@@ -37,13 +37,18 @@ fn wal_staged_max() -> u64 {
 }
 use crate::error::{CoreError, Result};
 
+#[path = "crc_kernel.rs"]
 pub mod crc;
+#[path = "format_kernel.rs"]
 pub mod format;
+#[path = "reader_kernel.rs"]
 pub mod reader;
+#[path = "recover_choose_kernel.rs"]
 pub mod recover_choose;
 pub mod recover_kernel;
 pub mod reopen_kernel;
 pub mod wal_state_kernel;
+#[path = "writer_kernel.rs"]
 pub mod writer;
 
 pub use reader::WalReader;

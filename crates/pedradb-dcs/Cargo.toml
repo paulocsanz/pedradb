@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "etcd-class DCS state machine on PedraDB (RFC-0010 P2.1 / Patroni path)"
 
+
+[lib]
+path = "src/lib_kernel.rs"
 [dependencies]
 pedradb-core.workspace = true
 pedradb-io-uring.workspace = true

@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn leveling_has_no_verus_cartoon() {
-        let src = include_str!("leveling.rs");
+        let src = include_str!("leveling_kernel.rs");
         let block = concat!("verus", "!", " {");
         let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
         assert!(!src.contains(block), "u64-key stand-in is not last-wins of rustc Vec<u8> LevelFile");

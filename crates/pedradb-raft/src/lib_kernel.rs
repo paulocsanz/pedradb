@@ -16,7 +16,9 @@ pub mod apply_kernel;
 pub mod c1_modelo_kernel;
 pub mod commit_kernel;
 pub mod membership_kernel;
+#[path = "net_kernel.rs"]
 pub mod net;
+#[path = "persist_kernel.rs"]
 pub mod persist;
 pub mod vote_kernel;
 

@@ -1,4 +1,4 @@
-path=crates/pedradb-capi/src/handles.rs
+path=crates/pedradb-capi/src/handles_kernel.rs
 sha256=686ee591711bf800498e1b8cc18723bfae7cdf0e1876ed93dcbf02919d3c4405
 aeneas=daa85d7
 charon=0.1.232

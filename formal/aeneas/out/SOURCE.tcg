@@ -1,4 +1,4 @@
-path=crates/pedradb-world/src/tcg.rs
+path=crates/pedradb-world/src/tcg_kernel.rs
 sha256=5fbb0544bb717f9ef4404e4c584639c980373324a805fe635438e94502df800a
 aeneas=daa85d7
 charon=0.1.232

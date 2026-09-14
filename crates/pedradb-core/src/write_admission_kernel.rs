@@ -1052,22 +1052,22 @@ mod tests {
         assert!(!wal_sync_required_as_is(true, true, false));
         assert!(!wal_sync_required(true, false, true));
         assert!(wal_sync_required(false, false, true));
-        let prep = named_fn_src(include_str!("db.rs"), "group_prepare").expect("group_prepare");
+        let prep = named_fn_src(include_str!("db_kernel.rs"), "group_prepare").expect("group_prepare");
         assert!(
             prep.contains("match crate::write_admission_kernel::group_batch_sync_plan("),
             "group_prepare matches group_batch_sync_plan (RFC-0219 P1.2c)"
         );
-        let apply = named_fn_src(include_str!("db.rs"), "group_apply").expect("group_apply");
+        let apply = named_fn_src(include_str!("db_kernel.rs"), "group_apply").expect("group_apply");
         assert!(
             apply.contains("match crate::changelog_kernel::changelog_durable_commit_fate("),
             "group_apply matches changelog_durable_commit_fate (RFC-0219 P2.1 drain — same fate as commit_ops_with)"
         );
-        let ns = named_fn_src(include_str!("db.rs"), "needs_sync").expect("needs_sync");
+        let ns = named_fn_src(include_str!("db_kernel.rs"), "needs_sync").expect("needs_sync");
         assert!(
             ns.contains("wal_sync_required("),
             "GroupInFlight::needs_sync must match wal_sync_required"
         );
-        let lead = include_str!("concurrent.rs")
+        let lead = include_str!("concurrent_kernel.rs")
             .split("fn lead<")
             .nth(1)
             .and_then(|s| s.split("fn validate_occ_batch").next())
@@ -1076,12 +1076,12 @@ mod tests {
             lead.contains("wal_sync_required("),
             "WriteGroup::lead catch-up must match wal_sync_required"
         );
-        let rs = named_fn_src(include_str!("concurrent.rs"), "resolve_sync").expect("resolve_sync");
+        let rs = named_fn_src(include_str!("concurrent_kernel.rs"), "resolve_sync").expect("resolve_sync");
         assert!(
             rs.contains("wal_sync_required("),
             "ConcurrentDb::resolve_sync must match wal_sync_required"
         );
-        let sub = include_str!("concurrent.rs")
+        let sub = include_str!("concurrent_kernel.rs")
             .split("fn submit_after_begin<")
             .nth(1)
             .and_then(|s| s.split("fn lead<").next())
@@ -1097,7 +1097,7 @@ mod tests {
         assert!(seq_exhausted(7, 6));
         assert!(!seq_exhausted_as_is(7, 6));
         assert!(!seq_exhausted(6, 6));
-        let bulk = named_fn_src(include_str!("db.rs"), "bulk_append_puts")
+        let bulk = named_fn_src(include_str!("db_kernel.rs"), "bulk_append_puts")
             .expect("bulk_append_puts");
         assert!(
             bulk.contains("seq_exhausted("),
@@ -1114,62 +1114,62 @@ mod tests {
         assert!(batch_is_empty(0));
         assert!(!batch_is_empty_as_is(0));
         assert!(!batch_is_empty(1));
-        let start = named_fn_src(include_str!("db.rs"), "group_start").expect("group_start");
+        let start = named_fn_src(include_str!("db_kernel.rs"), "group_start").expect("group_start");
         assert!(
             start.contains("batch_is_empty("),
             "group_start must match batch_is_empty"
         );
-        let absorb = named_fn_src(include_str!("db.rs"), "group_absorb").expect("group_absorb");
+        let absorb = named_fn_src(include_str!("db_kernel.rs"), "group_absorb").expect("group_absorb");
         assert!(
             absorb.contains("batch_is_empty("),
             "group_absorb must match batch_is_empty"
         );
         let append =
-            named_fn_src(include_str!("db.rs"), "group_append_ops").expect("group_append_ops");
+            named_fn_src(include_str!("db_kernel.rs"), "group_append_ops").expect("group_append_ops");
         assert!(
             append.contains("batch_is_empty("),
             "group_append_ops must match batch_is_empty"
         );
-        let prep = named_fn_src(include_str!("db.rs"), "group_prepare").expect("group_prepare");
+        let prep = named_fn_src(include_str!("db_kernel.rs"), "group_prepare").expect("group_prepare");
         assert!(
             prep.contains("batch_is_empty("),
             "group_prepare must match batch_is_empty"
         );
         let lone =
-            named_fn_src(include_str!("db.rs"), "lone_sync_commit").expect("lone_sync_commit");
+            named_fn_src(include_str!("db_kernel.rs"), "lone_sync_commit").expect("lone_sync_commit");
         assert!(
             lone.contains("batch_is_empty("),
             "lone_sync_commit must match batch_is_empty"
         );
-        let prep_ops = named_fn_src(include_str!("db.rs"), "prepare_write_ops_spill")
+        let prep_ops = named_fn_src(include_str!("db_kernel.rs"), "prepare_write_ops_spill")
             .expect("prepare_write_ops_spill");
         assert!(
             prep_ops.contains("batch_is_empty("),
             "prepare_write_ops_spill must match batch_is_empty"
         );
-        let apply = named_fn_src(include_str!("db.rs"), "group_apply").expect("group_apply");
+        let apply = named_fn_src(include_str!("db_kernel.rs"), "group_apply").expect("group_apply");
         assert!(
             apply.contains("batch_is_empty("),
             "group_apply must match batch_is_empty"
         );
-        let ns = named_fn_src(include_str!("db.rs"), "needs_sync").expect("needs_sync");
+        let ns = named_fn_src(include_str!("db_kernel.rs"), "needs_sync").expect("needs_sync");
         assert!(
             ns.contains("batch_is_empty("),
             "GroupInFlight::needs_sync must match batch_is_empty"
         );
-        let occ = named_fn_src(include_str!("concurrent.rs"), "apply_batch_occ_with")
+        let occ = named_fn_src(include_str!("concurrent_kernel.rs"), "apply_batch_occ_with")
             .expect("apply_batch_occ_with");
         assert!(
             occ.contains("batch_is_empty("),
             "apply_batch_occ_with must match batch_is_empty"
         );
         let obs =
-            named_fn_src(include_str!("db.rs"), "observe_bulk_batch").expect("observe_bulk_batch");
+            named_fn_src(include_str!("db_kernel.rs"), "observe_bulk_batch").expect("observe_bulk_batch");
         assert!(
             obs.contains("batch_is_empty("),
             "observe_bulk_batch must match batch_is_empty"
         );
-        let lead = include_str!("concurrent.rs")
+        let lead = include_str!("concurrent_kernel.rs")
             .split("fn lead<")
             .nth(1)
             .and_then(|s| s.split("fn validate_occ_batch").next())
@@ -1178,7 +1178,7 @@ mod tests {
             lead.contains("batch_is_empty("),
             "WriteGroup::lead must match batch_is_empty"
         );
-        let off = include_str!("concurrent.rs")
+        let off = include_str!("concurrent_kernel.rs")
             .split("fn finish_group_off_lock")
             .nth(1)
             .expect("finish_group_off_lock");
@@ -1187,7 +1187,7 @@ mod tests {
             "finish_group_off_lock must match batch_is_empty"
         );
         let fold = named_fn_src(
-            include_str!("concurrent.rs"),
+            include_str!("concurrent_kernel.rs"),
             "fold_retired_pending_off_lock",
         )
         .expect("fold_retired_pending_off_lock");
@@ -1227,7 +1227,7 @@ mod tests {
             "wal_commit_plan must call fence_on_sync_fail"
         );
         let commit =
-            named_fn_src(include_str!("db.rs"), "commit_ops_with").expect("commit_ops_with");
+            named_fn_src(include_str!("db_kernel.rs"), "commit_ops_with").expect("commit_ops_with");
         assert!(
             commit.contains("wal_commit_plan("),
             "commit_ops_with must match the plan fn"
@@ -1236,7 +1236,7 @@ mod tests {
             commit.contains("fence_on_sync_fail("),
             "commit_ops_with must match fence_on_sync_fail"
         );
-        let db_src = include_str!("db.rs");
+        let db_src = include_str!("db_kernel.rs");
         let sync_fn = db_src
             .split(concat!("pub fn ", "sync(&mut self)"))
             .nth(1)
@@ -1250,7 +1250,7 @@ mod tests {
             sync_fn.contains("fence_on_sync_fail("),
             "Db::sync must match fence_on_sync_fail"
         );
-        let open = named_fn_src(include_str!("db.rs"), "open_with_env_sourced")
+        let open = named_fn_src(include_str!("db_kernel.rs"), "open_with_env_sourced")
             .expect("open_with_env_sourced");
         assert!(
             open.contains("wal_commit_plan("),
@@ -1274,7 +1274,7 @@ mod tests {
             "torn-tail WAL cut must match fence_on_sync_fail"
         );
         let lone_sync =
-            named_fn_src(include_str!("db.rs"), "lone_sync_commit").expect("lone_sync_commit");
+            named_fn_src(include_str!("db_kernel.rs"), "lone_sync_commit").expect("lone_sync_commit");
         assert!(
             lone_sync.contains("wal_commit_plan("),
             "lone_sync_commit must match the plan fn"
@@ -1283,7 +1283,7 @@ mod tests {
             lone_sync.contains("fence_on_sync_fail("),
             "lone_sync_commit must match fence_on_sync_fail"
         );
-        let group = named_fn_src(include_str!("db.rs"), "wal_sync_group").expect("wal_sync_group");
+        let group = named_fn_src(include_str!("db_kernel.rs"), "wal_sync_group").expect("wal_sync_group");
         assert!(
             group.contains("wal_commit_plan("),
             "wal_sync_group must match the plan fn"
@@ -1292,7 +1292,7 @@ mod tests {
             group.contains("fence_on_sync_fail("),
             "wal_sync_group must match fence_on_sync_fail"
         );
-        let off = include_str!("concurrent.rs")
+        let off = include_str!("concurrent_kernel.rs")
             .split("fn finish_group_off_lock")
             .nth(1)
             .expect("finish_group_off_lock");
@@ -1304,7 +1304,7 @@ mod tests {
             off.contains("wal_commit_plan("),
             "finish_group_off_lock must match wal_commit_plan"
         );
-        let finish = named_fn_src(include_str!("db.rs"), "group_finish").expect("group_finish");
+        let finish = named_fn_src(include_str!("db_kernel.rs"), "group_finish").expect("group_finish");
         assert!(
             finish.contains("wal_commit_plan("),
             "group_finish must match the plan fn"
@@ -1314,7 +1314,7 @@ mod tests {
             "group_finish must match fence_on_sync_fail"
         );
         let vlog =
-            named_fn_src(include_str!("db.rs"), "vlog_prepare_wal").expect("vlog_prepare_wal");
+            named_fn_src(include_str!("db_kernel.rs"), "vlog_prepare_wal").expect("vlog_prepare_wal");
         assert!(
             vlog.contains("wal_commit_plan("),
             "vlog_prepare_wal must match the plan fn"
@@ -1323,7 +1323,7 @@ mod tests {
             vlog.contains("fence_on_sync_fail("),
             "vlog_prepare_wal must match fence_on_sync_fail"
         );
-        let sst = named_fn_src(include_str!("db.rs"), "fsync_sst_paths").expect("fsync_sst_paths");
+        let sst = named_fn_src(include_str!("db_kernel.rs"), "fsync_sst_paths").expect("fsync_sst_paths");
         assert!(
             sst.contains("wal_commit_plan("),
             "fsync_sst_paths must match the plan fn"
@@ -1336,7 +1336,7 @@ mod tests {
             sst.contains("match crate::write_admission_kernel::dir_sync_plan("),
             "fsync_sst_paths matches dir_sync_plan (RFC-0219 P1.1c; dir_sync_required stays live in the kernel body)"
         );
-        let ckpt = named_fn_src(include_str!("db.rs"), "write_checkpoint_meta")
+        let ckpt = named_fn_src(include_str!("db_kernel.rs"), "write_checkpoint_meta")
             .expect("write_checkpoint_meta");
         assert!(
             ckpt.contains("wal_commit_plan("),
@@ -1346,7 +1346,7 @@ mod tests {
             ckpt.contains("fence_on_sync_fail("),
             "write_checkpoint_meta must match fence_on_sync_fail"
         );
-        let close = named_fn_src(include_str!("db.rs"), "close").expect("Db::close");
+        let close = named_fn_src(include_str!("db_kernel.rs"), "close").expect("Db::close");
         assert!(
             close.contains("wal_commit_plan("),
             "Db::close must match the plan fn"
@@ -1359,7 +1359,7 @@ mod tests {
             close.contains("vlog_prepare_wal("),
             "Db::close must prepare vlog through the plan helper"
         );
-        let rot = named_fn_src(include_str!("db.rs"), "rotate_wal_now").expect("rotate_wal_now");
+        let rot = named_fn_src(include_str!("db_kernel.rs"), "rotate_wal_now").expect("rotate_wal_now");
         assert!(
             rot.contains("wal_commit_plan("),
             "rotate_wal_now must match the plan fn"
@@ -1368,7 +1368,7 @@ mod tests {
             rot.contains("fence_on_sync_fail("),
             "rotate_wal_now must match fence_on_sync_fail"
         );
-        let gstart = named_fn_src(include_str!("db.rs"), "group_start").expect("group_start");
+        let gstart = named_fn_src(include_str!("db_kernel.rs"), "group_start").expect("group_start");
         assert!(
             gstart.contains("wal_commit_plan("),
             "group_start must match the plan fn"
@@ -1377,7 +1377,7 @@ mod tests {
             gstart.contains("fence_on_sync_fail("),
             "group_start must match fence_on_sync_fail"
         );
-        let gabs = named_fn_src(include_str!("db.rs"), "group_absorb").expect("group_absorb");
+        let gabs = named_fn_src(include_str!("db_kernel.rs"), "group_absorb").expect("group_absorb");
         assert!(
             gabs.contains("wal_commit_plan("),
             "group_absorb must match the plan fn"
@@ -1413,7 +1413,7 @@ mod tests {
         // Live: every rename/dir gate matches the plan; the raw
         // dir_sync_required if left the trampoline (the predicate stays
         // the fate's own body).
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         assert_eq!(
             src.matches("match crate::write_admission_kernel::dir_sync_plan(").count(),
             5,
@@ -1436,7 +1436,7 @@ mod tests {
             FenceAdmission::AdmitOps,
             "AS-IS dente: ops admitted after the fence"
         );
-        let enf = named_fn_src(include_str!("db.rs"), "ensure_not_fenced")
+        let enf = named_fn_src(include_str!("db_kernel.rs"), "ensure_not_fenced")
             .expect("ensure_not_fenced");
         assert!(
             enf.contains("match crate::write_admission_kernel::fence_admission_plan("),
@@ -1460,7 +1460,7 @@ mod tests {
             FenceRecordPlan::RecordFirst,
             "AS-IS dente: later fence overwrites the first report"
         );
-        let fd = named_fn_src(include_str!("db.rs"), "fence_durability").expect("fence_durability");
+        let fd = named_fn_src(include_str!("db_kernel.rs"), "fence_durability").expect("fence_durability");
         assert!(
             fd.contains("match crate::write_admission_kernel::fence_record_plan("),
             "fence_durability must match fence_record_plan"
@@ -1489,7 +1489,7 @@ mod tests {
             GroupSyncPlan::BatchRidesGroup,
             "AS-IS dente: sync batch rides the group"
         );
-        let gp = named_fn_src(include_str!("db.rs"), "group_prepare").expect("group_prepare");
+        let gp = named_fn_src(include_str!("db_kernel.rs"), "group_prepare").expect("group_prepare");
         assert!(
             gp.contains("match crate::write_admission_kernel::group_batch_sync_plan("),
             "group_prepare must match group_batch_sync_plan"
@@ -1548,7 +1548,7 @@ mod tests {
             PitResyncRewritePlan::KeepRecoveredPrefix,
             "AS-IS dente: resync report never rewrites"
         );
-        let open = named_fn_src(include_str!("db.rs"), "open_with_env_sourced")
+        let open = named_fn_src(include_str!("db_kernel.rs"), "open_with_env_sourced")
             .expect("open_with_env_sourced");
         assert!(
             open.contains("match crate::write_admission_kernel::pit_resync_rewrite_plan("),
@@ -1572,7 +1572,7 @@ mod tests {
             ParkedPopPlan::PopOldestParked,
             "AS-IS dente: pops from the empty queue"
         );
-        let top = named_fn_src(include_str!("db.rs"), "take_oldest_parked")
+        let top = named_fn_src(include_str!("db_kernel.rs"), "take_oldest_parked")
             .expect("take_oldest_parked");
         assert!(
             top.contains("match crate::write_admission_kernel::parked_pop_plan("),
@@ -1592,7 +1592,7 @@ mod tests {
             cas_absent_put_as_is(true),
             "AS-IS dente: live key still puts"
         );
-        let body = named_fn_src(include_str!("db.rs"), "put_if_absent_with")
+        let body = named_fn_src(include_str!("db_kernel.rs"), "put_if_absent_with")
             .expect("put_if_absent_with");
         assert!(
             body.contains("cas_absent_put("),
@@ -1609,7 +1609,7 @@ mod tests {
             "AS-IS dente: mismatch still puts"
         );
         let body =
-            named_fn_src(include_str!("db.rs"), "put_if_eq_with").expect("put_if_eq_with");
+            named_fn_src(include_str!("db_kernel.rs"), "put_if_eq_with").expect("put_if_eq_with");
         assert!(
             body.contains("cas_eq_put("),
             "put_if_eq_with must match cas_eq_put"
@@ -1624,7 +1624,7 @@ mod tests {
             !range_inverted_as_is(true),
             "AS-IS dente: inverted range still applies"
         );
-        let body = named_fn_src(include_str!("db.rs"), "delete_range_with")
+        let body = named_fn_src(include_str!("db_kernel.rs"), "delete_range_with")
             .expect("delete_range_with");
         assert!(
             body.contains("range_inverted("),
@@ -1659,7 +1659,7 @@ mod tests {
     /// must call a kernel (not a raw predicate in `db.rs`).
     #[test]
     fn put_ok_and_recover_path_data_fate_ifs_call_kernels() {
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         let put_fns = [
             "put_with",
             "apply_batch_with",

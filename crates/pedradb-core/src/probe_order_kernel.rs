@@ -391,7 +391,7 @@ mod tests {
     /// inlined `>=`. The named body is the rustc-linked proof term.
     #[test]
     fn disjoint_sorted_by_lo_calls_kernel() {
-        let body = include_str!("db.rs");
+        let body = include_str!("db_kernel.rs");
         let needle = "fn disjoint_sorted_by_lo";
         let start = body.find(needle).expect("disjoint_sorted_by_lo in db.rs");
         let rest = &body[start..];

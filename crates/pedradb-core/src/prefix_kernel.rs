@@ -52,7 +52,7 @@ mod tests {
 
     #[test]
     fn prefix_rs_has_no_verus_cartoon() {
-        let src = include_str!("prefix.rs");
+        let src = include_str!("prefix_kernel.rs");
         let block = concat!("verus", "!", " {");
         let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
         assert!(
@@ -86,7 +86,7 @@ mod tests {
         assert!(key_in_prefix_range(b"ab", b"a", Some(b"b".as_ref())));
         assert!(!key_in_prefix_range(b"b", b"a", Some(b"b".as_ref())));
         assert!(key_in_prefix_range(b"z", b"", None));
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         let last = src
             .split("pub fn last_under_prefix")
             .nth(1)

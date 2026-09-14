@@ -418,7 +418,7 @@ mod tests {
             ChangeKind::from_value_type(ValueType::RangeDeletion),
             ChangeKind::DeleteRange
         );
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         let feed = src
             .split("fn collect_feed_from_live")
             .nth(1)

@@ -6,15 +6,23 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+#[path = "applied_kernel.rs"]
 mod applied;
+#[path = "caixote_kernel.rs"]
 mod caixote;
+#[path = "export_kernel.rs"]
 mod export;
 mod fold_kernel;
+#[path = "follow_kernel.rs"]
 mod follow;
 mod isolated_kernel;
+#[path = "roles_kernel.rs"]
 mod roles;
+#[path = "ship_kernel.rs"]
 mod ship;
+#[path = "store_kernel.rs"]
 mod store;
+#[path = "watch_kernel.rs"]
 mod watch;
 
 pub use applied::{watch_applied, watch_applied_prefix, WatchApplied};

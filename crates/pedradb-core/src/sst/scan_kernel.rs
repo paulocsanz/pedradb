@@ -641,7 +641,7 @@ mod tests {
 
     #[test]
     fn overlaps_user_range_on_live_table_matches_kernel() {
-        let src = include_str!("table.rs");
+        let src = include_str!("table_kernel.rs");
         let body = src
             .split(concat!("pub fn ", "overlaps_user_range"))
             .nth(1)

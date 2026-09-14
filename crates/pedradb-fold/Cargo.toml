@@ -5,9 +5,12 @@ edition.workspace = true
 license.workspace = true
 description = "Slipstream-class fold on Montanha/Pedra (RFC-0024)"
 
+
+[lib]
+path = "src/lib_kernel.rs"
 [[bin]]
 name = "fold-smoke"
-path = "src/bin/fold_smoke.rs"
+path = "src/bin/fold_smoke_kernel.rs"
 
 [dependencies]
 pedradb-core.workspace = true

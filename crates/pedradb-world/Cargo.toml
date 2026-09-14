@@ -5,64 +5,67 @@ edition.workspace = true
 license.workspace = true
 description = "FDB-shaped World runtime (RFC-0050): deterministic cluster sim over Montanha-Store, in-tree"
 
+
+[lib]
+path = "src/lib_kernel.rs"
 [[bin]]
 name = "world_smoke"
-path = "src/bin/world_smoke.rs"
+path = "src/bin/world_smoke_kernel.rs"
 
 [[bin]]
 name = "world_soak"
-path = "src/bin/world_soak.rs"
+path = "src/bin/world_soak_kernel.rs"
 
 [[bin]]
 name = "world_buggify_matrix"
-path = "src/bin/world_buggify_matrix.rs"
+path = "src/bin/world_buggify_matrix_kernel.rs"
 
 [[bin]]
 name = "world_shrink"
-path = "src/bin/world_shrink.rs"
+path = "src/bin/world_shrink_kernel.rs"
 
 [[bin]]
 name = "world_invariant_soak"
-path = "src/bin/world_invariant_soak.rs"
+path = "src/bin/world_invariant_soak_kernel.rs"
 
 [[bin]]
 name = "world_partition_storm"
-path = "src/bin/world_partition_storm.rs"
+path = "src/bin/world_partition_storm_kernel.rs"
 
 [[bin]]
 name = "multiproc_trace_smoke"
-path = "src/bin/multiproc_trace_smoke.rs"
+path = "src/bin/multiproc_trace_smoke_kernel.rs"
 
 [[bin]]
 name = "world_hunt"
-path = "src/bin/world_hunt.rs"
+path = "src/bin/world_hunt_kernel.rs"
 
 # RFC-0187 P0.1: exhaustive N≤3 concurrency gate (66-schedule space,
 # per-schedule oracle, explored-count assertion, --selftest redness).
 [[bin]]
 name = "gate_exhaustive"
-path = "src/bin/gate_exhaustive.rs"
+path = "src/bin/gate_exhaustive_kernel.rs"
 required-features = ["pct"]
 
 # RFC-0187 P0.2: versioned PCT seed ratchet (replay-all, fail-on-shrink,
 # pinned outcomes + schedule hashes, --selftest redness).
 [[bin]]
 name = "gate_seed_ratchet"
-path = "src/bin/gate_seed_ratchet.rs"
+path = "src/bin/gate_seed_ratchet_kernel.rs"
 required-features = ["pct"]
 
 # RFC-0187 P0.3: exhaustive crash-injection gate (measured op count,
 # fail-closed recovery oracle, CRC corruption phase, --selftest redness).
 [[bin]]
 name = "gate_crash_injection"
-path = "src/bin/gate_crash_injection.rs"
+path = "src/bin/gate_crash_injection_kernel.rs"
 required-features = ["pct"]
 
 # RFC-0187 P1.1: interleaving coverage floor (pinned-seed World campaign
 # union vs versioned floor, --selftest redness).
 [[bin]]
 name = "gate_coverage_floor"
-path = "src/bin/gate_coverage_floor.rs"
+path = "src/bin/gate_coverage_floor_kernel.rs"
 
 [features]
 # RFC-0051 P0: PCT runner over the real ConcurrentDb (enables core hooks).
@@ -80,3 +83,11 @@ thiserror.workspace = true
 bytes.workspace = true
 pedradb-journal.workspace = true
 pedradb-index.workspace = true
+
+[[bin]]
+name = "peer_msg_tcp_lab"
+path = "src/bin/peer_msg_tcp_lab_kernel.rs"
+
+[[bin]]
+name = "world_swarm"
+path = "src/bin/world_swarm_kernel.rs"

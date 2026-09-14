@@ -1,4 +1,4 @@
-path=crates/pedradb-store/src/l28.rs
+path=crates/pedradb-store/src/l28_kernel.rs
 sha256=4d1ab21d003319234745452326e9f0c090a392e2230b39b84f005cd8968596e0
 aeneas=daa85d7
 charon=0.1.232

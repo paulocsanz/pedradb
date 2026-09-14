@@ -149,7 +149,7 @@ mod tests {
     /// inlined cap. The named body is the rustc-linked proof term.
     #[test]
     fn lead_calls_pipeline_drain_cap() {
-        let body = include_str!("concurrent.rs");
+        let body = include_str!("concurrent_kernel.rs");
         assert!(
             body.contains("client_axis_kernel::pipeline_drain_cap("),
             "WriteGroup::lead must call pipeline_drain_cap"

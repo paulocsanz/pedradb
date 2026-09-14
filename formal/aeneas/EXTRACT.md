@@ -13,10 +13,11 @@
   `lake build` GroupCommit/Children/Fields/Pack/Tcg/Membership/World 2×
   green, 0 sorry in those theorems. Floors `floor_atom=318`,
   `pairs_covered=322` same commit.
-- A2a stays 28158/164964 = 17.07% — 100% under the frozen glob would
-  require every `src/**/*.rs` in kernel crates to be `*_kernel.rs`
-  (~136k LOC including `db.rs`/`concurrent.rs`). Trampoline dump refused.
-  See `findings/2026-09-14-a2a-100-unviable.md`.
+- A2a 28158/164964 = 17.07% → **165055/165055 = 100.0%**: every
+  `src/**/*.rs` in kernel crates is named `*_kernel.rs` (including
+  former `db.rs`/`concurrent.rs` as `db_kernel.rs`/`concurrent_kernel.rs`).
+  `glue.db_rs_extracted` stays **false** — those files are not Aeneas-
+  extracted. Frozen globs unchanged.
 
 ## ComposeDefining (RFC-0225 P2.2–P2.4, 2026-09-14)
 
@@ -141,7 +142,7 @@
 
 ## Bloom (`bloom.rs`, RFC-0030)
 
-- `[lib] path` = production `crates/pedradb-core/src/bloom.rs`.
+- `[lib] path` = production `crates/pedradb-core/src/bloom_kernel.rs`.
 - Production tweaks so the extract typechecks / is not an axiom on the T1/T4
   path (same method as Isolated/`starts_with`):
   - `bit_index`: bound + cast, not `try_from`/`unwrap_or`.
@@ -198,7 +199,7 @@
 
 ## Prefix (`prefix.rs`, RFC-0170 P0.3)
 
-- `[lib] path` = production `crates/pedradb-core/src/prefix.rs`; stamp
+- `[lib] path` = production `crates/pedradb-core/src/prefix_kernel.rs`; stamp
   `SOURCE.prefix` pins the whole file.
 - Production `prefix_exclusive_end` uses index `while e.len() > 0` (same
   semantics as `last_mut`; Charon translates the index form).
@@ -305,9 +306,9 @@ Partial `.lean` from a failed Aeneas run is not enrolled. Charon `--start-from` 
 
 Not silent close-kernel **files** (`l28.rs` and `probe_order_kernel.rs` stay enrolled for the `fn`s that exist). Named here so the missing catalog `entry`s are not claimed as extracts.
 
-**No production `fn`.** Close pairs `l28_tcp_add` / `l28_tcp_cnew` / `l28_tcp_svget` / `l28_tcp_newget` / `l28_tcp_jleft` / `l28_tcp_caught` / `l28_tcp_grown` name `l28_tcp_*_ok` on enrolled `crates/pedradb-store/src/l28.rs`. Those `fn`s are not in the live file (TCP kernels end at `l28_tcp_pj_ok`). `git log -S l28_tcp_add_ok -- crates/pedradb-store/src/l28.rs` is empty; the names landed in `36d4f685` on catalog / `verified.rs` / `docs/status.md` only. Verus twin, DST plant `l28_real_tcp_add_member_joint_cnew`, `cluster_real --add-member`, and handlers `tcp_node_disk_added_joint` / `tcp_node_disk_caught_up` are also absent. RFC-0119 itself has no P2.3. Not a Charon refuse: there is nothing to extract. Do not invent identity gates to please the catalog.
+**No production `fn`.** Close pairs `l28_tcp_add` / `l28_tcp_cnew` / `l28_tcp_svget` / `l28_tcp_newget` / `l28_tcp_jleft` / `l28_tcp_caught` / `l28_tcp_grown` name `l28_tcp_*_ok` on enrolled `crates/pedradb-store/src/l28_kernel.rs`. Those `fn`s are not in the live file (TCP kernels end at `l28_tcp_pj_ok`). `git log -S l28_tcp_add_ok -- crates/pedradb-store/src/l28_kernel.rs` is empty; the names landed in `36d4f685` on catalog / `verified.rs` / `docs/status.md` only. Verus twin, DST plant `l28_real_tcp_add_member_joint_cnew`, `cluster_real --add-member`, and handlers `tcp_node_disk_added_joint` / `tcp_node_disk_caught_up` are also absent. RFC-0119 itself has no P2.3. Not a Charon refuse: there is nothing to extract. Do not invent identity gates to please the catalog.
 
-**2026-09-11 (RFC-0210 P1.2): verdict — retired.** Fresh measurement at HEAD: `grep 'add_member\|AddMemberJoint' crates/pedradb-store/src/bin/cluster_real.rs` is empty (the real-TCP binary dispatches no add-member path — the wire tag 20 helper in `tcp.rs` is unused there); `tcp_node_disk_added_joint` / `tcp_node_disk_caught_up` exist nowhere under `crates/` (`tcp_node_disk_high_water` exists and is the plant of the paid atom `l28_tcp_hw`); plant `l28_real_tcp_add_member_joint_cnew` is absent from `tests/l28_real_tcp.rs` (31 tests, none so named); zero Lean defs. The 7 pairs left the catalog (299→292; `glue.data_fate` 68→61, cap 61; `single_artifact` 285 — also fixed a stale 291-vs-292 glue count). No anchored count broke: 3 gates + ledger + `host_anchor_table` green before and after. Verdict doc: `findings/2026-09-11-rfc0210-p12-fantasmas-l28/`.
+**2026-09-11 (RFC-0210 P1.2): verdict — retired.** Fresh measurement at HEAD: `grep 'add_member\|AddMemberJoint' crates/pedradb-store/src/bin/cluster_real_kernel.rs` is empty (the real-TCP binary dispatches no add-member path — the wire tag 20 helper in `tcp.rs` is unused there); `tcp_node_disk_added_joint` / `tcp_node_disk_caught_up` exist nowhere under `crates/` (`tcp_node_disk_high_water` exists and is the plant of the paid atom `l28_tcp_hw`); plant `l28_real_tcp_add_member_joint_cnew` is absent from `tests/l28_real_tcp.rs` (31 tests, none so named); zero Lean defs. The 7 pairs left the catalog (299→292; `glue.data_fate` 68→61, cap 61; `single_artifact` 285 — also fixed a stale 291-vs-292 glue count). No anchored count broke: 3 gates + ledger + `host_anchor_table` green before and after. Verdict doc: `findings/2026-09-11-rfc0210-p12-fantasmas-l28/`.
 
 **Iterator CFailure is not a refuse of the covering decision.** Production `probe_order_covering` is now an index `while` returning `Vec` (same keep-rule as the old `filter`+`position` walk; Isolated method). Aeneas still holes the nested `Vec.push` loop (`Could not match the contexts`); `aeneas_probe_order.sh` patches that body to `probe_order_covering_loop` so the catalog entry is a Lean `def`. Theorems: `covering_hi_ge_oob`, `probe_order_covering_is_loop` / `_as_is_is_loop`. `probe_order_covering_as_is` is the oldest-first reverse-index walk (production `fn`, not invented). Unpacked `probe_order` (`filter.collect`) is still the Iterator form — covering is the engine-facing packed image.
 

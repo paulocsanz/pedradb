@@ -10,6 +10,7 @@
 
 mod magic_kernel;
 mod scan_kernel;
+#[path = "table_kernel.rs"]
 mod table;
 
 pub use magic_kernel::{sst_magic_is_pedra, sst_magic_is_pedra_as_is};

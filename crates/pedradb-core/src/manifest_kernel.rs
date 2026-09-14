@@ -390,7 +390,7 @@ mod tests {
         // RFC-0219 P0.3: the DB sync default alone picks inline-durable
         // vs amortized; persist_bulk_manifest matches the kernel plan and
         // keeps no inline dir-sync gate of its own.
-        let pbm = named_fn_src(include_str!("db.rs"), "persist_bulk_manifest")
+        let pbm = named_fn_src(include_str!("db_kernel.rs"), "persist_bulk_manifest")
             .expect("persist_bulk_manifest");
         assert!(
             pbm.contains("match crate::manifest_kernel::bulk_manifest_persist_fate("),

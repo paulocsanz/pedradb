@@ -674,7 +674,7 @@ mod tests {
     /// (this module) are out of the scanned region.
     #[test]
     fn posix_unsafe_rc_sites_all_gated() {
-        let src = include_str!("lib.rs");
+        let src = include_str!("lib_kernel.rs");
         let lines: Vec<&str> = src.lines().collect();
         let cut = lines
             .iter()

@@ -53,15 +53,29 @@ def _test_gated_modules(parent: Path) -> set[str]:
     lines = parent.read_text(encoding="utf-8", errors="replace").splitlines()
     for i, line in enumerate(lines):
         m = re.match(r"\s*mod (\w+)\s*;", line)
-        if m and i > 0 and TEST_ATTR.match(lines[i - 1].strip()):
+        if not m or i == 0:
+            continue
+        window = [ln.strip() for ln in lines[max(0, i - 3) : i]]
+        if any(TEST_ATTR.match(ln) for ln in window):
             gated.add(m.group(1))
     return gated
 
 
 def _module_test_gated(path: Path) -> bool:
     """True when the file's `mod` declaration is cfg(test)-gated upstream."""
-    for parent_name in ("lib.rs", "main.rs", "mod.rs"):
-        if path.stem in _test_gated_modules(path.parent / parent_name):
+    stems = {path.stem}
+    if path.stem.endswith("_kernel"):
+        stems.add(path.stem[: -len("_kernel")])
+    for parent_name in (
+        "lib.rs",
+        "lib_kernel.rs",
+        "main.rs",
+        "main_kernel.rs",
+        "mod.rs",
+        "mod_kernel.rs",
+    ):
+        gated = _test_gated_modules(path.parent / parent_name)
+        if stems & gated:
             return True
     return False
 

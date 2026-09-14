@@ -1545,7 +1545,7 @@ mod tests {
 
     #[test]
     fn bound_as_ref_on_live_level_run_is_not_ok() {
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         assert!(
             src.contains("bound_as_ref(&self.start)")
                 && src.contains("bound_to_owned(start)"),
@@ -1583,7 +1583,7 @@ mod tests {
             b"z",
             b"m"
         ));
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         let body = src
             .split("pub fn key_has_write_after")
             .nth(1)
@@ -1634,7 +1634,7 @@ mod tests {
             write_op_range_end_as_is(ValueType::RangeDeletion, b"z").unwrap_or(&[]),
             b"m"
         ));
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         let body = src
             .split("pub(crate) fn stage_unapplied")
             .nth(1)
@@ -1656,7 +1656,7 @@ mod tests {
         assert!(!past_end(b"y", Bound::Excluded(b"z")));
         assert!(!past_end(b"z", Bound::Unbounded));
         assert!(past_end(b"z", Bound::Included(b"y")));
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         let sst = src
             .split("impl<'a> SstCountCursor")
             .nth(1)
@@ -1684,7 +1684,7 @@ mod tests {
             Bound::Excluded(b"a"),
             Bound::Unbounded
         ));
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         let sst = src
             .split("impl<'a> SstCountCursor")
             .nth(1)
@@ -1743,7 +1743,7 @@ mod tests {
 
     #[test]
     fn gc_merge_close_run_calls_visible_at() {
-        let src = include_str!("merge.rs");
+        let src = include_str!("merge_kernel.rs");
         let body = src
             .split("fn close_run(")
             .nth(1)
@@ -1761,7 +1761,7 @@ mod tests {
 
     #[test]
     fn gc_compact_entries_calls_visible_at() {
-        let src = include_str!("merge.rs");
+        let src = include_str!("merge_kernel.rs");
         let body = src
             .split("pub fn gc_compact_entries")
             .nth(1)
@@ -2096,7 +2096,7 @@ mod tests {
 
     #[test]
     fn merge_rs_has_no_verus_cartoon() {
-        let src = include_str!("merge.rs");
+        let src = include_str!("merge_kernel.rs");
         let block = concat!("verus", "!", " {");
         let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
         assert!(
@@ -2163,7 +2163,7 @@ mod tests {
         assert!(!visible_at(ValueType::Value, hidden));
         const B_OPEN: u8 = 123;
         const B_CLOSE: u8 = 125;
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         let needle = "fn count_visible(";
         let start = src.find(needle).expect("count_visible");
         let rest = &src[start..];

@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn locktab_has_no_verus_cartoon() {
-        let src = include_str!("locktab.rs");
+        let src = include_str!("locktab_kernel.rs");
         let block = concat!("verus", "!", " {");
         let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
         assert!(!src.contains(block), "flattened u64 two-cycle is not last-wins of rustc HashMap walk");

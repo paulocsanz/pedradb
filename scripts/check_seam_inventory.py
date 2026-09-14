@@ -3,7 +3,7 @@
 
 Exit 0 = every inventory row is L2 (listed + injector + trial_ref resolves to
 a real in-tree test) and the site id set matches `SEAM_IDS` in
-`crates/pedradb-world/src/coverage.rs`. Any orphan site (missing or
+`crates/pedradb-world/src/coverage_kernel.rs`. Any orphan site (missing or
 unresolvable trial_ref), broken injector, or SEAM_IDS drift fails CI.
 
 Usage: check_seam_inventory.py [inventory.json]
@@ -19,7 +19,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 CRATES = REPO / "crates"
 DEFAULT_INVENTORY = REPO / "scripts" / "seam_inventory_v1.json"
-SEAM_IDS_SRC = CRATES / "pedradb-world" / "src" / "coverage.rs"
+SEAM_IDS_SRC = CRATES / "pedradb-world" / "src" / "coverage_kernel.rs"
 
 _FNS_CACHE: dict[str, set[str]] = {}
 

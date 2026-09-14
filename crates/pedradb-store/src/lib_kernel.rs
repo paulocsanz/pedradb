@@ -44,20 +44,28 @@
 
 mod ae_ack_kernel;
 mod apply_kernel;
+#[path = "client_kernel.rs"]
 pub mod client;
 mod commit_kernel;
 mod compact_kernel;
+#[path = "fdb_compat_kernel.rs"]
 pub mod fdb_compat;
+#[path = "fdb_layers_kernel.rs"]
 pub mod fdb_layers;
 mod index_val_kernel;
+#[path = "l28_kernel.rs"]
 mod l28;
+#[path = "layers_kernel.rs"]
 pub mod layers;
 mod membership_kernel;
+#[path = "msg_kernel.rs"]
 mod msg;
 mod rpc_mode_kernel;
 mod si_kernel;
 mod snapshot_kernel;
+#[path = "tcp_kernel.rs"]
 pub mod tcp;
+#[path = "tls_kernel.rs"]
 pub mod tls;
 pub mod tx_glue_kernel;
 mod t1_modelo_kernel;
@@ -9244,6 +9252,7 @@ pub fn meta_key(suffix: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
+#[path = "three_teeth_queued_kernel.rs"]
 mod three_teeth_queued;
 
 #[cfg(test)]

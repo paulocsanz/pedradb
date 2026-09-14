@@ -2302,7 +2302,7 @@ mod tests {
 
     #[test]
     fn range_snapshot_calls_visible_at() {
-        let src = include_str!("memtable.rs");
+        let src = include_str!("memtable_kernel.rs");
         let body = src
             .split("pub fn range_snapshot")
             .nth(1)
@@ -2320,7 +2320,7 @@ mod tests {
 
     #[test]
     fn version_newer_and_ver_cmp_call_ikey_seq_cmp() {
-        let src = include_str!("memtable.rs");
+        let src = include_str!("memtable_kernel.rs");
         let newer = src
             .split("fn version_newer")
             .nth(1)

@@ -32,6 +32,7 @@
 
 mod cqe_kernel;
 #[cfg(target_os = "linux")]
+#[path = "ring_kernel.rs"]
 mod ring;
 
 use std::fs::{self, File, OpenOptions};

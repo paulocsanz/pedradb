@@ -1093,7 +1093,7 @@ mod tests {
             GroupAckPlan::AckPublishGroup,
             "AS-IS dente: acks a failed WAL I/O"
         );
-        let lsc = named_fn_src(include_str!("db.rs"), "lone_sync_commit")
+        let lsc = named_fn_src(include_str!("db_kernel.rs"), "lone_sync_commit")
             .expect("lone_sync_commit");
         assert!(
             lsc.contains("match crate::group_commit_kernel::group_ack_plan("),
@@ -1249,7 +1249,7 @@ mod tests {
             OccMemberFate::Ok,
             "AS-IS dente: lagging member still Ok"
         );
-        let src = include_str!("concurrent.rs");
+        let src = include_str!("concurrent_kernel.rs");
         assert!(
             src.contains("occ_batch_plan("),
             "validate_occ_batch must match occ_batch_plan"
@@ -1296,7 +1296,7 @@ mod tests {
             vec![OccMemberFate::Ok, OccMemberFate::Ok, OccMemberFate::Ok],
             "AS-IS dente: lagging member still Ok"
         );
-        let validate = include_str!("concurrent.rs")
+        let validate = include_str!("concurrent_kernel.rs")
             .split("fn validate_occ_batch")
             .nth(1)
             .expect("validate_occ_batch");
@@ -1337,7 +1337,7 @@ mod tests {
             vec![OccMemberFate::Ok],
             "AS-IS dente: lagging member still Ok"
         );
-        let src = include_str!("concurrent.rs");
+        let src = include_str!("concurrent_kernel.rs");
         let validate = src
             .split("fn validate_occ_batch")
             .nth(1)
@@ -1365,7 +1365,7 @@ mod tests {
             rwlock_client_may_mutate_as_is(false),
             "AS-IS dente: mutate after dropping the write lock"
         );
-        let src = include_str!("concurrent.rs");
+        let src = include_str!("concurrent_kernel.rs");
         let off = src
             .split("fn finish_group_off_lock")
             .nth(1)
@@ -1403,7 +1403,7 @@ mod tests {
             rwlock_client_may_read_as_is(false, false),
             "AS-IS dente: read Db with no guard"
         );
-        let snap = include_str!("concurrent.rs")
+        let snap = include_str!("concurrent_kernel.rs")
             .split("fn occ_snapshot(")
             .nth(1)
             .expect("occ_snapshot");

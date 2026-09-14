@@ -1321,7 +1321,7 @@ mod tests {
         assert_eq!(archive_kind_tag(ValueType::RangeDeletion), 2);
         assert_eq!(archive_kind_tag_as_is(ValueType::Value), 1);
         assert_eq!(archive_kind_tag_as_is(ValueType::Deletion), 0);
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         let note = src
             .split("fn archive_note(")
             .nth(1)

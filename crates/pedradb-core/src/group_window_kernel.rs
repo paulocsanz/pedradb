@@ -175,7 +175,7 @@ mod tests {
     /// inlined window predicate.
     #[test]
     fn concurrent_calls_group_window_kernel() {
-        let body = include_str!("concurrent.rs");
+        let body = include_str!("concurrent_kernel.rs");
         assert!(
             body.contains("group_window_kernel::merge_eligible("),
             "submit path must call merge_eligible"

@@ -715,7 +715,7 @@ mod tests {
         // debounce gate is no longer an inline sync-resolution if (the
         // do_sync resolution feeding wal_commit_plan stays — that is the
         // write-admission family's own call).
-        let coc = named_fn_src(include_str!("db.rs"), "commit_ops_with").expect("commit_ops_with");
+        let coc = named_fn_src(include_str!("db_kernel.rs"), "commit_ops_with").expect("commit_ops_with");
         assert!(
             coc.contains("match crate::changelog_kernel::changelog_durable_commit_fate("),
             "commit_ops_with must match changelog_durable_commit_fate"
@@ -746,7 +746,7 @@ mod tests {
             ChangelogStorePlan::StoreFeed,
             "AS-IS dente: stores with the publish failed"
         );
-        let csp = named_fn_src(include_str!("db.rs"), "changelog_store_point")
+        let csp = named_fn_src(include_str!("db_kernel.rs"), "changelog_store_point")
             .expect("changelog_store_point");
         assert!(
             csp.contains("match crate::changelog_kernel::changelog_store_plan("),
@@ -759,7 +759,7 @@ mod tests {
         // RFC-0219 P2.1 drain: the group_apply debounce matches the
         // same kernel fate as commit_ops_with (P0.1), no raw
         // wal_sync_required gate left in the trampoline.
-        let ga = named_fn_src(include_str!("db.rs"), "group_apply").expect("group_apply");
+        let ga = named_fn_src(include_str!("db_kernel.rs"), "group_apply").expect("group_apply");
         assert!(
             ga.contains("match crate::changelog_kernel::changelog_durable_commit_fate("),
             "group_apply matches changelog_durable_commit_fate"
@@ -793,7 +793,7 @@ mod tests {
         );
         // Live: delete_wal_archives matches the kernel plan; the raw
         // seq comparison left the trampoline.
-        let dwa = named_fn_src(include_str!("db.rs"), "delete_wal_archives")
+        let dwa = named_fn_src(include_str!("db_kernel.rs"), "delete_wal_archives")
             .expect("delete_wal_archives");
         assert!(
             dwa.contains("match crate::changelog_kernel::wal_archive_delete_plan("),

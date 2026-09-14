@@ -3255,7 +3255,7 @@ mod tests {
 
     #[test]
     fn best_point_in_entry_slice_calls_prefer_newer_seq() {
-        let src = include_str!("table.rs");
+        let src = include_str!("table_kernel.rs");
         let body = src
             .split("fn best_point_in_entry_slice")
             .nth(1)
@@ -3282,7 +3282,7 @@ mod tests {
 
     #[test]
     fn overlaps_user_range_calls_point_bounds_overlap() {
-        let src = include_str!("table.rs");
+        let src = include_str!("table_kernel.rs");
         let body = src
             .split("pub fn overlaps_user_range")
             .nth(1)
@@ -3300,7 +3300,7 @@ mod tests {
 
     #[test]
     fn sst_get_found_calls_visible_at() {
-        let src = include_str!("table.rs");
+        let src = include_str!("table_kernel.rs");
         let body = src
             .split("pub fn get(")
             .nth(1)
@@ -3318,7 +3318,7 @@ mod tests {
 
     #[test]
     fn last_visible_under_prefix_with_calls_visible_at() {
-        let src = include_str!("table.rs");
+        let src = include_str!("table_kernel.rs");
         let body = src
             .split("pub fn last_visible_under_prefix_with")
             .nth(1)
@@ -3336,7 +3336,7 @@ mod tests {
 
     #[test]
     fn last_visible_under_prefix_with_calls_key_in_prefix_range() {
-        let src = include_str!("table.rs");
+        let src = include_str!("table_kernel.rs");
         let body = src
             .split("pub fn last_visible_under_prefix_with")
             .nth(1)
@@ -3354,7 +3354,7 @@ mod tests {
 
     #[test]
     fn blocks_overlapping_range_calls_user_key_in_range() {
-        let src = include_str!("table.rs");
+        let src = include_str!("table_kernel.rs");
         let body = src
             .split("pub(crate) fn blocks_overlapping_range")
             .nth(1)
@@ -3372,7 +3372,7 @@ mod tests {
 
     #[test]
     fn sst_range_iter_next_calls_past_end() {
-        let src = include_str!("table.rs");
+        let src = include_str!("table_kernel.rs");
         let body = src
             .split("impl Iterator for SstRangeIter")
             .nth(1)
@@ -3398,7 +3398,7 @@ mod tests {
 
     #[test]
     fn iter_user_range_calls_bound_to_owned() {
-        let src = include_str!("table.rs");
+        let src = include_str!("table_kernel.rs");
         let body = src
             .split("pub fn iter_user_range")
             .nth(1)

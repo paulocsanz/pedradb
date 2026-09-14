@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "FDB design recipes on Montanha Transaction (bug-hunt / SI-OCC regression suite)"
 
+
+[lib]
+path = "src/lib_kernel.rs"
 [dependencies]
 pedradb-store.workspace = true
 

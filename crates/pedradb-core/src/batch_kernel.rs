@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn batch_has_no_verus_cartoon() {
-        let src = include_str!("batch.rs");
+        let src = include_str!("batch_kernel.rs");
         let block = concat!("verus", "!", " {");
         let cfg = concat!("cfg(", "verus", "_keep", "_ghost)");
         assert!(!src.contains(block), "u32 decoded_len stand-in is not last-wins of rustc usize");
@@ -406,7 +406,7 @@ mod tests {
 
     #[test]
     fn apply_record_matches_apply_ops_owned() {
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         let body = src
             .split("fn apply_record(")
             .nth(1)

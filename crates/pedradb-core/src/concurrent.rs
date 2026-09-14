@@ -331,7 +331,15 @@ impl WriteGroup {
                     "1" | "true" => Some(true),
                     _ => None,
                 }),
-            rmw_sched: matches!(std::env::var("PEDRA_RMW_SCHED").as_deref(), Ok("1" | "true")),
+            // Default ON: 4 writers on a 48-CPU box (Railway overwrite_mc4
+            // 0.35×) and on the 4-vCPU cartaz (writers == ncpu) were
+            // taking the 0201 bypass — each commit_async_one under the
+            // mutex. RFC-0211's rmw_group_sched is the cut; it was opt-in.
+            // `PEDRA_RMW_SCHED=0` restores the bypass.
+            rmw_sched: match std::env::var("PEDRA_RMW_SCHED").as_deref() {
+                Ok("0") | Ok("false") => false,
+                _ => true,
+            },
             axis_ncpu: std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1),
@@ -735,10 +743,10 @@ impl WriteGroup {
         // RFC-0201: the auto client-axis rule — concurrent async writers
         // merge into one frame iff they outnumber the CPUs (env pin
         // overrides in both directions; at/below ncpu the bypass stands).
-        // RFC-0211 P0.2: `PEDRA_RMW_SCHED=1` (opt-in) swaps the decision
-        // for the single-op shape — `rmw_sched_kernel` also merges the
-        // `writers == ncpu` rmw regime; multi-op and the default stay on
-        // the AS-IS twin exactly as before.
+        // RFC-0211: default ON — `rmw_sched_kernel` merges the single-op
+        // async group at writers == ncpu (overwrite_mc4 / ycsb_f_mc4).
+        // Multi-op (apply/raftlog) stays on the 0201 bypass. `=0` restores
+        // the AS-IS twin.
         let async_merged = if self.rmw_sched {
             crate::rmw_sched_kernel::rmw_group_sched(
                 active,
@@ -8755,10 +8763,9 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Concurrent async 1-op bypass uses `commit_async_one` (RFC-0154 P1.6
-    /// envelope, same WAL bytes as `commit_async_ops([op])`). Four writers
-    /// zipf-overwrite; every key is readable after the barrier; bypass
-    /// stats stay un-merged (`queued == 0`, `batches == submits`).
+    /// Concurrent async 1-op overwrite (the overwrite_mc4 shape): four
+    /// writers zipf-put; default rmw_sched merges them (`queued > 0`,
+    /// batches < submits). Every key is readable after the barrier.
     #[test]
     fn concurrent_async_one_op_overwrite_is_visible() {
         let dir = temp_dir();
@@ -8793,8 +8800,11 @@ mod tests {
         let (submits, queued, batches, batch_ops) = db.write_group_stats();
         assert_eq!(submits, (n * ops) as u64);
         assert_eq!(batch_ops, (n * ops) as u64);
-        assert_eq!(queued, 0, "default async must stay on the un-merged bypass");
-        assert_eq!(batches, submits);
+        assert!(queued > 0, "default 4-writer overwrite must join the group");
+        assert!(
+            batches < submits,
+            "group amortizes (batches={batches} submits={submits})"
+        );
         for u in 0..records {
             let k = format!("c/{u:06}");
             assert!(db.get(k.as_bytes()).is_some(), "lost overwrite {k}");
@@ -8925,6 +8935,7 @@ mod tests {
         let _env_axis = ENV_AXIS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = temp_dir();
         std::env::remove_var("PEDRA_ASYNC_GROUP");
+        std::env::set_var("PEDRA_RMW_SCHED", "0");
         let ncpu = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1);
@@ -8968,6 +8979,7 @@ mod tests {
         }
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
+        std::env::remove_var("PEDRA_RMW_SCHED");
     }
 
     /// RFC-0201 P0.1: one-op async writers under the forced merge
@@ -9103,12 +9115,9 @@ mod tests {
         }
     }
 
-    /// RFC-0211 P0.2: the shipped wiring on the real submit path. Same
-    /// writers == ncpu 1-op async workload twice: env-clean keeps the
-    /// 0201 bypass (`queued == 0`, one batch per submit — the AS-IS twin
-    /// pinned at exactly the boundary), `PEDRA_RMW_SCHED=1` forms real
-    /// drainable groups (`queued > 0`, amortized batches, every put
-    /// durable after reopen).
+    /// RFC-0211: default ON forms drainable groups at writers == ncpu
+    /// 1-op async (`queued > 0`, amortized batches). `PEDRA_RMW_SCHED=0`
+    /// restores the 0201 bypass (AS-IS twin).
     #[test]
     fn rfc0211_env_axis_rmw_sched_forms_groups() {
         let _env_axis = ENV_AXIS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -9148,11 +9157,14 @@ mod tests {
             let (submits, queued, batches, batch_ops) = db.write_group_stats();
             assert_eq!(submits, (threads * PER as usize) as u64);
             assert_eq!(batch_ops, (threads * PER as usize) as u64);
-            assert_eq!(
-                queued, 0,
-                "env-clean: writers == ncpu ({threads}) keep the 0201 bypass"
+            assert!(
+                queued > 0,
+                "default ON: writers == ncpu ({threads}) join the drainable group"
             );
-            assert_eq!(batches, submits, "env-clean: per-writer batches (AS-IS twin)");
+            assert!(
+                batches < submits,
+                "default ON: the group must amortize (batches={batches} submits={submits})"
+            );
             db.close().unwrap();
         }
         let db = ConcurrentDb::open(&dir0).unwrap();
@@ -9170,7 +9182,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir0);
 
         let dir1 = temp_dir();
-        std::env::set_var("PEDRA_RMW_SCHED", "1");
+        std::env::set_var("PEDRA_RMW_SCHED", "0");
         {
             let db = ConcurrentDb::open(&dir1).unwrap();
             let barrier = Arc::new(std::sync::Barrier::new(threads));
@@ -9192,13 +9204,13 @@ mod tests {
             let (submits, queued, batches, batch_ops) = db.write_group_stats();
             assert_eq!(submits, (threads * PER as usize) as u64);
             assert_eq!(batch_ops, (threads * PER as usize) as u64);
-            assert!(
-                queued > 0,
-                "PEDRA_RMW_SCHED=1: writers == ncpu ({threads}) join the drainable group"
+            assert_eq!(
+                queued, 0,
+                "PEDRA_RMW_SCHED=0: writers == ncpu ({threads}) keep the 0201 bypass"
             );
-            assert!(
-                batches < submits,
-                "PEDRA_RMW_SCHED=1: the group must amortize (batches={batches} submits={submits})"
+            assert_eq!(
+                batches, submits,
+                "PEDRA_RMW_SCHED=0: per-writer batches (AS-IS twin)"
             );
             db.close().unwrap();
         }

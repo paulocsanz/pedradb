@@ -280,7 +280,7 @@ mod tests {
         );
         const B_OPEN: u8 = 123;
         const B_CLOSE: u8 = 125;
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         let needle = "fn compact_blob(";
         let start = src.find(needle).expect("compact_blob");
         let rest = &src[start..];

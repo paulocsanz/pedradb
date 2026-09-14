@@ -22,6 +22,7 @@
 #![warn(missing_docs)]
 
 pub mod apply_kernel;
+#[path = "command_kernel.rs"]
 pub mod command;
 pub mod lease_kernel;
 

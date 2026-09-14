@@ -19,6 +19,7 @@
 
 #![warn(missing_docs)]
 
+#[path = "handles_kernel.rs"]
 mod handles;
 
 use std::cell::RefCell;

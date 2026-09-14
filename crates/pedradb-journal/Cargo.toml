@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Change-feed journal canary (RFC-0020 P2.1 feed-watermark)"
 
+
+[lib]
+path = "src/lib_kernel.rs"
 [dependencies]
 pedradb-core.workspace = true
 bytes.workspace = true

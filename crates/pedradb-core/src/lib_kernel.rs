@@ -12,15 +12,22 @@
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 
+#[path = "batch_kernel.rs"]
 pub mod batch;
+#[path = "bloom_kernel.rs"]
 pub mod bloom;
 /// Optional DST buggify annotation sites (RFC-0018 P2.5; no-op unless feature).
+#[path = "buggify_hooks_kernel.rs"]
 pub mod buggify_hooks;
+#[path = "bulk_ingest_kernel.rs"]
 pub mod bulk_ingest;
+#[path = "bulk_run_kernel.rs"]
 pub(crate) mod bulk_run;
 
+#[path = "cache_kernel.rs"]
 pub mod cache;
 pub mod cf_kernel;
+#[path = "change_feed_kernel.rs"]
 pub mod change_feed;
 pub mod changelog_kernel;
 pub mod client_axis_kernel;
@@ -28,53 +35,77 @@ pub mod write_cycle_kernel;
 pub mod wal_buffer_kernel;
 pub mod rmw_sched_kernel;
 pub mod compact_kernel;
+#[path = "concurrent_kernel.rs"]
 pub mod concurrent;
+#[path = "corrupt_kernel.rs"]
 pub mod corrupt;
 pub mod d1_modelo_kernel;
 pub mod durability_spine_kernel;
 pub mod product_crown_kernel;
+#[path = "db_kernel.rs"]
 pub mod db;
+#[path = "env_kernel.rs"]
 pub mod env;
 pub mod env_crash_kernel;
+#[path = "error_kernel.rs"]
 pub mod error;
 pub mod flush_kernel;
 pub mod group_commit_kernel;
 pub mod group_window_kernel;
+#[path = "history_kernel.rs"]
 pub mod history;
+#[path = "host_kernel.rs"]
 pub mod host;
+#[path = "key_kernel.rs"]
 pub mod key;
+#[path = "leveling_kernel.rs"]
 mod leveling;
 pub mod lsm_r1_kernel;
 pub mod write_ack_kernel;
 
 /// Disk-pressure watermarks (RFC-0179): refuse writes before ENOSPC, keep reads up.
 pub mod disk_pressure_kernel;
+#[path = "lock_kernel.rs"]
 pub mod lock;
 pub mod leftover_page_kernel;
 pub mod lookup_kernel;
+#[path = "manifest_mod_kernel.rs"]
 pub mod manifest;
 pub mod manifest_kernel;
+#[path = "memtable_kernel.rs"]
 pub mod memtable;
+#[path = "merge_kernel.rs"]
 pub mod merge;
+#[path = "occ_kernel.rs"]
 pub mod occ;
 /// Cooperative PCT turnstile hooks (RFC-0051 P0; feature `pct` only).
 #[cfg(feature = "pct")]
+#[path = "pct_hooks_kernel.rs"]
 pub mod pct_hooks;
+#[path = "prefix_kernel.rs"]
 pub mod prefix;
 pub mod probe_order_kernel;
+#[path = "rng_kernel.rs"]
 pub mod rng;
 /// One-process scale model (RFC-0176): probes, WARM cap, spectrum clock.
 pub mod scale_kernel;
 pub mod scan_readahead_kernel;
 pub mod ratio_curve_kernel;
+#[path = "sst/mod_kernel.rs"]
 pub mod sst;
+#[path = "time_kernel.rs"]
 pub mod time;
+#[path = "tx_kernel.rs"]
 pub mod tx;
+#[path = "verified_kernel.rs"]
 pub mod verified;
 /// At-rest CRC scrub (RFC-0060).
+#[path = "verify_kernel.rs"]
 pub mod verify;
+#[path = "vlog_kernel.rs"]
 pub mod vlog;
 pub mod vlog_gc_kernel;
+#[path = "wal/mod_kernel.rs"]
 pub mod wal;
 pub mod write_admission_kernel;
 

@@ -6,22 +6,33 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+#[path = "bandit_kernel.rs"]
 pub mod bandit;
+#[path = "buggify_kernel.rs"]
 pub mod buggify;
+#[path = "coverage_kernel.rs"]
 pub mod coverage;
+#[path = "net_kernel.rs"]
 pub mod net;
+#[path = "pct_kernel.rs"]
 pub mod pct;
 /// PCT runner over real concurrent code (RFC-0051 P0; feature `pct`).
 #[cfg(feature = "pct")]
+#[path = "pct_concurrent_kernel.rs"]
 pub mod pct_concurrent;
+#[path = "schedule_kernel.rs"]
 pub mod schedule;
+#[path = "scheduler_kernel.rs"]
 pub mod scheduler;
 /// Parallel swarm executor over World seeds (RFC-0057 P0.3).
+#[path = "swarm_kernel.rs"]
 pub mod swarm;
 /// RFC-0079: native World is not TCG guest coverage.
+#[path = "tcg_kernel.rs"]
 pub mod tcg;
 /// RFC-0059 P2.2: trajectory monotonicity kernel.
 mod world_kernel;
+#[path = "wenv_kernel.rs"]
 pub mod wenv;
 
 pub use buggify::{buggify_schedule_from_seed, BuggifyArm, BuggifySchedule};
@@ -2808,7 +2819,7 @@ mod tests {
             world_runs_guest_ssh_as_is(),
             "AS-IS dente: World::run would SSH"
         );
-        let tcg = include_str!("tcg.rs");
+        let tcg = include_str!("tcg_kernel.rs");
         assert!(
             !tcg.contains("Command::new(\"ssh\")") && !tcg.contains("PEDRA_QEMU_SSH"),
             "tcg.rs must not spawn ssh or read PEDRA_QEMU_SSH"

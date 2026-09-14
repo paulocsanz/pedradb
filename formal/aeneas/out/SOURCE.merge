@@ -1,4 +1,4 @@
-path=crates/pedradb-core/src/merge.rs
-sha256=767405a95b0e84dcb13cc6a0174bd4b48f51473bab0050104e7eb5b72ac09359
+path=crates/pedradb-core/src/merge_kernel.rs
+sha256=59c0554cca995fc491959add5a71425b4f8db9c4f60e675ec0f5b66dfc23bbb2
 aeneas=daa85d7
 charon=0.1.232

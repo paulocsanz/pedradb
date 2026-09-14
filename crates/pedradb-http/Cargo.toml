@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Minimal HTTP wire for KvService + DCS (RFC-0012 P1)"
 
+
+[lib]
+path = "src/lib_kernel.rs"
 [dependencies]
 pedradb-core.workspace = true
 pedradb-apply.workspace = true

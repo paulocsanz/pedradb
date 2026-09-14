@@ -13070,6 +13070,7 @@ fn write_merged_tables_parallel<E: Env + Sync>(
     Ok(out)
 }
 
+#[path = "db/lookup_archive_kernel.rs"]
 mod lookup_archive;
 
 #[cfg(test)]
@@ -16374,7 +16375,7 @@ mod tests {
     /// RFC-0195: scan_at_raw routes through scan_readahead_window.
     #[test]
     fn scan_at_raw_calls_scan_readahead_window() {
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         assert!(
             src.contains("scan_readahead_window("),
             "scan walk must call the 0195 kernel"

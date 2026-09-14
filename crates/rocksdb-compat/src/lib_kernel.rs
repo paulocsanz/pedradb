@@ -14,11 +14,16 @@
 
 #![forbid(unsafe_code)]
 
+#[path = "api_kernel.rs"]
 mod api;
+#[path = "env_kernel.rs"]
 mod env;
 mod iter_kernel;
+#[path = "knobs_kernel.rs"]
 mod knobs;
+#[path = "locktab_kernel.rs"]
 mod locktab;
+#[path = "txn_kernel.rs"]
 mod txn;
 pub use api::{
     AsColumnFamilyRef, BlockBasedOptions, Cache, ChecksumType, CompactionDecision, DBPinnableSlice,
@@ -37,7 +42,9 @@ fn to_core_decision(d: CompactionDecision) -> pedradb_core::merge::CompactFilter
         }
     }
 }
+#[path = "backup_kernel.rs"]
 pub mod backup;
+#[path = "checkpoint_kernel.rs"]
 pub mod checkpoint;
 pub use backup::{BackupEngine, BackupEngineInfo, BackupEngineOptions, RestoreOptions};
 pub use checkpoint::Checkpoint;
@@ -50,6 +57,7 @@ pub use txn::{
 
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
+#[path = "shape_kernel.rs"]
 mod shape;
 pub use shape::{
     properties, BottommostLevelCompaction, ColumnFamilyDescriptor, CompactOptions,

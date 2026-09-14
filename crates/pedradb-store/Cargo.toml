@@ -5,33 +5,36 @@ edition.workspace = true
 license.workspace = true
 description = "Montanha-Store: multi-Raft range KV on PedraDB (substrate for DCS)"
 
+
+[lib]
+path = "src/lib_kernel.rs"
 [[bin]]
 name = "montanha-store-smoke"
-path = "src/bin/montanha-store-smoke.rs"
+path = "src/bin/montanha-store-smoke_kernel.rs"
 
 [[bin]]
 name = "montanha-tcp"
-path = "src/bin/montanha-tcp.rs"
+path = "src/bin/montanha-tcp_kernel.rs"
 
 [[bin]]
 name = "cluster_real"
-path = "src/bin/cluster_real.rs"
+path = "src/bin/cluster_real_kernel.rs"
 
 [[bin]]
 name = "montanha-perf-gate"
-path = "src/bin/montanha-perf-gate.rs"
+path = "src/bin/montanha-perf-gate_kernel.rs"
 
 [[bin]]
 name = "montanha-fdb-bench"
-path = "src/bin/montanha-fdb-bench.rs"
+path = "src/bin/montanha-fdb-bench_kernel.rs"
 
 [[bin]]
 name = "montanha-fdb-compare"
-path = "src/bin/montanha-fdb-compare.rs"
+path = "src/bin/montanha-fdb-compare_kernel.rs"
 
 [[bin]]
 name = "montanha-scale-gate"
-path = "src/bin/montanha-scale-gate.rs"
+path = "src/bin/montanha-scale-gate_kernel.rs"
 
 [features]
 default = []

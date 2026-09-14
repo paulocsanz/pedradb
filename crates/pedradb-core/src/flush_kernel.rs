@@ -1022,7 +1022,7 @@ mod tests {
             ManifestPublishPlan::PublishManifest,
             "AS-IS dente: publishes with unsynced SST"
         );
-        let pm = named_fn_src(include_str!("db.rs"), "persist_manifest").expect("persist_manifest");
+        let pm = named_fn_src(include_str!("db_kernel.rs"), "persist_manifest").expect("persist_manifest");
         assert!(
             pm.contains("match crate::flush_kernel::manifest_publish_plan("),
             "persist_manifest must match manifest_publish_plan"
@@ -1037,7 +1037,7 @@ mod tests {
     fn trampoline_drains_match_kernel_plans() {
         // RFC-0219 P2.1 drains: the already-paired kernel decisions
         // leave the `if` shape — the trampoline matches the kernel.
-        let trw = named_fn_src(include_str!("db.rs"), "try_rotate_wal").expect("try_rotate_wal");
+        let trw = named_fn_src(include_str!("db_kernel.rs"), "try_rotate_wal").expect("try_rotate_wal");
         assert!(
             trw.contains("match crate::flush_kernel::wal_rotate_decision("),
             "try_rotate_wal matches wal_rotate_decision"
@@ -1046,13 +1046,13 @@ mod tests {
             trw.contains("match crate::flush_kernel::wal_segment_is_empty("),
             "try_rotate_wal matches wal_segment_is_empty"
         );
-        let ewr = named_fn_src(include_str!("db.rs"), "ensure_wal_rotated_for_gc")
+        let ewr = named_fn_src(include_str!("db_kernel.rs"), "ensure_wal_rotated_for_gc")
             .expect("ensure_wal_rotated_for_gc");
         assert!(
             ewr.contains("match crate::flush_kernel::wal_rotate_decision("),
             "ensure_wal_rotated_for_gc matches wal_rotate_decision"
         );
-        let cv = named_fn_src(include_str!("db.rs"), "count_visible").expect("count_visible");
+        let cv = named_fn_src(include_str!("db_kernel.rs"), "count_visible").expect("count_visible");
         assert_eq!(
             cv.matches("match visible").count(),
             2,
@@ -1073,7 +1073,7 @@ mod tests {
             FlusherGate::WorkerDrains,
             "AS-IS dente: workerless Db parks on a drain nobody runs"
         );
-        let cc = include_str!("concurrent.rs");
+        let cc = include_str!("concurrent_kernel.rs");
         for (name, field) in [
             ("await_flush_debt", "self"),
             ("await_l0_park", "self"),
@@ -1108,7 +1108,7 @@ mod tests {
             ParkedDebtPlan::NoDebtBelowCap,
             "AS-IS dente: a table's worth of parked debt never throttles"
         );
-        let cc = include_str!("concurrent.rs");
+        let cc = include_str!("concurrent_kernel.rs");
         let afd = named_fn_src(cc, "await_flush_debt").expect("await_flush_debt");
         assert!(
             afd.contains("match crate::flush_kernel::parked_debt_plan("),
@@ -1130,7 +1130,7 @@ mod tests {
         // RFC-0219 P2.2 drains: the already-paired kernel decisions
         // leave the `if` shape in concurrent.rs — the trampoline matches
         // the kernel (or its plan).
-        let cc = include_str!("concurrent.rs");
+        let cc = include_str!("concurrent_kernel.rs");
         let fate_drains = [
             ("submit_after_begin", "lone/async 3-way"),
             ("lead", "catchup bound"),
@@ -1186,7 +1186,7 @@ mod tests {
             CfFlushPlan::CfNotDueSkip,
             "AS-IS dente: armed family over the limit never flushes"
         );
-        let maf = named_fn_src(include_str!("db.rs"), "maybe_auto_flush").expect("maybe_auto_flush");
+        let maf = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_flush").expect("maybe_auto_flush");
         assert!(
             maf.contains("match crate::flush_kernel::cf_flush_plan("),
             "maybe_auto_flush must match cf_flush_plan"
@@ -1206,7 +1206,7 @@ mod tests {
             !occ_snap_uses_published_as_is(true),
             "AS-IS dente: last_seq while inflight"
         );
-        let src = include_str!("concurrent.rs");
+        let src = include_str!("concurrent_kernel.rs");
         assert!(
             src.contains("occ_snap_uses_published("),
             "occ_snapshot must match occ_snap_uses_published"
@@ -1236,7 +1236,7 @@ mod tests {
             !occ_snap_lock_order_as_is(false, true),
             "AS-IS dente: last_seq while write lock held"
         );
-        let snap = include_str!("concurrent.rs")
+        let snap = include_str!("concurrent_kernel.rs")
             .split("fn occ_snapshot(")
             .nth(1)
             .expect("occ_snapshot");
@@ -1271,7 +1271,7 @@ mod tests {
             "AS-IS dente: rotate empty segment"
         );
         assert!(!wal_segment_is_empty(1));
-        let rot = include_str!("db.rs")
+        let rot = include_str!("db_kernel.rs")
             .split("fn try_rotate_wal(&mut self)")
             .nth(1)
             .and_then(|s| s.split("fn wal_pin_state").next())
@@ -1347,7 +1347,7 @@ mod tests {
             ParkedPairPlan::HandOutOldestPair,
             "AS-IS dente: pair handed out of a short queue"
         );
-        let popa = named_fn_src(include_str!("db.rs"), "parked_oldest_pair_arcs")
+        let popa = named_fn_src(include_str!("db_kernel.rs"), "parked_oldest_pair_arcs")
             .expect("parked_oldest_pair_arcs");
         assert!(
             popa.contains("match crate::flush_kernel::parked_pair_plan("),
@@ -1381,7 +1381,7 @@ mod tests {
             AutoFlushGate::ScanColumnFamilies,
             "AS-IS dente: scan even when both axes are under"
         );
-        let maf = named_fn_src(include_str!("db.rs"), "maybe_auto_flush")
+        let maf = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_flush")
             .expect("maybe_auto_flush");
         assert!(
             maf.contains("match crate::flush_kernel::auto_flush_gate("),
@@ -1417,7 +1417,7 @@ mod tests {
             FamilyFlushMode::PartitionFamily,
             "AS-IS dente: always partitions in-commit"
         );
-        let maf = named_fn_src(include_str!("db.rs"), "maybe_auto_flush")
+        let maf = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_flush")
             .expect("maybe_auto_flush");
         assert!(
             maf.contains("dominant_family_stage_plan("),
@@ -1448,7 +1448,7 @@ mod tests {
             MemAutoFlushPlan::NotDueKeepMem,
             "AS-IS dente: armed limit ignored, mem grows unbounded"
         );
-        let maf = named_fn_src(include_str!("db.rs"), "maybe_auto_flush")
+        let maf = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_flush")
             .expect("maybe_auto_flush");
         assert!(
             maf.contains("match crate::flush_kernel::mem_auto_flush_plan("),

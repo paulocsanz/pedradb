@@ -23,6 +23,7 @@
 
 mod auth_kernel;
 mod cl_kernel;
+#[path = "fail_closed_kernel.rs"]
 mod fail_closed;
 mod form_kernel;
 mod path_kernel;
