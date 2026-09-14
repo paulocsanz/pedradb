@@ -3,11 +3,11 @@
   "keys": 48,
   "value_bytes": 2048,
   "rows": [
-    {"n":1,"rounds":1870,"ms_per_scan":0.0428},
-    {"n":2,"rounds":1327,"ms_per_scan":0.0636},
-    {"n":4,"rounds":959,"ms_per_scan":0.0835},
-    {"n":8,"rounds":2013,"ms_per_scan":0.0485},
-    {"n":16,"rounds":1129,"ms_per_scan":0.0709}
+    {"n":1,"rounds":1711,"ms_per_scan":0.0494},
+    {"n":2,"rounds":1133,"ms_per_scan":0.0707},
+    {"n":4,"rounds":614,"ms_per_scan":0.1305},
+    {"n":8,"rounds":389,"ms_per_scan":0.2205},
+    {"n":16,"rounds":329,"ms_per_scan":0.2432}
   ],
   "best_n": 1,
   "default_n": 4,

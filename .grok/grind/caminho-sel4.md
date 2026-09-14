@@ -445,3 +445,362 @@ Iff.trans explicito no lugar de rw de padrao bind/match; '>' U64 e
 decide de Prop; proof_depth.tsv e espacado; worktree de sweep dentro
 de software/ (aeneas relativo); colisao de RFC: renumerar A MINHA
 cirurgicamente, dela intocada.
+
+Fire 821 (2026-09-11, rfc0208 P0): seam raft 1/2+2/2 FECHADO.
+7adc0cf1 atom grant_persist (grant_after_persist_fate_iff: grant iff
+WouldGrant e persist Ok) e ef36c681 atom commit_raft
+(propose_ack_ok_fate_iff: ack iff index<=commit_index). Escada:
+cap 92->90, floor_atom 39->41, floor_extract 239->237. Claim datada
+MEDIDA: vote_kernel.rs e commit_kernel.rs zero data_fate pendente
+(membership 26 nomeados para cadencia; o "tres kernels" do texto
+original era overclaim — flipado honesto). Plantas 1/1, gates 3x
+GREEN apos cada. PROXIMO: P1.1 composicao do cluster em
+ComposeStoreRaft.lean (cadeia eleicao vote->grant via bind + trio
+recovery sobre atoms registrados; vote_decision_total e private —
+precisa virar publico).
+
+## Fire 822 — rfc0208 P1.1: composição do cluster (faec9c9d)
+- ComposeStoreRaft.lean (19º compose lib, lakefile+lean_extracts.sh no mesmo commit):
+  election_grant_chain_fate (bind de vote_decision × grant_after_persist sobre os
+  dois atoms registrados; Deny/persist-Err via vote_decision_total, tornado público)
+  + recovery_fate_composed (triple recover_apply × recover_drop_orphan × node_counts).
+- Zero sorry; twins DST do cluster 7/7 (three_teeth_queued); gates 3× GREEN (sem
+  promoção — composição não é par do catálogo, motivo do não-registro em findings).
+- 3 erros de tactic na primeira compilação (rfl onde precisava da hipótese hd;
+  rw [hd] antes do simp numa equação entre construtores; aridade dos conjuntos do
+  Deny — 3, sem persist). Molde do bind-composição bankado: bind_ok_inv/bind_intro
+  + rcases dos dois iff registrados.
+
+## Fire 823 — rfc0208 P1.2: cadência membership ×4 (c3bfeb72, 9188ec08, 08016c7d, 8837e2ad)
+- 4 atoms, 4 commits, números EXATOS do RFC: cap 90→86, floor_atom 41→45,
+  floor_extract 237→233. removed_steps_down e disk_membership_overrides_cli
+  (pure-lifts), high_water_at_least (trait-default Ord::max; semântica do lt
+  escalar = ok (decide (x<y)) por rfl), joint_still_active (PRIMEIRO USO no repo
+  da ponte de specs da Aeneas: eq_homo_spec + spec_imp_exists — corpo que atravessa
+  trait deixa de ser opaco).
+- Lições bankadas: do-block do backend reduz com simp COMPLETO (o bind é da instância
+  Monad — bind_ok direto não casa); iff residual de simetria fecha com `exact eq_comm`;
+  extração de Prop de hbeq (spec) fecha com hbeq.mp rfl / fun h => absurd (hbeq.mpr h).
+
+## Fire 824 — rfc0208 P2.1: banda l28 ×2 + plano datado do bloco (b5e15cb9, 98d7b960)
+- 2 atoms, 2 commits, números EXATOS do RFC: cap 86→84, floor_atom 45→47,
+  floor_extract 233→231. l28_tcp_left (reporte de saída ⟺ disco) e l28_tcp_hw
+  (high-water move ⟺ inventário commitado mantido) — pure-lifts ok b em L28.lean,
+  molde cases b <;> cases v <;> simp (4ª e 5ª aplicação).
+- Plantas TCP REAIS verdes (protocolo TCP entre nós, ~235s cada): remove_member_
+  left_on_disk e high_water_after_remove (tests/l28_real_tcp.rs).
+- Plano datado dos 29 data_fate restantes em EXTRACT.md: 22 pure-lifts extraíveis
+  (identidade literal num Bool; risco de corpo opaco ZERO) em cadências de 4, cada
+  um com planta real nomeada — meta relativa: cap 84→62, floor_atom 47→69,
+  floor_extract 231→209; + 7 fantasmas de catálogo (add/cnew/svget/newget/jleft/
+  caught/grown nomeiam fn que NÃO existe — kernels TCP terminam em pj) = conserto
+  de catálogo ou aposentadoria, NUNCA gate de identidade inventado.
+- Sessão paralela ativa em pedradb-core (wal/*, wal_buffer_kernel.rs) — commits
+  sempre --only com meus caminhos; commit dela (6bb34dfc) caiu entre os meus dois.
+
+## Fire 825 — rfc0208 P2.2 + flip: sweep em worktree destacado, 0208 fechado 6/6 (9a20cb25, 637eda76)
+- Worktree destacado DENTRO de software/ (pedradb-wt0208) no HEAD 98d7b960: gates 3×
+  GREEN, extracts --required ok (61 libs + 19 compose; 1929 jobs lake), sorry 0 nos 5
+  wrappers tocados, admissions always false (recusas plantadas). Worktree removido com
+  --force (só pycache sujo).
+- Correção datada da aritmética do slice: restante vivo do cluster = 58 nomeados
+  (22 membership + 29 l28 + 6 txn + 1 compact_unleft), NÃO 55 — o texto subtraía o
+  trio do 0205 que já estava fora dos 66. Pool vivo 84 = cap ✓.
+- Escada final do 0208 contra o início: extract 239→231, atom 39→47, cap 92→84 —
+  alvos exatos do RFC; 8 atoms (um commit cada) + 1 compose lib.
+- SESSÃO PARALELA abriu a 0209 (c064d621, WAL staging) — sucessora precisa do
+  próximo número LIVRE (checar ls docs/rfc/ na hora; precedente da dupla colisão).
+
+## Fire 826 — rfc0210: sucessora do 0208 autorada (80c6acde)
+- Número: 0210 (0209 tomada pela sessão paralela em c064d621 — WAL user-space staging).
+- Tese com números vivos: pool 84, L28 = 29 (22 pure-lifts risco-ZERO pelo plano
+  datado + 7 fantasmas). P0 = cadências 1/4+2/4; P1 = 3/4+4/4 e o VEREDITO dos
+  fantasmas (conserto se caminho vivo, senão aposentadoria datada sem quebrar
+  espelhos/âncoras 0203/0204 — conta ancorada quebrada ⇒ recusa registrada, nunca
+  força); P2 = cadência final (bloco ZERO data_fate) + composição ∀ da remoção TCP
+  em ComposeL28.lean + sweep. Alvos: cap 84→62, floor_atom 47→69, extract 231→209.
+- Out-of-scope com os bans: admissions, seL4, db.rs inteiro, HashMap, ∀π, escada
+  dela, add-member joint como produto (catálogo não dirige o produto).
+
+## Fire 827 — auditoria final round 4: limpa
+- 8 commits de promoção, cada um com EXATAMENTE +1 linha de registro (git show por
+  conteúdo); 4 não-promoções (compose/sweep/flip/RFC) sem registro espúrio.
+- 0 paths proibidos nos 12 commits do round (journal, findings 0192-0196, kernels
+  e âncoras dela — nada). Commits dela (6bb34dfc, c064d621) intactos.
+- 3 admissions recusadas VERDES no HEAD (media_durable, forall_schedules,
+  lock_interleavings — 3 passed). Capturas no scratch novo
+  (implementer/auditoria-round4-rfc0208.md).
+- ROUND 4 FECHADO: 0208 done 6/6 nos números exatos (extract 239→231, atom 39→47,
+  cap 92→84); sucessora 0210 aberta. PRÓXIMO ROUND: implementar 0210 P0.1
+  (cadência l28 1/4: dterm, part, apply, napply — 4 commits, plantas TCP reais).
+
+## Fire 828 — rfc0210 P0+P1.1: 12 atoms do bloco l28 (9a0869ee…este)
+- P0 (8 atoms): cadências 1/4+2/4 — dterm, part, apply, napply, trunc, odrop,
+  abort, nowms. P1.1 (8 atoms): cadências 3/4+4/4 — hist, fence, clear, pre,
+  peer, lid, rdr, dsc. Números EXATOS em cada fechamento: cap 84→76 (P0),
+  76→68 (P1.1); floor_atom 47→55→63; floor_extract 231→223→215.
+- Molde pure-lift cases b <;> cases v <;> simp: 13ª+ aplicação — ZERO erros de
+  prova em todo o round 5 até aqui; script de cirurgia reutilizável no scratch
+  (promote_l28.py) derrubou cada promoção para ~1 min.
+- Plantas TCP REAIS em paralelo (4+8 simultâneas): 16/16 verdes, 234–391s cada.
+  Lição: lançar as plantas do lote ANTES das promoções e colher os resultados
+  antes/durante os commits finais do lote.
+- PRÓXIMO: P1.2 veredito dos 7 fantasmas (medição add-member → recusa datada
+  SEM aposentadoria se quebrar âncoras dela), depois P2.1 cadência final ×6.
+
+## Fire 829 — rfc0210 P1.2+P2.1+P2.2+sucessora: round 5 FECHADO (fe236f91…4cba62a2)
+- Correção do Fire 828: P0+P1.1 = 16 atoms (não 12) — o corpo estava certo.
+- P1.2 (fe236f91): 7 fantasmas APOSENTADOS com recusa datada — medição a
+  fresco: cluster_real.rs sem add-member, handlers/planta inexistentes, zero
+  defs Lean; catálogo 299→292, data_fate 68→61, cap 61, single_artifact 285
+  (corrigiu stale 291 vs live 292), marker ledger, nota R-joint. Gates +
+  host_anchor_table + test_proof_vs_campaign + test_twin_mutation verdes
+  ANTES e DEPOIS. Lição: pedra_formal compara glue.sa/data_fate com o vivo —
+  atualizar junto; o marker do ledger carrega total/campaign/sa/aeneas.
+- P2.1 (fafbbfa4…e627702c, 6 commits): pld, std, hnt, slot, sth, pj — cap
+  61→55, floor_atom 68→69, floor_extract 210→209. Plantas 6/6 verdes
+  (pld 231.8s, std 369.0s, hnt 366.6s, slot 349.2s, sth 22.2s, pj 1.8s —
+  sth/pj são ctor-sobre-plantado, não pagam kill-wait). Medido: 26 pares
+  l28, ZERO data_fate.
+- P2.2 (80f2344f + 48db12b4): ComposeL28.lean (20ª compose lib) —
+  protocolo de remoção composto (left ∧ hw) + fused (bind). Lição: o gate
+  extracts recusa a PALAVRA sorry até em comentário ("Zero sorry." no
+  header falhou; reescrito "No holes"). Lição 2: Aeneas bind não reduz por
+  simp sozinho — `simp [Aeneas.Std.bind]` após cases fecha.
+- Sweep no worktree destacado dentro de software/ (mold 0202): gates no
+  worktree, extracts/sorry na árvore principal. RFC-0210 Status done.
+- Sucessora 4cba62a2: RFC-0211 — drenar o bloco cluster (membership ×22 +
+  txn ×6 + compact ×1 = os 29 nomeados; cap 55→26, atom 69→98, extract
+  209→180; molde 0208 P1.2 de corpo REAL, não pure-lift).
+- PRÓXIMO ROUND: implementar 0211 P0.1 (cadência membership discard ×4:
+  discard_uncommitted, discard_leader, drop_preimages, force_clear).
+- Correção do Fire 829: a sucessora virou RFC-0212 (5db39a2c) — a 0211 é dela
+  (escalonamento rmw mc4, a262f095); colisão ⇒ renumerar a minha.
+
+## Fire 830 — rfc0212 P2.1+P2.2+sucessora: round 6 FECHADO (0e86d730…9df25b47)
+- P2.1 ×7 (0e86d730, 6b8d3454, de09a2c3, 11fc86f1, a795d062, 4185c2fc,
+  11354e27): discard_cut, leftover_txn_is_aborted, next_txn_id_after,
+  prepare_error_aborts_earlier, reserve_si_gen, unreserve_si_gen (StoreTxn)
+  + compact_through_unleft (StoreCompact). Números EXATOS: cap 33→26,
+  floor_atom 91→98, floor_extract 187→180. BLOCO CLUSTER 29/29 (membership
+  22 + txn 6 + compact 1) ZERO data_fate medido ao vivo. 1 promoção = 1
+  commit ×7 auditado (grep -c "^+theorem" = 1 em cada).
+- Lição P2.1: eu tinha appending os 6 teoremas de uma vez e o commit --only
+  leva o working tree INTEIRO do arquivo — o primeiro commit carregou os 6.
+  Reset soft + truncar o wrapper para 1 teorema + reapendar um a um por
+  commit (bloco salvo em {SCRATCH}/p21_pending_theorems.lean). Sempre
+  1 teorema por commit desde o primeiro.
+- Lição P2.1 2: StoreTxn NÃO estava no LIBS do lean_extracts.sh — 23
+  teoremas sem gate desde o RFC-0191 (nada importava o wrapper). Inscrito
+  no primeiro commit do P2.1 (62 libs).
+- Plantas: 4 novas em three_teeth_queued.rs via LiveQueued; técnica
+  broadcast_append (log RAM do líder): prepare persiste no índice de commit
+  (discard_cut), Puts carimbam si_gen 2,3 distintas (reserve/unreserve);
+  compact via unleft_applied_joint_index==None. Regressão módulo 85→86
+  passed (agora 150 com twin P2.2).
+- P2.2 (9f94b167 + c892b57d): ComposeStoreFinish.lean (21ª compose lib) —
+  queued_finish_chain_fate sobre os 4 atoms do fim-de-fila (discard_leader ×
+  discard_uncommitted × persist_fence × persist_hist), v = localidade para
+  todo in_ids (0136 sobrevive); SEM registro TSV (razão em findings). Twin
+  kernel queued_finish_from_counts + planta viva: put não cometido na réplica
+  4 (prev DELA, técnica da planta discard) → leave remove 4 → fence
+  persiste "abort" na removida → discard derruba o sufixo (sent_through
+  neutralizado). Hook de drift Aeneas: mudou membership_kernel ⇒ re-extract
+  e re-carimbar SOURCE.store_membership no commit.
+- Sweep: worktree /Users/paulo/software/pedradb-wt-r0212 no HEAD 9f94b167 —
+  gates 3× GREEN + test_proof_vs_campaign ok; árvore principal extracts
+  "62 libs + 21 compose", sorry 0. RFC-0212 Status done.
+- Auditoria final: 1 teorema/commit ×7; nenhum path dela; admissions
+  3/3 verdes no HEAD (claim_media_durable_refused_after_fsync_ok,
+  forall_schedules_admitted_on_live_group_is_not_ok,
+  claim_lock_interleavings_refused_after_put); gates GREEN no HEAD
+  (292/266/26, data_fate 26<=26). Capturas em {SCRATCH}/audit_*.
+- Sucessora 9df25b47: RFC-0213 — drenar o storage (wa 9 + lookup 4 + flush
+  3 + cf 2 + leveling 2 + 6 singletons = 26; cap 26→0, atom 98→124, extract
+  180→154; CATÁLOGO ZERO data_fate). WalRecover + Reopen fora do LIBS
+  (buraco classe StoreTxn) — inscrição na P2.1 dela.
+- PRÓXIMO ROUND: implementar 0213 P0.1 (cadência write_admission ×9).
+- Fronteira respeitada: pedradb-core só leitura (admissions); commit dela
+  741aecbf entrou no meio do meu fecho sem conflito.
+
+## 2026-09-12 — round 7 FECHADO: RFC-0213 done, CATÁLOGO ZERO data_fate (26 promoções + compose + sweep)
+
+- P0.1 wa×9 (2979b00c…0b88780c FECHAMENTO) + P0.2 lookup×4 (9b780470…d2749e24)
+  + P1.1 flush×3+cf×2 (394a08d0…f604d0ee) + P1.2 leveling×2+singletons×4
+  (ced458f1…44bd1b67 FECHAMENTO; 8898bb93 cap-only visible_at) + P1.3 veredito
+  (40afb3b0: 0 ausentes nas 24) + P2.1 wal finais ×2 (6a538512 wal_recover atom
+  FRESH; 57c1277e dictionary_link CAP-ONLY — atom desde 2026-09-10, fate-iff
+  fortalecido, pagou só o cap) — CATÁLOGO ZERO data_fate (292 pares medido ao
+  vivo). Escada final 0213: cap 26→0, floor_atom 98→122, floor_extract 180→156.
+  WalRecover + Reopen INSCRITOS no LIBS nesta data (62→64; extratos
+  re-carimbados byte-idênticos, diff vazio).
+- P2.2 (3782ced7 + 7f1c7cf4): ComposeStorageWrite.lean (22ª compose lib) —
+  storage_write_path_recovered_iff: admission portão → plano cerca → recovery
+  corta sobre os atoms write_admit × wal_commit_plan × torn_tail_needs_cut,
+  v true EXATAMENTE sob a conjunção quádrupla para TODO input; SEM registro
+  TSV (três kernels — razão datada em findings p22). Twin kernel
+  storage_write_recovered(+as_is) + planta
+  storage_write_recovered_on_live_stall_fence_torn_is_not_ok (4 quadrantes +
+  as-is mente nos três eixos); extrato re-carimbado
+  (aeneas_write_admission.sh, +49 linhas). Hook drift satisfeito.
+- Sweep: worktree /Users/paulo/software/pedradb-wt-r0213 @ 3782ced7 — gates
+  3× GREEN + test_proof_vs_campaign ok + extracts "ok lean extracts (64 libs
+  + 22 compose)" build-completo do zero (1944 jobs), sorry 0; worktree
+  removido. Nota datada EXTRACT.md: bloco storage DRENADO — catálogo inteiro
+  292 pares ZERO data_fate; restam nomeados: ZERO (0211/0212/0213 drenados).
+  RFC-0213 Status done.
+- Auditoria final: 1 teorema/commit em TODAS as 26 promoções (sweep/veredito
+  = 0, compose = 1); nenhum arquivo dela commitado por mim (concurrent.rs só
+  no commit DELA a5e18c75, sessão 0211); admissions 3/3 verdes no HEAD
+  (claim_media_durable_refused_after_fsync_ok,
+  forall_schedules_admitted_on_live_group_is_not_ok,
+  claim_lock_interleavings_refused_after_put); depth-floor GREEN no HEAD
+  (extract=156/atom=122/data_fate=0<=0). Capturas em {SCRATCH}/r0213_audit_*
+  + r0213_p22_*.
+- Sucessora 232c5cdd: RFC-0214 — drenar a espinha de durabilidade ao degrau
+  átomo (wal_state ×6 + env_crash ×6 + cqe ×5 + write_ack ×3 = 20 pares;
+  wrappers já no LIBS, zero buracos): floor_atom 122→142, floor_extract
+  156→136, cap_data_fate 0<=0 imutável; P1.2 veredito datado para classe
+  campanha; P2.1 composição ∀ env→wal→ack; P2.2 sweep + EXTRACT.md + done.
+  Fora de escopo nomeado: group_commit ×11 (escalonador permanece ok false).
+- PRÓXIMO ROUND: implementar 0214 P0.1 (wal_state ×6 ao átomo).
+- Fronteira respeitada: 4 arquivos sujos dela intactos (concurrent.rs,
+  caminho-sel4.md, serial-fillin10.prevstate, rfc0029 stdout.json, __pycache__);
+  commit dela a5e18c75 entrou no meio do round sem conflito.
+
+## 2026-09-12 — round 8 FECHADO: RFC-0214 done, espinha de durabilidade no degrau átomo (20 promoções + compose ∀ + sweep)
+
+- 20 promoções 1 teorema/commit, gate GREEN em todas: wal_state ×6
+  (d6179165, bb0f8e08, eb5c65b4, 8f370758, 2a23f62a, ca40cfde), env_crash
+  ×6 (2977e49e, 44bed493, 49f8461e, 02dc3a64, 3bacca3d, 1130ec51), cqe ×5
+  (b5350a8c, 003fa79b, 0db60735, 61d6946b, c57a78d1), write_ack ×3
+  (0d7324da, 4893f009, 42891839) — floor_atom 122→142, floor_extract
+  156→136, close=6/count=7/data_fate 0<=0 imutáveis.
+- Correção LIVE no meio do round (0d7324da): puts sync single-client
+  tomavam submit_one → lone_commit e BYPASSAVAM o ledger do WriteAck;
+  fix liga o ledger ao caminho pinned (on_append/on_barrier/on_ack +
+  assert_inv em lone_commit quando verified) — planta DST on live
+  (2 puts, crash+reopen, ambos gets sobrevivem) verde antes do commit.
+- P1.2 veredito datado (8b5d5dd4): nenhum medido recusado, 20/20 — sem
+  gate inventado.
+- P2.1 composição ∀ (8e2bb091): ComposeDurabilitySpine.lean — spine_step
+  (append/barrier/ack com futuros ok), spine_reach, pontes ok DERIVADAS
+  das três iff (corpos extraídos nunca reabertos para futuros ok),
+  spine_inv_every_reach (Inv-WAL acked⊆synced⊆written de TODO caminho,
+  indução em spine_reach), coroa spine_d1_every_reach (D1 do prefixo
+  acked sobre TODO corte tornado — abre inv_wal+d1_modelo(+crash_legal)
+  UMA vez, montagem); twin durability_spine_kernel.rs (SpineStep,
+  spine_replay com assert_inv por passo, spine_replay_as_is, 2 tests) +
+  planta DST on live no perfil verificado pinned; inscrição lakefile +
+  COMPOSE; SEM TSV com razão datada em findings (atravessa 3 átomos,
+  não um par único). Moldes Lean aprendidos: literal de estrutura em
+  construtor de indutivo tem que ser 1 linha; `cases hs with` unifica o
+  `l` do construtor com o `l` em escopo (nomear só binders novos);
+  `show` falha defeq em projeção de let __src → `dsimp only` antes;
+  ifs rebaixados a `= true` sob binds precisam `liftFun2` no simp set
+  para beta a continuação.
+- P2.2 sweep (85855e56): worktree /Users/paulo/software/pedradb-wt-r0214
+  @ 8e2bb091 DENTRO de software/ — depth-floor GREEN (extract=136 floor,
+  atom=142, close=6, count=7, data_fate=0), inventory 7/7 terminal,
+  twins 7/7 bound (TSV máquina), test_proof_vs_campaign ok (3 ok),
+  extracts 64 libs + 23 compose build do zero 1946 jobs ok, sorry 0 nos
+  cinco wrappers da rodada; nota datada EXTRACT.md (linha 600: ladder
+  122→142/156→136, "Restam no degrau extrato: 136"); RFC-0214 Status
+  done; worktree removido (--force só pyc regenerado).
+- Auditoria final round 8 (HEAD 85855e56): 1 teorema/commit em TODAS as
+  20 promoções (compose P2.1 = 5 teoremas, veredito/sweep = 0);
+  NENHUM arquivo dela no range 7f1c7cf4..85855e56; admissions 5/5
+  verdes no HEAD (claim_media_durable_refused_after_fsync_ok core+world,
+  forall_schedules_admitted_on_live_group_is_not_ok,
+  claim_lock_interleavings_refused_after_put,
+  cqe_ring_model_is_not_admitted io-uring); depth-floor GREEN no HEAD;
+  extracts --required exit 0 no HEAD (1939 jobs). Capturas
+  {SCRATCH}/r0214_audit_{gate,admissions,extracts}.txt +
+  r0214_sweep_* + r0214_p*_*. Baseline vermelho pré-existente
+  documentado (pedradb-core 23, pedradb-sim 2 — medido no HEAD limpo
+  c57a78d1 ANTES do round; não é do 0214).
+- Sucessora faeb1f98: RFC-0215 — coroa de produto no degrau átomo.
+  Medição ao vivo (candidates.py @ 85855e56): TODOS os boards de
+  máquina zerados (script 0/17, compose 0/17, concorrência 0/5, scale
+  0/3, produto 0, A/B/D/C vazios, data_fate=0, atom_to_close none);
+  cartoon_twin=4 TODO em montanha-fdb-recipes (skip, regra 13). Restam
+  136 no degrau extrato; o bloco de maior valor seL4 é a COROA DE
+  PRODUTO: spec ×4 (Properties.lean: d1_holds, r1_answer_ok, t1_holds,
+  c1_holds — hoje só placeholder `: True`), modelo ×4 (d1_modelo,
+  r1_modelo, t1_modelo, c1_modelo), fate ×2 (d1_put_ok,
+  c1_advance_commit); P1.2 ComposeProductCrown (11ª compose): espinha →
+  d1_modelo ÁTOMO (corpo não reaberto) → d1_holds spec — a garantia de
+  produto D1 como teorema composto sem buraco de extrato no meio;
+  P2.1 http ×6 (Auth/Form já no LIBS). Alvo: floor_atom 142→158,
+  floor_extract 136→120.
+- PRÓXIMO ROUND: implementar 0215 P0.1 (spec ×4 ao átomo em
+  Properties.lean).
+- Fronteira respeitada: arquivos sujos dela intactos
+  (caminho-sel4.md, serial-fillin10.log.prevstate, rfc0029 stdout.json,
+  __pycache__); nenhum stash tocado; concurrent.rs só mexido no commit
+  do fix lone_commit (0d7324da) com planta verde antes.
+## 2026-09-12 — round 9 FECHADO: RFC-0215 done, coroa de produto no degrau átomo (16 promoções + compose espinha→coroa + sweep)
+
+- P0.1 spec ×4 (1ae394dc…6ffdbcb6, Properties.lean): c1/d1/t1/r1
+  holds_fate_iff — o placeholder `: True` do wrapper virou teorema
+  real; loops reais provados por spec_decr_nat; ladder 142→146/136→132.
+- Fix de motor fora de fatia (052d151e): deadlock do 1º put async sob
+  disk pressure soft (reclaim do wal-held lock-free).
+- P0.2 modelo ×4 (52e7296e…26f3e463): d1_modelo (D1Modelo.lean),
+  r1_modelo (LsmR1.lean), t1_modelo (T1Modelo.lean), c1_modelo
+  (C1Modelo.lean) — ramos construtivos carregando a igualdade
+  habilitante; 146→150/132→128. Planta r1_modelo achou bug REAL:
+  SST v5 vazio reaberto panicava fail_stop com corrupção inventada —
+  fix 30e572db (materialize_entries devolve vazio; as 4 falhas
+  pré-existentes do suite sst falham igual no HEAD anterior).
+- P1.1 fate ×2 (bb22b756+335e78ef): put_ok_fate_iff (cadeia honesta
+  wal_append→wal_sync→wal_ack) e c1_advance_commit_fate_iff
+  (maioria); 150→152/128→126.
+- P1.2 compose espinha→coroa (8d29e2fc): ComposeProductCrown.lean
+  (24ª compose lib) — sobre todo ledger spine_reach do 0214, as duas
+  pernas JUNTAS: d1_modelo = ok true (cita a iff; corpo extraído NÃO
+  reaberto; perna geminada wa_d1_modelo_fate_iff em WriteAck.lean
+  resolve o choque de import das cópias geradas) e d1_holds = ok
+  true (perna P0.1). Twin product_crown_kernel.rs (2 testes) +
+  planta DST on live verde. SEM TSV (não é par único).
+- P2.1 http ×6 (4fdec668…4a4d138d): is_bearer_scheme,
+  is_non_bearer_auth_scheme, normalize_http_method, ascii_lower,
+  ascii_upper, authorization_matches — 152→158/126→120. O loop de
+  scan do Authorization fechou nos DOIS sentidos (hit/end/cont);
+  técnica nova registrada: o `let (k, v) := (k, v)` elaborado reduz
+  só por `conv => lhs; whnf`; ∨ é associativo à direita em Lean 4
+  (rcases e construtores anônimos aninhados explicitamente).
+- P2.2 sweep (c130482e): worktree /Users/paulo/software/pedradb-
+  r0215-sweep @ 4a4d138d DENTRO de software/ — .lake (7,4G) primado
+  por clone APFS copy-on-write (13s; build completo replayed em 7s,
+  1941 jobs) — depth-floor GREEN (extract=120, atom=158, close=6,
+  count=7, data_fate=0), inventory terminal, twins bound,
+  test_proof_vs_campaign ok, extracts 64 libs + 24 compose exit 0,
+  sorry 0 nos 8 wrappers da rodada; nota datada EXTRACT.md; RFC-0215
+  Status done; worktree removido.
+- Auditoria final round 9 (HEAD 0dff77c2): 1 teorema/commit em TODAS
+  as 16 promoções (compose P1.2 fora da régua por-átomo, veredito/
+  sweep = 0); NENHUM arquivo dela no range faeb1f98..0dff77c2;
+  admissions 3/3 verdes no HEAD (claim_media_durable_refused_after_
+  fsync_ok, forall_schedules_admitted_on_live_group_is_not_ok,
+  claim_lock_interleavings_refused_after_put — 1 passed cada);
+  depth-floor GREEN no HEAD; extracts --required exit 0 no HEAD.
+  Capturas {SCRATCH}/r0215_audit_{theorem_commit,head,admissions,
+  extracts}.txt + r0215_sweep_{depth,inventory,twin_contracts,
+  campaign,extracts,sorry}.txt + r0215_candidates.txt.
+- Sucessora 0dff77c2: RFC-0216 — superfície de parse HTTP no degrau
+  átomo. Medição ao vivo (candidates.py @ c130482e): TODOS os boards
+  zerados (script 0/17, compose 0/17, concorrência 0/5, scale 0/3,
+  produto 0, SA none, A/B/D/C vazios); leftover_next caiu no fallback
+  P1.5 (trampolim db.rs/concurrent.rs congelado — mesma non-goal);
+  cartoon 4 TODO em Montanha (skip). Restam 120 no extrato; o maior
+  bloco coerente é parse HTTP: cl ×4 (Cl.lean: keep_body_without_cl,
+  invalid_cl_as_zero, content_length_repeat_ok,
+  short_body_vs_cl_is_error) + fail_closed ×1 (FailClosed.lean:
+  parse_error_writes_status) + form ×7 (Form.lean) + path ×8
+  (Path.lean) = 20 pares → família http 27/27 em átomo, floor_atom
+  158→178, floor_extract 120→100.
+- PRÓXIMO ROUND: implementar 0216 P0.1 (cl ×4 ao átomo em Cl.lean).
+- Fronteira respeitada: arquivos sujos dela intactos
+  (caminho-sel4.md, serial-fillin10.log.prevstate, rfc0029 stdout.json,
+  __pycache__); nenhum stash tocado; diário NÃO commitado.
