@@ -272,16 +272,19 @@ def render(m: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
-def gate(m: dict[str, object]) -> int:
-    if not FLOORS.is_file():
-        print(f"GAP  sel4_gap: pisos não congelados ainda ({FLOORS.name} ausente) — RFC-0222 P1.2")
-        return 0
-    floors = json.loads(FLOORS.read_text(encoding="utf-8"))["floors"]
+def gate(m: dict[str, object], floors_path: Path = FLOORS) -> int:
+    if not floors_path.is_file():
+        print(f"GATE sel4_gap: FAIL — pisos ausentes ({floors_path}) — RFC-0222 P1.2")
+        return 1
+    floors = json.loads(floors_path.read_text(encoding="utf-8"))["floors"]
     bad = 0
     for key, floor in floors.items():
         live = m.get(key)
         if isinstance(live, (int, float)) and live < floor:
-            print(f"GATE sel4_gap: FAIL — {key}={live} < piso {floor} (regrediu; mover o piso exige prova no mesmo commit)")
+            print(
+                f"GATE sel4_gap: FAIL — {key}={live} < piso {floor} "
+                "(regrediu; mover o piso exige prova no mesmo commit)"
+            )
             bad += 1
         else:
             print(f"ok    sel4_gap: {key}={live} ≥ piso {floor}")
@@ -289,8 +292,41 @@ def gate(m: dict[str, object]) -> int:
     return 1 if bad else 0
 
 
+def selftest() -> int:
+    import tempfile
+
+    m = measure()
+    caught = 0
+    total = 2
+    missing = Path("/nonexistent/sel4_gap_floors.json")
+    if gate(m, missing) == 1:
+        print("SELFTEST sel4_gap: caught=missing-floors")
+        caught += 1
+    else:
+        print("SELFTEST sel4_gap: MISSED missing-floors")
+    high = dict(m)
+    # pick a numeric live key and demand more than live
+    key = "pairs_covered"
+    bogus = {"floors": {key: int(m[key]) + 1}}
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(bogus, f)
+        bogus_path = Path(f.name)
+    try:
+        if gate(m, bogus_path) == 1:
+            print("SELFTEST sel4_gap: caught=floor-above-live")
+            caught += 1
+        else:
+            print("SELFTEST sel4_gap: MISSED floor-above-live")
+    finally:
+        bogus_path.unlink(missing_ok=True)
+    print(f"SELFTEST sel4_gap: {caught}/{total} sabotages caught")
+    return 0 if caught == total else 1
+
+
 def main() -> int:
     args = sys.argv[1:]
+    if "--selftest" in args:
+        return selftest()
     m = measure()
     if "--gate" in args:
         return gate(m)

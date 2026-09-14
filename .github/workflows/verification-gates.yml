@@ -201,3 +201,18 @@ jobs:
           grep -q 'GATE proof-check-toolchains: GREEN' /tmp/pc1.log
           python3 scripts/check_proof_check_toolchains.py --selftest | tee /tmp/pcs.log
           grep -q 'SELFTEST proof-check-toolchains: 3/3 sabotages caught' /tmp/pcs.log
+
+  sel4-gap-floor:
+    name: RFC-0222 P1.2 sel4_gap --gate (never regress an axis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: gate (twice, logs identical) + selftest (2/2 redness)
+        run: |
+          python3 scripts/sel4_gap.py --gate | tee /tmp/sg1.log
+          python3 scripts/sel4_gap.py --gate | tee /tmp/sg2.log
+          cmp /tmp/sg1.log /tmp/sg2.log
+          grep -q 'GATE sel4_gap: GREEN' /tmp/sg1.log
+          python3 scripts/sel4_gap.py --selftest | tee /tmp/sgs.log
+          grep -q 'SELFTEST sel4_gap: 2/2 sabotages caught' /tmp/sgs.log
