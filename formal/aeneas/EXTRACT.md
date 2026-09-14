@@ -1,5 +1,12 @@
 # Aeneas extract + Lean theorems
 
+## ComposeWriter fence chain (RFC-0224 P0.2 / RFC-0220 P0.4, 2026-09-14)
+
+- Dual-unfold `wal_commit_plan_fate_iff` × `fence_admission_plan_fate_iff`.
+- `writer_fence_chain_iff` / `append_sync_fence_refuses_all_after` /
+  `writer_fence_as_is_admits`. `lake build ComposeWriter` 2× green, 0 sorry.
+- m2 40→41 (`fence_admission_plan` now chained).
+
 ## ComposeWriter sync chain (RFC-0224 P0.1 / RFC-0220 P0.3, 2026-09-14)
 
 - Dual-unfold `changelog_durable_commit_fate_fate_iff` × `wal_commit_plan_fate_iff`.

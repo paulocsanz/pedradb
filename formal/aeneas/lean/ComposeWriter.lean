@@ -2,6 +2,8 @@
 -- flusher_gate_plan × parked_debt_plan.
 -- RFC-0224 P0.1 / RFC-0220 P0.3 — changelog_durable_commit_fate ×
 -- wal_commit_plan (Count+sync ⇒ AppendSync; Skip async ⇒ AppendApplyOk).
+-- RFC-0224 P0.2 / RFC-0220 P0.4 — wal_commit_plan::AppendSyncFence ×
+-- fence_admission_plan (sync fail ⇒ RefuseFenced).
 --
 -- Sem worker (Workerless) NADA parqueia — inclusive com dívida no cap.
 -- O AS-IS diz WorkerDrains sempre (writer workerless dorme para sempre).
@@ -140,4 +142,56 @@ theorem writer_sync_as_is_never_counts_and_never_fences :
   · unfold changelog_durable_commit_fate_as_is
     rfl
   · unfold wal_commit_plan_as_is
+    rfl
+
+/-- RFC-0224 P0.2 / RFC-0220 P0.4: a cadeia do fence COMPOSTA — o plano
+    WAL é AppendSyncFence EXATAMENTE quando sync requerido falhou, e a
+    admissão é RefuseFenced EXATAMENTE com o fence armado. Dual-unfold
+    de `wal_commit_plan_fate_iff` × `fence_admission_plan_fate_iff`.
+    Corpos extraídos não abrem. -/
+theorem writer_fence_chain_iff :
+    ∀ (need_sync sync_failed fenced : Bool)
+      (w : WalCommitPlan) (a : FenceAdmission),
+      (wal_commit_plan need_sync sync_failed = ok w ∧
+          fence_admission_plan fenced = ok a) ↔
+        (((w = WalCommitPlan.AppendSyncFence ∧
+              need_sync = true ∧ sync_failed = true) ∨
+            (w = WalCommitPlan.AppendSyncApplyOk ∧
+              need_sync = true ∧ sync_failed = false) ∨
+            (w = WalCommitPlan.AppendApplyOk ∧ need_sync = false)) ∧
+          ((fenced = true ∧ a = FenceAdmission.RefuseFenced) ∨
+            (fenced = false ∧ a = FenceAdmission.AdmitOps))) := by
+  intro need_sync sync_failed fenced w a
+  constructor
+  · intro ⟨hw, ha⟩
+    exact ⟨(wal_commit_plan_fate_iff need_sync sync_failed w).mp hw,
+      (fence_admission_plan_fate_iff fenced a).mp ha⟩
+  · intro ⟨hw, ha⟩
+    exact ⟨(wal_commit_plan_fate_iff need_sync sync_failed w).mpr hw,
+      (fence_admission_plan_fate_iff fenced a).mpr ha⟩
+
+/-- Sync requerido falhou ⇒ WAL é AppendSyncFence e, com o fence armado,
+    a admissão recusa TUDO depois. -/
+theorem append_sync_fence_refuses_all_after :
+    ∀ (a : FenceAdmission),
+      (wal_commit_plan true true = ok WalCommitPlan.AppendSyncFence ∧
+          fence_admission_plan true = ok a) →
+        a = FenceAdmission.RefuseFenced := by
+  intro a h
+  have := (writer_fence_chain_iff true true true
+    WalCommitPlan.AppendSyncFence a).mp h
+  rcases this.2 with hrefuse | hadmit
+  · exact hrefuse.2
+  · cases hadmit.1
+
+/-- AS-IS dente composto: WAL nunca cerca (Apply/Ok no sync falho) e a
+    admissão admite mesmo com fence armado. -/
+theorem writer_fence_as_is_admits :
+    wal_commit_plan_as_is true true
+        = ok WalCommitPlan.AppendSyncApplyOk ∧
+      fence_admission_plan_as_is true = ok FenceAdmission.AdmitOps := by
+  constructor
+  · unfold wal_commit_plan_as_is
+    rfl
+  · unfold fence_admission_plan_as_is
     rfl
