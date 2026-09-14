@@ -1,6 +1,6 @@
 # RFC-0224: Depois do Piso Verde — a espinha do writer, os 7 átomos de recovery que faltam, e os quatro terminais que o seL4 pagou em anos
 
-**Status:** active (2026-09-14: P0.4 + P0.1 + P0.2 done — leftover I/O + sync + fence)
+**Status:** active (2026-09-14: P0 done — leftover I/O + writer-spine sync/fence/publish)
 **Updated:** 2026-09-14
 
 ## Background
@@ -56,7 +56,7 @@ m1 (`sel4_coverage`) não sobe por composição. Piso: **300/322 = 93,17%**.
 
 - [x] **P0.1** RFC-0220 P0.3: `changelog_durable_commit_fate` × `wal_commit_plan` (Count+sync ⇒ AppendSync; Skip async ⇒ AppendApplyOk) — dual-unfold, `lake build`, m2 sobe no mesmo commit — status: done (`ComposeWriter.lean`: `writer_sync_chain_iff` / `count_with_sync_requires_append_sync` / `skip_async_is_append_apply_ok`; lake 2× verde; m2 39→40)
 - [x] **P0.2** RFC-0220 P0.4: `wal_commit_plan::AppendSyncFence` × `fence_admission_plan` — status: done (`ComposeWriter.lean`: `writer_fence_chain_iff` / `append_sync_fence_refuses_all_after`; lake 2× verde; m2 40→41)
-- [ ] **P0.3** RFC-0220 P0.5: `manifest_publish_plan` × `changelog_durable_commit_fate` — status: `todo`
+- [x] **P0.3** RFC-0220 P0.5: `manifest_publish_plan` × `changelog_durable_commit_fate` — status: done (`ComposeWriter.lean`: `writer_publish_chain_iff` / `durable_and_counted_publishes` / `not_durable_holds_fail_closed`; lake 2× verde; m2 41→42)
 - [x] **P0.4** wiring: `db.rs` chama `leftover_page_advice` / `scan_readahead_window` no I/O que o kernel nomeia, ou recusa medida de que o I/O é outro (drop_page_cache ≠ leftover compaction) — status: done (`90bf4b64`; `leftover_drop_pages` → DontNeed; scan load → WillNeed; teste `scan_at_raw_calls_scan_readahead_window` 2× verde)
 
 ### P1 — recovery 4/11 → 11/11
@@ -77,7 +77,7 @@ m1 (`sel4_coverage`) não sobe por composição. Piso: **300/322 = 93,17%**.
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | writer-spine sync (fate × wal_commit) | done | ComposeWriter `writer_sync_chain_iff`; m2 39→40 | 2026-09-14 |
 | P0.2 | p0 | writer-spine fence | done | ComposeWriter `writer_fence_chain_iff`; m2 40→41 | 2026-09-14 |
-| P0.3 | p0 | writer-spine publish | todo | — | 2026-09-14 |
+| P0.3 | p0 | writer-spine publish | done | ComposeWriter `writer_publish_chain_iff`; m2 41→42 | 2026-09-14 |
 | P0.4 | p0 | wiring leftover_page / scan_readahead | done | `90bf4b64` | 2026-09-14 |
 | P1.1 | p1 | recovery atoms 4→11 chained | todo | — | 2026-09-14 |
 | P1.2 | p1 | floor recovery_atoms_chained=11 | todo | — | 2026-09-14 |

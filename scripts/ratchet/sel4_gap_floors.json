@@ -5,7 +5,7 @@
     "pairs_covered": 300,
     "pairs_total": 322,
     "atom_fns": 296,
-    "atom_fns_chained": 41,
+    "atom_fns_chained": 42,
     "recovery_atoms_chained": 4,
     "kernel_files_enrolled": 69,
     "kernel_pub_fns_on_surface": 868,

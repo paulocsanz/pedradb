@@ -1,5 +1,12 @@
 # Aeneas extract + Lean theorems
 
+## ComposeWriter publish chain (RFC-0224 P0.3 / RFC-0220 P0.5, 2026-09-14)
+
+- Dual-unfold `manifest_publish_plan_fate_iff` × `changelog_durable_commit_fate_fate_iff`.
+- `writer_publish_chain_iff` / `durable_and_counted_publishes` /
+  `not_durable_holds_fail_closed` / `writer_publish_as_is_publishes_unsynced`.
+- `lake build ComposeWriter` 2× green, 0 sorry. m2 41→42 (`manifest_publish_plan` now chained).
+
 ## ComposeWriter fence chain (RFC-0224 P0.2 / RFC-0220 P0.4, 2026-09-14)
 
 - Dual-unfold `wal_commit_plan_fate_iff` × `fence_admission_plan_fate_iff`.

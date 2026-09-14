@@ -4,6 +4,8 @@
 -- wal_commit_plan (Count+sync ⇒ AppendSync; Skip async ⇒ AppendApplyOk).
 -- RFC-0224 P0.2 / RFC-0220 P0.4 — wal_commit_plan::AppendSyncFence ×
 -- fence_admission_plan (sync fail ⇒ RefuseFenced).
+-- RFC-0224 P0.3 / RFC-0220 P0.5 — manifest_publish_plan ×
+-- changelog_durable_commit_fate (SST durável + Count ⇒ publica).
 --
 -- Sem worker (Workerless) NADA parqueia — inclusive com dívida no cap.
 -- O AS-IS diz WorkerDrains sempre (writer workerless dorme para sempre).
@@ -194,4 +196,77 @@ theorem writer_fence_as_is_admits :
   · unfold wal_commit_plan_as_is
     rfl
   · unfold fence_admission_plan_as_is
+    rfl
+
+/-- RFC-0224 P0.3 / RFC-0220 P0.5: a cadeia da publicação COMPOSTA — o
+    manifesto publica EXATAMENTE com SST durável, e o changelog Count
+    EXATAMENTE na resolução de sync. Dual-unfold de
+    `manifest_publish_plan_fate_iff` × `changelog_durable_commit_fate_fate_iff`.
+    Corpos extraídos não abrem. -/
+theorem writer_publish_chain_iff :
+    ∀ (sst_durable client_set client_sync db_sync : Bool)
+      (p : ManifestPublishPlan) (c : ChangelogCommitFate),
+      (manifest_publish_plan sst_durable = ok p ∧
+          changelog_durable_commit_fate client_set client_sync db_sync = ok c) ↔
+        (((sst_durable = true ∧
+              p = ManifestPublishPlan.PublishManifest) ∨
+            (sst_durable = false ∧
+              p = ManifestPublishPlan.HoldUnsyncedFailClosed)) ∧
+          ((client_set = true ∧ client_sync = true ∧
+              c = ChangelogCommitFate.Count) ∨
+            (client_set = true ∧ client_sync = false ∧
+              c = ChangelogCommitFate.Skip) ∨
+            (client_set = false ∧ db_sync = true ∧
+              c = ChangelogCommitFate.Count) ∨
+            (client_set = false ∧ db_sync = false ∧
+              c = ChangelogCommitFate.Skip))) := by
+  intro sst_durable client_set client_sync db_sync p c
+  constructor
+  · intro ⟨hp, hc⟩
+    exact ⟨(manifest_publish_plan_fate_iff sst_durable p).mp hp,
+      (changelog_durable_commit_fate_fate_iff
+        client_set client_sync db_sync c).mp hc⟩
+  · intro ⟨hp, hc⟩
+    exact ⟨(manifest_publish_plan_fate_iff sst_durable p).mpr hp,
+      (changelog_durable_commit_fate_fate_iff
+        client_set client_sync db_sync c).mpr hc⟩
+
+/-- SST durável + commit contado ⇒ publica o manifesto. -/
+theorem durable_and_counted_publishes :
+    ∀ (client_set client_sync db_sync : Bool)
+      (p : ManifestPublishPlan) (c : ChangelogCommitFate),
+      (manifest_publish_plan true = ok p ∧
+          changelog_durable_commit_fate client_set client_sync db_sync = ok c) →
+        c = ChangelogCommitFate.Count →
+        p = ManifestPublishPlan.PublishManifest := by
+  intro client_set client_sync db_sync p c h hc
+  have := (writer_publish_chain_iff true client_set client_sync db_sync p c).mp h
+  rcases this.1 with hpub | hhold
+  · exact hpub.2
+  · cases hhold.1
+
+/-- SST não durável ⇒ hold fail-closed (não publica). -/
+theorem not_durable_holds_fail_closed :
+    ∀ (client_set client_sync db_sync : Bool)
+      (p : ManifestPublishPlan) (c : ChangelogCommitFate),
+      (manifest_publish_plan false = ok p ∧
+          changelog_durable_commit_fate client_set client_sync db_sync = ok c) →
+        p = ManifestPublishPlan.HoldUnsyncedFailClosed := by
+  intro client_set client_sync db_sync p c h
+  have := (writer_publish_chain_iff false client_set client_sync db_sync p c).mp h
+  rcases this.1 with hpub | hhold
+  · cases hpub.1
+  · exact hhold.2
+
+/-- AS-IS dente composto: publica mesmo com SST unsynced, e o changelog
+    nunca conta. -/
+theorem writer_publish_as_is_publishes_unsynced :
+    manifest_publish_plan_as_is false
+        = ok ManifestPublishPlan.PublishManifest ∧
+      changelog_durable_commit_fate_as_is true true true
+        = ok ChangelogCommitFate.Skip := by
+  constructor
+  · unfold manifest_publish_plan_as_is
+    rfl
+  · unfold changelog_durable_commit_fate_as_is
     rfl

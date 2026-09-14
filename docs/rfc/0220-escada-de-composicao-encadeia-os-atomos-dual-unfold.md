@@ -79,9 +79,9 @@ Métricas registradas (ambas datadas, monotônicas):
 - [x] **P0.4** cadeia do fence — `wal_commit_plan::AppendSyncFence` ×
   `fence_admission_plan` (sync requerido falhou ⇒ cerca recusa TUDO
   depois; as-is admite) — status: done (RFC-0224 P0.2, 2026-09-14)
-- [ ] **P0.5** cadeia da publicação — `manifest_publish_plan` ×
+- [x] **P0.5** cadeia da publicação — `manifest_publish_plan` ×
   `changelog_durable_commit_fate` (SST durável + commit contado ⇒
-  publica; hold fail-closed senão) — status: `todo`
+  publica; hold fail-closed senão) — status: done (RFC-0224 P0.3, 2026-09-14)
 - [ ] **P0.6** sweep P0 em worktree + nota datada em
   `formal/aeneas/EXTRACT.md` — status: `todo`
 
@@ -121,7 +121,7 @@ Métricas registradas (ambas datadas, monotônicas):
 | P0.2 | p0 | cadeia workerless (flusher_gate × parked_debt) | done | RFC-0222 P2.1 | 2026-09-14 |
 | P0.3 | p0 | cadeia do sync (fate × wal_commit_plan) | done | RFC-0224 P0.1 | 2026-09-14 |
 | P0.4 | p0 | cadeia do fence (wal_commit × fence_admission) | done | RFC-0224 P0.2 | 2026-09-14 |
-| P0.5 | p0 | cadeia da publicação (manifest_publish × fate) | todo | — | 2026-09-13 |
+| P0.5 | p0 | cadeia da publicação (manifest_publish × fate) | done | RFC-0224 P0.3 | 2026-09-14 |
 | P0.6 | p0 | sweep P0 + EXTRACT.md | todo | — | 2026-09-13 |
 | P1.1 | p1 | espinha auto-flush ×3 | todo | — | 2026-09-13 |
 | P1.2 | p1 | espinha OCC/lookup + N-way | todo | — | 2026-09-13 |
