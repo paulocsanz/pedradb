@@ -10288,7 +10288,7 @@ impl<E: Env> Db<E> {
         let (op, seq) = self.encode_async_one(&mut w, batch)?;
         let st = self.phase_stats.clone();
         let t1 = st.as_ref().map(|_| Instant::now());
-        w.write_pending_frame()?;
+        w.write_pending_frame_lone()?;
         if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
             st.wal_ns
                 .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);

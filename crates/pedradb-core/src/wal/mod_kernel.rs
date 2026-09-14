@@ -22,18 +22,19 @@ fn walfd_diag_enabled() -> bool {
     *ENABLED.get_or_init(|| std::env::var_os("PEDRA_FDSYNC_DIAG").is_some())
 }
 
-/// RFC-0209 P0.2: staging cap for the WAL user-space buffer, from the
-/// opt-in env. `0` = disabled (default — the pre-0209 one-write-per-frame
-/// path). Read per segment construction (open + rotation), never cached:
-/// segment opens are rare and tests flip the env between writers.
+/// RFC-0209: staging cap. Default **on** (64 KiB, Rocks WritableFile).
+/// `PEDRA_WAL_BUFFER=0`/`false` restores one-write-per-frame. Lone
+/// writers still drain every frame (`write_pending_frame_lone`) so 1c
+/// does not wait for the cap (p209b regression). Read per segment
+/// construction, never cached.
 fn wal_staged_max() -> u64 {
-    if std::env::var_os("PEDRA_WAL_BUFFER").is_none() {
-        return 0;
+    match std::env::var("PEDRA_WAL_BUFFER") {
+        Ok(s) if s == "0" || s.eq_ignore_ascii_case("false") => 0,
+        _ => std::env::var_os("PEDRA_WAL_BUF_MAX")
+            .and_then(|v| v.to_str().and_then(|s| s.parse::<u64>().ok()))
+            .filter(|&v| v > 0)
+            .unwrap_or(crate::wal_buffer_kernel::WAL_BUF_MAX_DEFAULT_BYTES),
     }
-    std::env::var_os("PEDRA_WAL_BUF_MAX")
-        .and_then(|v| v.to_str().and_then(|s| s.parse::<u64>().ok()))
-        .filter(|&v| v > 0)
-        .unwrap_or(crate::wal_buffer_kernel::WAL_BUF_MAX_DEFAULT_BYTES)
 }
 use crate::error::{CoreError, Result};
 
@@ -237,6 +238,17 @@ impl<F: EnvFile> Wal<F> {
     /// # Errors
     /// Underlying file write.
     pub fn write_pending_frame(&mut self) -> Result<()> {
+        self.write_pending_inner(false)
+    }
+
+    /// Lone/1c path: stage then **drain** so each Ok is a kernel `write()`
+    /// (Rocks `FlushWAL` per `Write()`). Group path uses
+    /// [`Self::write_pending_frame`] and only flushes at the 64 KiB cap.
+    pub fn write_pending_frame_lone(&mut self) -> Result<()> {
+        self.write_pending_inner(true)
+    }
+
+    fn write_pending_inner(&mut self, lone_writer: bool) -> Result<()> {
         let mut frame = self.writer.take_frame();
         if crate::write_admission_kernel::batch_is_empty(frame.len() as u64) {
             self.writer.restore_frame(frame);
@@ -246,7 +258,11 @@ impl<F: EnvFile> Wal<F> {
         let r = self.writer.write_frame(&frame);
         frame.clear();
         self.writer.restore_frame(frame);
-        r
+        r?;
+        if lone_writer {
+            self.writer.drain_staged()?;
+        }
+        Ok(())
     }
 
     /// Keep [`WAL_PREALLOC_CHUNK`] of storage reserved ahead of the append
@@ -511,16 +527,12 @@ mod probe_tests {
         dir
     }
 
-    /// RFC-0209 P0.2 default-off: without `PEDRA_WAL_BUFFER` the
-    /// one-write-per-frame path is unchanged — every `write_pending_frame`
-    /// lands in the file immediately, so a crash-shaped reader sees each
-    /// acked record with no drain call and the logical size tracks the
-    /// append point at every step (AS-IS twin at the real-file level).
+    /// RFC-0209: `PEDRA_WAL_BUFFER=0` restores one-write-per-frame.
     #[test]
     fn rfc0209_staging_disabled_without_env() {
         let _env_axis = RFC0209_ENV_AXIS.lock().unwrap_or_else(|e| e.into_inner());
         let _restore = Rfc0209EnvGuard;
-        std::env::remove_var("PEDRA_WAL_BUFFER");
+        std::env::set_var("PEDRA_WAL_BUFFER", "0");
         std::env::remove_var("PEDRA_WAL_BUF_MAX");
 
         let dir = rfc0209_dir("nostage");
@@ -534,6 +546,47 @@ mod probe_tests {
             assert_eq!(recs.len(), seq as usize, "AS-IS: each frame lands immediately");
             assert!(end > 0);
             assert_eq!(StdEnv.metadata_len(&path).unwrap(), w.stream_position().unwrap());
+        }
+        drop(w);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Default ON: group frames stay in user-space below the 64 KiB cap.
+    #[test]
+    fn rfc0209_default_stages_group_frames() {
+        let _env_axis = RFC0209_ENV_AXIS.lock().unwrap_or_else(|e| e.into_inner());
+        let _restore = Rfc0209EnvGuard;
+        std::env::remove_var("PEDRA_WAL_BUFFER");
+        std::env::remove_var("PEDRA_WAL_BUF_MAX");
+        let dir = rfc0209_dir("default-stage");
+        let path = dir.join("wal.log");
+        let mut w = Wal::create(&path).unwrap();
+        for seq in 1..=4u64 {
+            let ops = rfc0209_put(seq);
+            w.encode_write_op_batches(&[ops.as_slice()]).unwrap();
+            w.write_pending_frame().unwrap();
+        }
+        let (recs, _, _) = Wal::recover_span_on(&StdEnv, &path).unwrap();
+        assert_eq!(recs.len(), 0, "default group path stages below 64KiB");
+        drop(w);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Lone path drains even with default staging (1c = FlushWAL per Write).
+    #[test]
+    fn rfc0209_lone_drains_under_default_staging() {
+        let _env_axis = RFC0209_ENV_AXIS.lock().unwrap_or_else(|e| e.into_inner());
+        let _restore = Rfc0209EnvGuard;
+        std::env::remove_var("PEDRA_WAL_BUFFER");
+        let dir = rfc0209_dir("lone-drain");
+        let path = dir.join("wal.log");
+        let mut w = Wal::create(&path).unwrap();
+        for seq in 1..=3u64 {
+            let ops = rfc0209_put(seq);
+            w.encode_write_op_batches(&[ops.as_slice()]).unwrap();
+            w.write_pending_frame_lone().unwrap();
+            let (recs, _, _) = Wal::recover_span_on(&StdEnv, &path).unwrap();
+            assert_eq!(recs.len(), seq as usize, "lone Ok is a kernel write");
         }
         drop(w);
         let _ = std::fs::remove_dir_all(&dir);
@@ -618,7 +671,7 @@ mod probe_tests {
 
         let dir_plain = rfc0209_dir("ident-plain");
         let path_plain = dir_plain.join("wal.log");
-        std::env::remove_var("PEDRA_WAL_BUFFER");
+        std::env::set_var("PEDRA_WAL_BUFFER", "0");
         std::env::remove_var("PEDRA_WAL_BUF_MAX");
         {
             let mut w = Wal::create(&path_plain).unwrap();

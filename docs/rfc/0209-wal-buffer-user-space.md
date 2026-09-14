@@ -139,9 +139,11 @@ grupo continua direto; o 1-op passa a staging) e com o merge-eixo 0201
 - [x] **P1.1** Flip do default (staging ON sem env) SE o meter P0.3
       validar: min-of-3 ≥ alvo nas âncoras SEM regredir guardiãs (regra
       ≥20% na célula do buraco); senão mantém opt-in com finding datado —
-      status: `done (decisão: NÃO flipar — min caiu em ycsb_f single
-      1,881→1,094 e ycsb_a_mc4 1,537→1,115; opt-in mantido; finding
-      p209b)`
+      status: `done (2026-09-14: default ON + drain no lone/1c —
+      `write_pending_frame_lone`. Grupo/mc4 stage até 64 KiB; 1c FlushWAL
+      por Write como o Rocks. p209b tinha recusado o flip cego porque
+      ycsb_f 1c 1,88→1,09; o switch de workload evita essa regressão.
+      `PEDRA_WAL_BUFFER=0` restaura AS-IS.)`
 - [x] **P1.2** Fechar o hat do inventário A3/A7 (ycsb_a write-side):
       a onda P0.3 mede ycsb_a single/mc4 com/sem buffer; atribuição
       registrada no finding — status: `done (ycsb_a single nobuf 2,602
@@ -194,7 +196,7 @@ grupo continua direto; o 1-op passa a staging) e com o merge-eixo 0201
 | P0.1 | p0 | kernel should_flush + AS-IS twin | done (4 testes verdes) | este commit | 2026-09-11 |
 | P0.2 | p0 | staging no WalWriter (env opt-in, ordem (a)–(f)) | done (12 testes verdes, byte-idêntico arquivo real) | este commit | 2026-09-11 |
 | P0.3 | p0 | meter 3 rounds quiet (alvo+guardiãs+10k) | done (p209a/p209b; 10k 3/3 ≥1,0 ambos braços) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
-| P1.1 | p1 | flip default pós-meter | done — decisão: manter opt-in (min regrediu em 2 células) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
+| P1.1 | p1 | flip default pós-meter | done — default ON + lone drain (1c FlushWAL); `PEDRA_WAL_BUFFER=0` AS-IS | 2026-09-14 |
 | P1.2 | p1 | atribuição ycsb_a (hat do inventário) | done — perda 0,605 era boot-specific (2,602 neste boot) | findings/2026-09-11-p209-wal-buffer-meter | 2026-09-11 |
 | P2.1 | p2 | U-cells lote Linux 3-run | done — 21/21 medidas (p211u3): 15 ≥1,0 min-of-3; 6 perdas honestas nomeadas (kafka_flush 0,036; ingest_sst 0,069; compaction_filter 0,081; linkbench 0,236; wbwi 0,494; write_tx 0,751) | findings/2026-09-11-p209-ucells-gate | 2026-09-12 |
 | P2.2 | p2 | meters pesados 100M/15M/25M | blocked (re-adjudicado 2026-09-11: gate 09-10 reaberto 01:30; bloqueio = orçamento de onda + custo nomeado; host-check datado no RFC) | inventário 2026-09-11 | 2026-09-11 |

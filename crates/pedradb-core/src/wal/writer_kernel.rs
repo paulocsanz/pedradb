@@ -89,7 +89,7 @@ impl<W: Write + Seek> WalWriter<W> {
     /// the file order is always the logical (seq) order. On a sink error
     /// the bytes return to the buffer — a failed drain is retryable, like
     /// the direct write path whose frame the caller still holds.
-    fn drain_staged(&mut self) -> Result<()> {
+    pub(crate) fn drain_staged(&mut self) -> Result<()> {
         let buf = match self.staged.as_mut() {
             Some(st) if !st.buf.is_empty() => std::mem::take(&mut st.buf),
             _ => return Ok(()),
