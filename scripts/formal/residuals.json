@@ -77,16 +77,17 @@
       "crates/pedradb-store/src/t1_modelo_kernel.rs",
       "crates/pedradb-raft/src/c1_modelo_kernel.rs",
       "crates/pedradb-world/src/world_kernel.rs",
-      "crates/pedradb-core/src/client_axis_kernel.rs"
+      "crates/pedradb-core/src/client_axis_kernel.rs",
+      "crates/pedradb-core/src/group_window_kernel.rs"
     ],
     "kernel_files": 69,
-    "kernel_loc": 28611,
+    "kernel_loc": 28626,
     "handler_loc": 116993,
     "db_rs_extracted": false,
     "proof_depth": {
       "extract": 20,
       "close": 4,
-      "atom": 288,
+      "atom": 290,
       "model": 2,
       "count": 7
     },
@@ -147,6 +148,13 @@
       "crates/pedradb-core/src/client_axis_kernel.rs": [
         "drain_convoy_count",
         "oversubscription_spin_policy"
+      ],
+      "crates/pedradb-core/src/group_window_kernel.rs": [
+        "group_window_us",
+        "async_catchup_bound_us",
+        "collect_should_break",
+        "peer_horizon_us",
+        "group_window_cap_to_flight"
       ]
     },
     "single_artifact": 305,

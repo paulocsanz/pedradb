@@ -514,3 +514,9 @@ name = "ClientAxisKernel"
 
 [[lean_lib]]
 name = "ClientAxis"
+
+[[lean_lib]]
+name = "GroupWindowKernel"
+
+[[lean_lib]]
+name = "GroupWindow"

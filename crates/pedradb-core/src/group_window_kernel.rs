@@ -171,6 +171,21 @@ pub fn async_catchup_bound_us_as_is(
 mod tests {
     use super::*;
 
+    /// RFC-0222 P0.7: production concurrent.rs calls the kernel, not an
+    /// inlined window predicate.
+    #[test]
+    fn concurrent_calls_group_window_kernel() {
+        let body = include_str!("concurrent.rs");
+        assert!(
+            body.contains("group_window_kernel::merge_eligible("),
+            "submit path must call merge_eligible"
+        );
+        assert!(
+            body.contains("group_window_kernel::flight_capped_window_us("),
+            "effective window must call flight_capped_window_us"
+        );
+    }
+
     #[test]
     fn rfc0217_group_window_env_parse_off_by_default() {
         assert_eq!(group_window_us(None), 0);

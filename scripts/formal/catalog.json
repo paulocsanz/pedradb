@@ -8813,6 +8813,51 @@
         "date": "2026-09-14",
         "why": "RFC-0222 P0.7 enrollment: async_merge_policy merges iff env pin or writers>ncpu (ncpu=0 never). AS-IS is env-pin only. Fate forall over the extracted body (ClientAxis.lean). Production submit path calls it."
       }
+    },
+    {
+      "id": "merge_eligible",
+      "finding": "RFC-0217 P0.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_window_kernel.rs",
+      "aeneas": "scripts/aeneas_group_window.sh",
+      "callers": [
+        "crates/pedradb-core/src/concurrent.rs"
+      ],
+      "entry": "merge_eligible",
+      "as_is": "merge_eligible_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_window_kernel.rs",
+        "test": "rfc0217_group_window_merge_eligibility_boundary"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: merge_eligible is window_us>0 AND (writers>=2 OR peers_recent); AS-IS always false (RFC-0044 bypass). Fate forall over the extracted body (GroupWindow.lean). Production submit path calls it."
+      }
+    },
+    {
+      "id": "flight_capped_window_us",
+      "finding": "RFC-0217 P0.4",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_window_kernel.rs",
+      "aeneas": "scripts/aeneas_group_window.sh",
+      "callers": [
+        "crates/pedradb-core/src/concurrent.rs"
+      ],
+      "entry": "flight_capped_window_us",
+      "three_teeth": false,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_window_kernel.rs",
+        "test": "rfc0217_p04_window_never_exceeds_flight"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: flight_capped_window_us is min(window, flight-or-seed) collapsing below one quiescence slice when cap_to_flight; else the flat window. Fate forall over the extracted body (GroupWindow.lean). Production effective_group_window_us calls it."
+      }
     }
   ],
   "clones": [

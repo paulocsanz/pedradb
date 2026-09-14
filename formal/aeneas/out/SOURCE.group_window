@@ -1,0 +1,4 @@
+path=crates/pedradb-core/src/group_window_kernel.rs
+sha256=5ec486d6088268f56823d9b0fe7cb3fb72943999f495c39c18a4f1aa75ecf7bb
+aeneas=daa85d7
+charon=0.1.232

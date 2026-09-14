@@ -14,6 +14,18 @@
   `.partialOrdInst.lt` (same class as txn/c1_modelo) — `drain_convoy_count`.
 - Lean 4.31.0 accepted (no `sorry` in `ClientAxis.lean`).
 
+## GroupWindow (`group_window_kernel.rs`, RFC-0222 P0.7 2026-09-14)
+
+- `[lib] path` = production `crates/pedradb-core/src/group_window_kernel.rs`.
+- Charon `0.1.232` + Aeneas `daa85d7` → `out/lean/GroupWindowKernel.lean`.
+- Pairs `merge_eligible` and `flight_capped_window_us` are single_artifact:
+  production `concurrent.rs` calls the rustc body; Lean unfolds that body
+  (`merge_eligible_fate_iff`, `flight_capped_window_us_fate_iff`).
+- Generated `Ord.max.default` U64 patched to `.partialOrdInst.lt` (`peer_horizon_us`).
+- `group_window_us` / `group_window_cap_to_flight` extract via `Str.parse`
+  axioms (env parse — not the ∀ pairs).
+- Lean 4.31.0 accepted (no `sorry` in `GroupWindow.lean`).
+
 ## Vote (`vote_kernel.rs`)
 
 - Charon `0.1.232` + Aeneas `daa85d7` → `out/lean/VoteKernel.lean`. Pairs `durable_term`, `grant_persist`, and `vote` are single_artifact: production file is the Verus term.

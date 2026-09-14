@@ -11,7 +11,7 @@ sustenta. Uma linha só sobe de camada (`experimento → teorema`) com o
 gate da camada de destino verde no mesmo commit (three-teeth ou
 enumeração completa); nunca por reescrita de ledger.
 
-<!-- ledger-catalog: total=314 proof=288 campaign=26 absent=0 single_artifact=307 aeneas_scripts=250 clones=7 models=34 -->
+<!-- ledger-catalog: total=316 proof=290 campaign=26 absent=0 single_artifact=309 aeneas_scripts=252 clones=7 models=34 -->
 
 ## Teorema — ∀ sobre código/modelo (machine-checked ou enumeração completa)
 
@@ -158,6 +158,12 @@ entra no catálogo (`pipeline_drain_cap`, `async_merge_policy` — produção
 `pipeline_drain_cap_fate_iff` / `async_merge_policy_fate_iff` em
 ClientAxis.lean). total 312→314, proof 286→288, single_artifact 305→307,
 aeneas_scripts 248→250.
+
+Enrollment 2026-09-14 (RFC-0222 P0.7, 2/8): `group_window_kernel.rs`
+(`merge_eligible`, `flight_capped_window_us` — produção `concurrent.rs`
+já chamava; extract `aeneas_group_window.sh`, teoremas em
+GroupWindow.lean). total 314→316, proof 288→290, single_artifact 307→309,
+aeneas_scripts 250→252.
 
 ## TCB — axiomas nomeados (fora de prova, por decisão registrada)
 
