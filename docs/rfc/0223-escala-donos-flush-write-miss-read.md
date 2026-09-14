@@ -87,16 +87,18 @@
 
 ### P1 — next wave (ataque condicionado ao P0)
 
-- [ ] **P1.1** ataque ao dono do `flush_check` — DECIDIDO pelo split
+- [x] **P1.1** ataque ao dono do `flush_check` — DECIDIDO pelo split
   P0.3: é **work** (99,85%; gate 58ns/commit não paga otimização).
-  Diagnóstico rev.2 (arqueologia pós-split): o I/O de SST **já é
-  off-commit** (bench abre por `open_cf` → `defer_auto_compact(true)` +
-  compact/flush workers); o custo in-commit é o **`take_family`** —
-  partição da memtable por família O(n) sob a write-lock (ramo
-  physical-CF do `maybe_auto_flush`). Ataque: quando a família que
-  venceu o gate **domina** a memtable, estacionar a memtable inteira
-  O(1) (`stage_flush_imm`) em vez de parti-la in-commit; `take_family`
-  fica para famílias pequenas — status: `todo`
+  Diagnóstico rev.2: I/O de SST já é off-commit; custo in-commit =
+  `take_family` O(n) sob write-lock. **Código landed**: kernel
+  `dominant_family_stage_plan` (fam ≥ 3/4 do total ⇒ `StageWholeMem`
+  O(1) via `stage_flush_imm`; abaixo ⇒ `PartitionFamily`; AS-IS
+  sempre partição; imm ocupado cai na partição). Integração no ramo
+  defer de `maybe_auto_flush`; testes
+  `dominant_family_stage_plan_on_live_dominant_stages` +
+  `rfc0223_dominant_family_stages_whole_mem`. Re-meter DIAG
+  write-at-scale (WRITEPHASE `flush_work_ms` deve colapsar) e
+  cartaz = e4b. — status: `done (código)`
 - [ ] **P1.2** `probe_miss` re-meter oficial no gate com bloom real
   (RFC-0160 P1.6 in-tree); se <1,0 persistir, fatia de tuning de bloom
   datada no mesmo commit do finding — status: `todo` (blocked: gate)
@@ -118,7 +120,7 @@
 | P0.2 | p0 | mc50 simetria A/B 256×64 (pipeline local) | done (DIAG: não é artefato) | `p26r3b-mc50x` ×7 intercalado | 2026-09-13 |
 | P0.3 | p0 | split flush gate×work @10M | done (DIAG) | `7f2758d4` + `p26r3`: work 99,85%, gate 58ns/commit | 2026-09-13 |
 | P0.4 | p0 | e4b gate 3-run | todo | blocked p211z | 2026-09-13 |
-| P1.1 | p1 | flush fora do commit (worker bounded) | todo | decidido pelo P0.3 (work, não gate) | 2026-09-13 |
+| P1.1 | p1 | dominant family O(1) stage (`take_family` fora do commit) | done (código) | kernel `dominant_family_stage_plan` + `maybe_auto_flush`; DIAG re-meter / cartaz = e4b | 2026-09-14 |
 | P1.2 | p1 | probe_miss re-meter oficial (bloom real) | todo | blocked gate | 2026-09-13 |
 | P2.1 | p2 | SstCountCursor lazy-first-block | todo | condição cumprida (rev.3: tables/op constantes) | 2026-09-13 |
 | P2.2 | p2 | miss-path vs fjall oficial | todo | — | 2026-09-13 |

@@ -11071,6 +11071,21 @@ impl<E: Env> Db<E> {
                 }
                 let fam = self.physical_cfs[i].clone();
                 if self.defer_auto_compact {
+                    // RFC-0223 P1.1: a dominant due family stages the WHOLE
+                    // table (O(1) swap) instead of the O(n) `take_family`
+                    // partition under this lock — the worker parks imm and
+                    // `write_imm_l0_files` splits per family at materialize.
+                    // Falls through to the partition when imm is occupied
+                    // (worker behind) or the family is small.
+                    let fam_bytes = self.mem.approx_memory_usage_cf(&fam) as u64;
+                    let total_bytes = self.mem.approx_memory_usage() as u64;
+                    if crate::flush_kernel::dominant_family_stage_plan(fam_bytes, total_bytes)
+                        == crate::flush_kernel::FamilyFlushMode::StageWholeMem
+                        && self.stage_flush_imm().unwrap_or(false)
+                    {
+                        did_work = true;
+                        continue;
+                    }
                     let taken = self.mem.take_family(&fam);
                     if !crate::write_admission_kernel::batch_is_empty(taken.len() as u64) {
                         self.push_parked_unflushed(taken);
@@ -16094,6 +16109,83 @@ mod tests {
         assert_eq!(lock_sst, 0, "lock must stay in mem");
         assert!(default_sst >= 1, "default should have auto-flushed");
         assert_eq!(db.get(b"lock\0k").as_deref(), Some(b"L".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Seed one CF into the live memtable, bypassing `put` (which parks a
+    /// leftover family via `maybe_park_foreign_one_slash` on prefix switch
+    /// and auto-flushes per commit — both hide the gate under test).
+    fn seed_cf_mem(db: &mut Db, family: &str, n: u32, val_len: usize, seq0: u64) {
+        let mut k = Vec::with_capacity(family.len() + 5);
+        k.extend_from_slice(family.as_bytes());
+        k.push(0);
+        k.extend_from_slice(&[0u8; 4]);
+        let val = vec![b'x'; val_len];
+        for i in 0..n {
+            let off = family.len() + 1;
+            k[off..].copy_from_slice(&i.to_be_bytes());
+            db.mem.insert(
+                InternalKey::new(k.clone(), seq0 + i as u64, ValueType::Value),
+                bytes::Bytes::from(val.clone()),
+            );
+        }
+    }
+
+    /// RFC-0223 P1.1: under `defer_auto_compact` a DOMINANT due family
+    /// stages the whole memtable (O(1) swap) instead of partitioning
+    /// in-commit; a small due family still partitions, and a blocked imm
+    /// slot falls back to the partition.
+    #[test]
+    fn rfc0223_dominant_family_stages_whole_mem() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                auto_flush_bytes: None,
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["default".into(), "lock".into()]);
+        db.set_defer_auto_compact(true);
+        db.set_cf_write_buffer("default", 1024 * 1024);
+        db.set_cf_write_buffer("lock", 64 * 1024);
+
+        // default ~300 KiB (under 1 MiB) + lock ~70 KiB (over 64 KiB) —
+        // lock is due but < 3/4 of total ⇒ partition.
+        seed_cf_mem(&mut db, "default", 300, 1024, 1);
+        seed_cf_mem(&mut db, "lock", 70, 1024, 1000);
+        assert!(
+            (db.mem.approx_memory_usage_cf("lock") as u64) * 4
+                < (db.mem.approx_memory_usage() as u64) * 3,
+            "lock must be the small family"
+        );
+        assert!(db.maybe_auto_flush().unwrap());
+        assert!(!db.has_imm(), "small family must partition, not stage");
+        assert_eq!(db.parked_unflushed_count(), 1);
+        assert!(
+            db.mem.approx_memory_usage_cf("default") > 0,
+            "default stays in active mem"
+        );
+        assert_eq!(db.mem.approx_memory_usage_cf("lock"), 0);
+
+        // Dominant default: grow it over 1 MiB, lock stays empty.
+        seed_cf_mem(&mut db, "default", 20, 64 * 1024, 2000);
+        assert!(
+            db.mem.approx_memory_usage_cf("default") as u64 * 4
+                >= db.mem.approx_memory_usage() as u64 * 3
+        );
+        assert!(db.maybe_auto_flush().unwrap());
+        assert!(db.has_imm(), "dominant family must stage the whole mem");
+        assert_eq!(db.parked_unflushed_count(), 1, "stage adds no parked table");
+        assert_eq!(db.mem.len(), 0, "active mem swapped into imm");
+
+        // Imm slot busy + dominant family due again: falls back to partition.
+        seed_cf_mem(&mut db, "default", 20, 64 * 1024, 3000);
+        assert!(db.maybe_auto_flush().unwrap());
+        assert_eq!(db.parked_unflushed_count(), 2, "blocked imm partitions");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

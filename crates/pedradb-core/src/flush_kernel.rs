@@ -217,6 +217,52 @@ pub fn cf_flush_plan_as_is(_mem_bytes: u64, _limit: u64) -> CfFlushPlan {
 }
 
 #[cfg(not(verus_keep_ghost))]
+/// RFC-0223 P1.1: how a due family leaves the commit path under
+/// `defer_auto_compact`. The O(n) per-family partition
+/// (`MemTable::take_family`) under the write lock was the whole
+/// in-commit "flush work" @10M (split `7f2758d4`: work 99,85%, gate
+/// 58ns/commit) — staging the whole table is the O(1) swap the global
+/// branch already uses, and `write_imm_l0_files` splits parked tables
+/// per family at materialize time anyway.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FamilyFlushMode {
+    /// The due family dominates the memtable: swap the whole table to
+    /// `imm` (O(1) in-commit); the host worker parks and materializes
+    /// per-family L0 files.
+    StageWholeMem,
+    /// Small family (e.g. `lock`): partition it out in-commit; the rest
+    /// of the table keeps accumulating.
+    PartitionFamily,
+}
+
+/// `fam_bytes/total_bytes >= 3/4` — the dominant-family bar. Below it a
+/// whole-mem stage would flush too many not-due bytes to be worth the
+/// earlier commit return.
+pub const DOMINANT_FAMILY_NUM: u64 = 3;
+pub const DOMINANT_FAMILY_DEN: u64 = 4;
+
+#[cfg(not(verus_keep_ghost))]
+/// Stage the WHOLE memtable EXACTLY when the due family dominates it
+/// (≥ 3/4 of usage): in-commit cost becomes the O(1) swap, the O(n)
+/// partition moves to the worker's materialize pass.
+#[must_use]
+pub fn dominant_family_stage_plan(fam_bytes: u64, total_bytes: u64) -> FamilyFlushMode {
+    if fam_bytes * DOMINANT_FAMILY_DEN >= total_bytes * DOMINANT_FAMILY_NUM {
+        FamilyFlushMode::StageWholeMem
+    } else {
+        FamilyFlushMode::PartitionFamily
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: always partitions the family out in-commit (the O(n)
+/// `take_family` under the write lock — dente).
+#[must_use]
+pub fn dominant_family_stage_plan_as_is(_fam_bytes: u64, _total_bytes: u64) -> FamilyFlushMode {
+    FamilyFlushMode::PartitionFamily
+}
+
+#[cfg(not(verus_keep_ghost))]
 /// RFC-0219 P2.2: which flush-pipeline regime a submit/park/assist
 /// decision is in — decided by whether a host flush worker is attached.
 /// The five concurrent.rs trampoline gates (`await_flush_debt`,
@@ -1344,6 +1390,38 @@ mod tests {
         assert!(
             !maf.contains("skip_auto_flush(global_under, cf_under)"),
             "the raw both-under gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn dominant_family_stage_plan_on_live_dominant_stages() {
+        // RFC-0223 P1.1: fam >= 3/4 of total stages the WHOLE mem
+        // (O(1) swap in-commit; the worker splits per family at
+        // materialize). Below the bar the family partitions out.
+        // AS-IS always partitions (O(n) take_family under the write
+        // lock — the whole in-commit flush work @10M, split 7f2758d4).
+        assert_eq!(
+            dominant_family_stage_plan(80, 100),
+            FamilyFlushMode::StageWholeMem
+        );
+        assert_eq!(
+            dominant_family_stage_plan(75, 100),
+            FamilyFlushMode::StageWholeMem
+        );
+        assert_eq!(
+            dominant_family_stage_plan(74, 100),
+            FamilyFlushMode::PartitionFamily
+        );
+        assert_eq!(
+            dominant_family_stage_plan_as_is(99, 100),
+            FamilyFlushMode::PartitionFamily,
+            "AS-IS dente: always partitions in-commit"
+        );
+        let maf = named_fn_src(include_str!("db.rs"), "maybe_auto_flush")
+            .expect("maybe_auto_flush");
+        assert!(
+            maf.contains("dominant_family_stage_plan("),
+            "maybe_auto_flush defer branch must route through dominant_family_stage_plan"
         );
     }
 

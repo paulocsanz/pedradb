@@ -189,11 +189,11 @@ são incomparáveis, os counters mecânicos abaixo é que fecham):
   db.rs:11078): partição da memtable por família — O(n) alocando ~MiB
   de nós BTree **sob a write-lock** (~2–3M entries/evento). O caminho
   O(1) já existe no ramo global: swap via `stage_flush_imm` (db.rs:6121)
-  + o worker particiona/materializa. Ataque refinado: quando a família
-  que venceu o gate **domina** a memtable, estacionar a memtable
-  inteira (O(1)) em vez de parti-la in-commit; `take_family` fica para
-  famílias pequenas (ex. `lock` — o comentário do memtable.rs:899 é
-  esse caso).
+  + o worker particiona/materializa. **Ataque landed (RFC-0223 P1.1,
+  2026-09-14):** kernel `dominant_family_stage_plan` (fam ≥ 3/4 ⇒
+  `StageWholeMem` via `stage_flush_imm`; abaixo ⇒ `PartitionFamily`;
+  imm ocupado cai na partição). Integração no ramo defer de
+  `maybe_auto_flush`. Re-meter DIAG `flush_work_ms` / cartaz = e4b.
 - mc50 A/B 1ª passada **inconclusiva** sob load (compat 37k–236k qps
   entre rounds; braço Rocks 64MiB consistentemente mais rápido que
   256MiB — 151/156/168k vs 107/142/101k — sinal direcional de que o
