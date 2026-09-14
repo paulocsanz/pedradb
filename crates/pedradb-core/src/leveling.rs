@@ -184,7 +184,7 @@ pub(crate) fn pick_l0_to_l1(
 /// regardless of overlap — the pre-leveled whole-level-rewrite shape.
 #[cfg(test)]
 #[must_use]
-pub(crate) fn pick_l0_to_l1_as_is_whole_level(
+fn pick_l0_to_l1_as_is_whole_level(
     l0: &[LevelFile],
     l1: &[LevelFile],
 ) -> Option<(Vec<usize>, Vec<usize>)> {
@@ -201,7 +201,7 @@ pub(crate) fn pick_l0_to_l1_as_is_whole_level(
 /// cap is ignored — unbounded job size on a deep L0 stack.
 #[cfg(test)]
 #[must_use]
-pub(crate) fn pick_l0_to_l1_as_is_uncapped(l0: &[LevelFile], _max_l0: usize) -> Option<Vec<usize>> {
+fn pick_l0_to_l1_as_is_uncapped(l0: &[LevelFile], _max_l0: usize) -> Option<Vec<usize>> {
     if l0.is_empty() {
         return None;
     }
@@ -233,7 +233,7 @@ pub(crate) fn pick_pushdown(src: &[LevelFile], dst: &[LevelFile]) -> Option<(usi
 /// the `leveling_pushdown` close-twin token (the extract covers it).
 #[cfg_attr(not(test), allow(dead_code))]
 #[must_use]
-pub(crate) fn pick_pushdown_as_is_blind(
+fn pick_pushdown_as_is_blind(
     src: &[LevelFile],
     dst: &[LevelFile],
 ) -> Option<(usize, Vec<usize>)> {

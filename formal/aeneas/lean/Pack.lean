@@ -13,3 +13,13 @@ theorem pack_cut_tag_as_is_dente :
     pack_cut_tag_as_is 7#u32 = ok (0#u32) := by
   unfold pack_cut_tag_as_is
   rfl
+
+/-- Cut tag is the identity: the packed length is kept. -/
+theorem pack_cut_tag_fate_iff :
+    ∀ (len r : U32),
+      (pack_cut_tag len = ok r) ↔ (r = len) := by
+  intro len r
+  unfold pack_cut_tag
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl

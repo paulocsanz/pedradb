@@ -643,9 +643,9 @@ mod tests {
     fn overlaps_user_range_on_live_table_matches_kernel() {
         let src = include_str!("table.rs");
         let body = src
-            .split("pub fn overlaps_user_range")
+            .split(concat!("pub fn ", "overlaps_user_range"))
             .nth(1)
-            .and_then(|s| s.split("pub fn iter_user_range").next())
+            .and_then(|s| s.split(concat!("pub fn ", "iter_user_range")).next())
             .expect("overlaps_user_range");
         assert!(
             body.contains("point_bounds_overlap("),

@@ -164,6 +164,76 @@ theorem forall_schedules_pct2_not_admitted :
   unfold forall_schedules_admitted
   rfl
 
+/-- Always refuse: no PCT depth is ∀ OS schedules. Flag stays false. -/
+theorem forall_schedules_admitted_fate_iff :
+    ∀ (d : U64) (v : Bool),
+      (forall_schedules_admitted d = ok v) ↔ (v = false) := by
+  intro d v
+  unfold forall_schedules_admitted
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
+/-- Campaign default PCT depth is 2 (RFC-0070 does not raise it). -/
+theorem pct_campaign_default_depth_fate_iff :
+    ∀ (d : U64),
+      (pct_campaign_default_depth = ok d) ↔ (d = 2#u64) := by
+  intro d
+  unfold pct_campaign_default_depth
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
+/-- Claim that 0070 raised the default PCT depth: always false. -/
+theorem default_pct_depth_raised_fate_iff :
+    ∀ (v : Bool),
+      (default_pct_depth_raised = ok v) ↔ (v = false) := by
+  intro v
+  unfold default_pct_depth_raised
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
+/-- Lock-schedule ∀π is not a theorem. Flag stays false. -/
+theorem lock_interleavings_admitted_fate_iff :
+    ∀ (v : Bool),
+      (lock_interleavings_admitted = ok v) ↔ (v = false) := by
+  intro v
+  unfold lock_interleavings_admitted
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
+/-- fdatasync rc==0 is not media durability. Flag stays false. -/
+theorem media_durable_admitted_fate_iff :
+    ∀ (fsync_ok v : Bool),
+      (media_durable_admitted fsync_ok = ok v) ↔ (v = false) := by
+  intro fsync_ok v
+  unfold media_durable_admitted
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
+/-- Stacking two fsync-liar boxes is not a campaign. Flag stays false. -/
+theorem stacked_fsync_liars_admitted_fate_iff :
+    ∀ (lying det_io v : Bool),
+      (stacked_fsync_liars_admitted lying det_io = ok v) ↔ (v = false) := by
+  intro lying det_io v
+  unfold stacked_fsync_liars_admitted
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
+/-- Closing the lying-fsync model does not invent a TCG guest. -/
+theorem fsync_lie_closes_tcg_guest_fate_iff :
+    ∀ (v : Bool),
+      (fsync_lie_closes_tcg_guest = ok v) ↔ (v = false) := by
+  intro v
+  unfold fsync_lie_closes_tcg_guest
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
 /-- AS-IS dente: d≥2 is rounded to forall. -/
 theorem forall_schedules_as_is_dente :
     forall_schedules_admitted_as_is (2#u64) = ok true := by

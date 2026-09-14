@@ -19,6 +19,15 @@ theorem joint_election_ok_as_is_dente :
   unfold majority_of
   rfl
 
+/-- RFC-0069: liveness is admitted EXACTLY when all three ES flags hold. -/
+theorem liveness_admitted_fate_iff :
+    ∀ (es1 es2 es3 v : Bool),
+      (liveness_admitted es1 es2 es3 = ok v) ↔
+        (v = (es1 && es2 && es3)) := by
+  intro es1 es2 es3 v
+  unfold liveness_admitted
+  cases es1 <;> cases es2 <;> cases es3 <;> cases v <;> simp
+
 /-- RFC-0069 P2.2: bounded elect does not print live. -/
 theorem elect_claim_banner_bounded :
     elect_claim_banner false false false =

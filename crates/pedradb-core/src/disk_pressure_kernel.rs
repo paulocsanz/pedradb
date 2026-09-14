@@ -285,9 +285,9 @@ mod tests {
             }
         );
         let glue = include_str!("env.rs")
-            .split("pub fn probe_available_bytes")
+            .split(concat!("pub fn ", "probe_available_bytes"))
             .nth(1)
-            .and_then(|s| s.split("pub fn admit_disk_write").next())
+            .and_then(|s| s.split(concat!("pub fn ", "admit_disk_write")).next())
             .expect("probe_available_bytes");
         assert!(
             glue.contains("disk_probe_or_unknown("),
@@ -314,7 +314,7 @@ mod tests {
             "AS-IS dente: dest copy proceeds at zero free"
         );
         let glue = include_str!("env.rs")
-            .split("pub fn admit_disk_write")
+            .split(concat!("pub fn ", "admit_disk_write"))
             .nth(1)
             .and_then(|s| s.split("fn note_external_disk_pressure").next())
             .expect("admit_disk_write");
@@ -327,7 +327,7 @@ mod tests {
             "admit_disk_write must probe via disk_probe_or_unknown"
         );
         let copy = include_str!("db.rs")
-            .split("pub fn copy_db_directory")
+            .split(concat!("pub fn ", "copy_db_directory"))
             .nth(1)
             .and_then(|s| s.split("\npub fn ").next())
             .expect("copy_db_directory");
@@ -336,7 +336,7 @@ mod tests {
             "copy_db_directory must admit before copy"
         );
         let ckpt = include_str!("db.rs")
-            .split("pub fn create_checkpoint")
+            .split(concat!("pub fn ", "create_checkpoint"))
             .nth(1)
             .and_then(|s| s.split("\n    pub fn ").next())
             .expect("create_checkpoint");
@@ -345,7 +345,7 @@ mod tests {
             "create_checkpoint must admit before copy"
         );
         let hist = include_str!("../../pedradb-ops/src/lib.rs")
-            .split("pub fn restore_history_from_remote")
+            .split(concat!("pub fn ", "restore_history_from_remote"))
             .nth(1)
             .and_then(|s| s.split("\nfn write_warch").next())
             .expect("restore_history_from_remote");
@@ -376,9 +376,9 @@ mod tests {
             "only WriteStall/WriteStallMem retry"
         );
         let del = include_str!("db.rs")
-            .split("pub fn delete_with(")
+            .split(concat!("pub fn ", "delete_with("))
             .nth(1)
-            .and_then(|s| s.split("pub fn delete_range(").next())
+            .and_then(|s| s.split(concat!("pub fn ", "delete_range(")).next())
             .expect("delete_with");
         assert!(
             del.contains("apply_batch_with("),
@@ -394,25 +394,25 @@ mod tests {
             "FailingEnvArc must inject probe Err (unknown, not 0-free)"
         );
         let compact = include_str!("db.rs")
-            .split("pub fn compact_with(")
+            .split(concat!("pub fn ", "compact_with("))
             .nth(1)
-            .and_then(|s| s.split("pub fn compact_reclaim").next())
+            .and_then(|s| s.split(concat!("pub fn ", "compact_reclaim")).next())
             .expect("compact_with");
         assert!(
             compact.contains("compact_refuse("),
             "compact_with must match compact_refuse"
         );
         let flush = include_str!("db.rs")
-            .split("pub fn flush(")
+            .split(concat!("pub fn ", "flush("))
             .nth(1)
-            .and_then(|s| s.split("pub(crate) fn bulk_family_of_table").next())
+            .and_then(|s| s.split(concat!("pub(crate) fn ", "bulk_family_of_table")).next())
             .expect("flush");
         assert!(
             flush.contains("compact_refuse("),
             "flush must match compact_refuse"
         );
         let ssts_only = include_str!("db.rs")
-            .split("pub fn compact_with_ssts_only(")
+            .split(concat!("pub fn ", "compact_with_ssts_only("))
             .nth(1)
             .and_then(|s| s.split("fn compact_l0_into_l1").next())
             .expect("compact_with_ssts_only");
@@ -421,7 +421,7 @@ mod tests {
             "compact_with_ssts_only must match compact_refuse"
         );
         let leveled = include_str!("db.rs")
-            .split("pub fn compact_leveled(")
+            .split(concat!("pub fn ", "compact_leveled("))
             .nth(1)
             .and_then(|s| s.split("fn dump_level_diag").next())
             .expect("compact_leveled");
@@ -430,7 +430,7 @@ mod tests {
             "compact_leveled must match compact_refuse"
         );
         let flush_cf = include_str!("db.rs")
-            .split("pub fn flush_cf(")
+            .split(concat!("pub fn ", "flush_cf("))
             .nth(1)
             .and_then(|s| s.split("\n    pub fn ").next())
             .expect("flush_cf");
@@ -439,9 +439,9 @@ mod tests {
             "flush_cf must match compact_refuse"
         );
         let cf = include_str!("db.rs")
-            .split("pub fn compact_ssts_only_cf(")
+            .split(concat!("pub fn ", "compact_ssts_only_cf("))
             .nth(1)
-            .and_then(|s| s.split("pub fn live_sst_meta").next())
+            .and_then(|s| s.split(concat!("pub fn ", "live_sst_meta")).next())
             .expect("compact_ssts_only_cf");
         assert!(
             cf.contains("compact_refuse("),

@@ -1,5 +1,23 @@
 # Aeneas extract + Lean theorems
 
+## A2b 100% + escada 0188 100% (2026-09-14)
+
+- A2b: 868/925 → **901/901 = 100.0%**. Test-string `pub fn` false positives
+  (`concat!`); test-only `pub(crate)` as-is helpers in `leveling.rs` became
+  private `fn`; remaining as-is-infix / helper names on the existing
+  `kernel_fn_allowlist`. Tests: `rfc0217_probe_cache_only_after_fresh_ok`,
+  `overlaps_user_range_on_live_table_matches_kernel`,
+  `pick_l0_to_l1_on_live_slice_is_not_ok` green.
+- Escada 0188: 300/322 → **322/322 = 100.00%**, `pending: 0`. 22 atom ∀
+  rungs (Montanha children/fields/pack + never-admit flags stay **false**).
+  `lake build` GroupCommit/Children/Fields/Pack/Tcg/Membership/World 2×
+  green, 0 sorry in those theorems. Floors `floor_atom=318`,
+  `pairs_covered=322` same commit.
+- A2a stays 28158/164964 = 17.07% — 100% under the frozen glob would
+  require every `src/**/*.rs` in kernel crates to be `*_kernel.rs`
+  (~136k LOC including `db.rs`/`concurrent.rs`). Trampoline dump refused.
+  See `findings/2026-09-14-a2a-100-unviable.md`.
+
 ## ComposeDefining (RFC-0225 P2.2–P2.4, 2026-09-14)
 
 - `formal/aeneas/lean/ComposeDefining.lean`: three lake-checked theorems,

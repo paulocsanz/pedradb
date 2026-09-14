@@ -1238,9 +1238,9 @@ mod tests {
         );
         let db_src = include_str!("db.rs");
         let sync_fn = db_src
-            .split("pub fn sync(&mut self)")
+            .split(concat!("pub fn ", "sync(&mut self)"))
             .nth(1)
-            .and_then(|s| s.split("pub fn fence_report").next())
+            .and_then(|s| s.split(concat!("pub fn ", "fence_report")).next())
             .expect("Db::sync");
         assert!(
             sync_fn.contains("wal_commit_plan("),
