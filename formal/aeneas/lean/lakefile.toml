@@ -504,6 +504,9 @@ name = "ComposeDurabilitySpine"
 name = "ComposeProductCrown"
 
 [[lean_lib]]
+name = "ComposeWriter"
+
+[[lean_lib]]
 name = "MagicKernel"
 
 [[lean_lib]]

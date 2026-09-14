@@ -70,9 +70,9 @@ Métricas registradas (ambas datadas, monotônicas):
 
 - [ ] **P0.1** gate `check_compose_floor.py` (+ `--selftest`, job
   `compose-floor`), piso m2 = 33/286 = 11,54% medido — status: `todo`
-- [ ] **P0.2** `ComposeWriter.lean`: cadeia workerless —
+- [x] **P0.2** `ComposeWriter.lean`: cadeia workerless —
   `flusher_gate_plan` × `parked_debt_plan` (sem worker NADA parqueia,
-  inclusive com dívida no cap; ramo as-is: workerless dorme) — status: `todo`
+  inclusive com dívida no cap; ramo as-is: workerless dorme) — status: done (RFC-0222 P2.1, 2026-09-14)
 - [ ] **P0.3** cadeia do sync — `changelog_durable_commit_fate` ×
   `wal_commit_plan` (Count com sync exige AppendSync; Skip async só
   AppendApplyOk; as-is cerca nada) — status: `todo`
@@ -118,7 +118,7 @@ Métricas registradas (ambas datadas, monotônicas):
 | ID | Banda | Título | Status | Task / PR | Updated |
 |----|-------|--------|--------|-----------|---------|
 | P0.1 | p0 | gate compose-floor + selftest | todo | — | 2026-09-13 |
-| P0.2 | p0 | cadeia workerless (flusher_gate × parked_debt) | todo | — | 2026-09-13 |
+| P0.2 | p0 | cadeia workerless (flusher_gate × parked_debt) | done | RFC-0222 P2.1 | 2026-09-14 |
 | P0.3 | p0 | cadeia do sync (fate × wal_commit_plan) | todo | — | 2026-09-13 |
 | P0.4 | p0 | cadeia do fence (wal_commit × fence_admission) | todo | — | 2026-09-13 |
 | P0.5 | p0 | cadeia da publicação (manifest_publish × fate) | todo | — | 2026-09-13 |

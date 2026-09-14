@@ -1,5 +1,13 @@
 # Aeneas extract + Lean theorems
 
+## ComposeWriter (RFC-0222 P2.1 / RFC-0220 P0.2, 2026-09-14)
+
+- `formal/aeneas/lean/ComposeWriter.lean`: dual-unfold of
+  `flusher_gate_plan_fate_iff` × `parked_debt_plan_fate_iff`.
+- `writer_workerless_gate_and_debt_iff` / `workerless_never_drains` /
+  `flusher_gate_plan_as_is_always_drains`. `lake build ComposeWriter` green,
+  0 sorry. m2 33→35 (`flusher_gate_plan`, `parked_debt_plan` now chained).
+
 **Date:** 2026-08-15
 
 ## ClientAxis (`client_axis_kernel.rs`, RFC-0222 P0.7 2026-09-14)
