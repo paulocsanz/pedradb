@@ -176,9 +176,9 @@ def async_catchup_bound_us
 @[global_simps, irreducible] def COLLECT_QUIESCE_US : Std.U64 := 20#u64
 
 /-- [pedra_aeneas_group_window_kernel::HERD_COLLECT_US]
-    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 90:0-90:35
+    Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 90:0-90:36
     Visibility: public -/
-@[global_simps, irreducible] def HERD_COLLECT_US : Std.U64 := 2#u64
+@[global_simps, irreducible] def HERD_COLLECT_US : Std.U64 := 10#u64
 
 /-- [pedra_aeneas_group_window_kernel::herd_collect_us]:
     Source: '../../../crates/pedradb-core/src/group_window_kernel.rs', lines 95:0-101:1

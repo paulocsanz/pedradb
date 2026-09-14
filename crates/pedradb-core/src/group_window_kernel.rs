@@ -83,11 +83,11 @@ pub fn async_catchup_bound_us(
 pub const COLLECT_QUIESCE_US: u64 = 20;
 
 /// When in-flight writers outnumber the batch they are inside `submit()`,
-/// not in a client gap. Wait this many µs for them to queue before
-/// sealing the WAL frame. Half a Darwin `write()` (20.8µs WRITEPHASE):
-/// break-even at +1 op, win at +2. AS-IS = 0 (seal immediately →
-/// avg_group=1.39, one `write()` per put).
-pub const HERD_COLLECT_US: u64 = 2;
+/// not in a client gap. Spin this many µs for them to queue before
+/// sealing the WAL frame. 10µs condvar packed avg_group=3.78 but parked
+/// (cw=23µs/grp) and lost QPS; the same bound as a **spin** (no
+/// `wait_for`) is half a Darwin `write()` with no park tax. AS-IS = 0.
+pub const HERD_COLLECT_US: u64 = 10;
 
 /// `active > batch_len` ⇒ the missing writers are in `submit()`; give
 /// them [`HERD_COLLECT_US`] to land in this frame.
