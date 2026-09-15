@@ -61,15 +61,29 @@ jobs:
   kani-harnesses:
     name: kani harnesses on production kernels (pinned kani)
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       # kani-github-action v1.1, pinned by commit sha; kani itself pinned
-      # by version (the action verifies its sha on install)
+      # by version (the action verifies its sha on install).
+      # `args: -p pedradb-core` (no --harness) SAT-stalls on bloom T2/T3
+      # (scripts/kani_bloom.sh: OOM/stall; T1+T4 are the paid harnesses).
       - uses: model-checking/kani-github-action@f838096619a707b0f6b2118cf435eaccfa33e51f # v1.1
         with:
           kani-version: 0.67.0
-          args: -p pedradb-core
+          args: --version
+      - name: every scripts/kani_*.sh --required
+        run: |
+          status=0
+          for sh in scripts/kani_*.sh; do
+            echo "::group::${sh}"
+            if ! bash "${sh}" --required; then
+              echo "::error::${sh} failed (harness drifted or kani pin broke)"
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "${status}"
 
   # RFC-0222 P1.1 — Lean extracts + Aeneas corpus. Skip→exit 0 is forbidden:
   # both jobs pass --required. Pins match formal/aeneas/PINS.md.
