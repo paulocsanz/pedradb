@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Embeddable persistent key-value store with multi-key ACID transactions"
 
+
+[lib]
+path = "src/lib_kernel.rs"
 [features]
 default = []
 # RFC-0018 P2.5: enable optional engine buggify hook bodies (still SeedRng-only).

@@ -9,7 +9,7 @@ pub mod error {
     pub type Result<T> = std::result::Result<T, CoreError>;
 }
 
-#[path = "../../../../crates/pedradb-core/src/key.rs"]
+#[path = "../../../../crates/pedradb-core/src/key_kernel.rs"]
 pub mod key;
 
 #[path = "../../../../crates/pedradb-core/src/compact_kernel.rs"]
@@ -18,7 +18,7 @@ pub mod compact_kernel;
 #[path = "../../../../crates/pedradb-core/src/write_admission_kernel.rs"]
 pub mod write_admission_kernel;
 
-#[path = "../../../../crates/pedradb-core/src/merge.rs"]
+#[path = "../../../../crates/pedradb-core/src/merge_kernel.rs"]
 pub mod merge;
 
 pub use merge::*;

@@ -143,6 +143,21 @@ mod tests {
         );
     }
 
+    /// RFC-0222 P0.7: production `lead` drains through the kernel, not an
+    /// inlined cap. The named body is the rustc-linked proof term.
+    #[test]
+    fn lead_calls_pipeline_drain_cap() {
+        let body = include_str!("concurrent_kernel.rs");
+        assert!(
+            body.contains("client_axis_kernel::pipeline_drain_cap("),
+            "WriteGroup::lead must call pipeline_drain_cap"
+        );
+        assert!(
+            body.contains("client_axis_kernel::async_merge_policy("),
+            "submit path must call async_merge_policy"
+        );
+    }
+
     /// RFC-0201 P0.1 tooth: the AS-IS twin pins the 0044-era cap-8 convoy
     /// math the cut removes (mc50 = 7 serial convoys vs 1).
     #[test]
@@ -186,7 +201,7 @@ mod tests {
     }
 
     /// RFC-0201 P0.2 tooth: the 0189 spin never parks by policy — the
-    /// cegueira the cut names.
+    /// blindness this cut names.
     #[test]
     fn rfc0201_spin_policy_as_is_always_spins() {
         assert_eq!(

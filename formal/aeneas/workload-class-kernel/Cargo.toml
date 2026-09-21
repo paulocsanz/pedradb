@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-workload-class-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate whose [lib] path is production workload_class_kernel.rs (RFC-0235 P0.1)"
+
+[lib]
+path = "../../../crates/pedradb-core/src/workload_class_kernel.rs"

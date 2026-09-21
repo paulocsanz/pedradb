@@ -363,11 +363,11 @@ theorem pit_resync_rewrite_fate_iff :
   unfold pit_resync_needs_rewrite
   cases is_resync <;> cases v <;> simp
 
-/-- RFC-0219 P1.1 (atom `catalog:dir_sync_plan`): the dir-fsync post-rename
-    (SST `.tmp`, chunk fundido, gate dir of the DB) is paid EXACTLY in
-    modo sync — the dentry of the rename is durable before the reply; async
-    skips (recovery tolera dentry of name-tmp vanished). The AS-IS never
-    pays (dentry vanishes post-crash same in sync — tooth planted). -/
+/-- RFC-0219 P1.1 (atom `catalog:dir_sync_plan`): o dir-fsync pós-rename
+    (SST `.tmp`, chunk fundido, portão dir do DB) é pago EXATAMENTE em
+    modo sync — o dentry do rename é durável antes de voltar; async
+    pula (recuperação tolera dentry de nome-tmp sumiu). O AS-IS nunca
+    paga (dentry some pós-crash mesmo em sync — tooth plantado). -/
 theorem dir_sync_plan_fate_iff :
     ∀ (sync : Bool) (plan : DirSyncPlan),
       (dir_sync_plan sync = ok plan) ↔
@@ -377,11 +377,11 @@ theorem dir_sync_plan_fate_iff :
   unfold dir_sync_plan dir_sync_required
   cases sync <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.2 (atom `catalog:fence_admission`): the Db with fence of
-    durability refuses each new operation EXACTLY when the fence
-    is armed — fail-closed; without fence admits. The AS-IS always admits
-    (barrier failed follows servindo write the if durable — tooth
-    planted). -/
+/-- RFC-0219 P1.2 (atom `catalog:fence_admission`): um Db com fence de
+    durabilidade recusa cada nova operação EXATAMENTE quando o fence
+    está armado — fail-closed; sem fence admite. O AS-IS admite sempre
+    (barreira falhada segue servindo escrita como se durável — tooth
+    plantado). -/
 theorem fence_admission_plan_fate_iff :
     ∀ (fenced : Bool) (plan : FenceAdmission),
       (fence_admission_plan fenced = ok plan) ↔
@@ -391,10 +391,10 @@ theorem fence_admission_plan_fate_iff :
   unfold fence_admission_plan
   cases fenced <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.2 (atom `catalog:fence_record`): only the FIRST fence
-    registers the report of the uncertain window — a later fence maintains the
-    first (the widest, the honest one). The AS-IS re-registers (shrinks the
-    window the client knows to be unproven — tooth planted). -/
+/-- RFC-0219 P1.2 (atom `catalog:fence_record`): só o PRIMEIRO fence
+    registra o relatório da janela incerta — fence posterior mantém o
+    primeiro (o mais largo, o honesto). O AS-IS re-registra (encolhe a
+    janela que o client sabe estar não-provada — tooth plantado). -/
 theorem fence_record_plan_fate_iff :
     ∀ (has_report : Bool) (plan : FenceRecordPlan),
       (fence_record_plan has_report = ok plan) ↔
@@ -404,11 +404,11 @@ theorem fence_record_plan_fate_iff :
   unfold fence_record_plan
   cases has_report <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.2 (atom `catalog:group_batch_sync`): the batch with the sync
-    flag EXACTLY forces the single barrier of the group (one shared
-    fsync); an async batch only rides the aggregate. The AS-IS lets
-    everything ride (a client that asked for sync is acked without a barrier — tooth
-    planted). -/
+/-- RFC-0219 P1.2 (atom `catalog:group_batch_sync`): um batch com flag
+    de sync EXATAMENTE força a barreira única do grupo (one fsync
+    compartilhado); batch async apenas viaja no agregado. O AS-IS deixa
+    tudo viajar (client que pediu sync é ackado sem barreira — tooth
+    plantado). -/
 theorem group_batch_sync_plan_fate_iff :
     ∀ (client_sync : Bool) (plan : GroupSyncPlan),
       (group_batch_sync_plan client_sync = ok plan) ↔
@@ -418,11 +418,11 @@ theorem group_batch_sync_plan_fate_iff :
   unfold group_batch_sync_plan
   cases client_sync <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.4 (atom `catalog:pit_resync_rewrite`): the open rewrites
-    the WAL starting from the prefix recovered EXACTLY when the report
-    of recovery is the resync; without resync the prefix stays on the disk
-    the as-is. The AS-IS never rewrites (the damage mid-log survives to the
-    next open fail-closed — tooth planted). -/
+/-- RFC-0219 P1.4 (atom `catalog:pit_resync_rewrite`): o open reescreve
+    o WAL a partir do prefixo recuperado EXATAMENTE quando o relatório
+    de recuperação é um resync; sem resync o prefixo fica no disco
+    como-is. O AS-IS nunca reescreve (o dano mid-log sobrevive ao
+    próximo open fail-closed — tooth plantado). -/
 theorem pit_resync_rewrite_plan_fate_iff :
     ∀ (is_resync : Bool) (plan : PitResyncRewritePlan),
       (pit_resync_rewrite_plan is_resync = ok plan) ↔
@@ -434,10 +434,10 @@ theorem pit_resync_rewrite_plan_fate_iff :
   unfold pit_resync_rewrite_plan pit_resync_needs_rewrite
   cases is_resync <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P2.1 (atom `catalog:parked_pop_plan`): the parked pop
-    happens EXACTLY when the queue is non-empty; an
-    empty queue delivers nothing to the fold. The AS-IS pops from the empty queue (an
-    index from the front into nothing — tooth planted). -/
+/-- RFC-0219 P2.1 (atom `catalog:parked_pop_plan`): o pop da fila
+    estacionada acontece EXATAMENTE quando a fila está não-vazia; fila
+    vazia não entrega nada ao fold. O AS-IS popa da fila vazia (índice
+    de frente no nada — tooth plantado). -/
 theorem parked_pop_plan_fate_iff :
     ∀ (parked_len : U64) (plan : ParkedPopPlan),
       (parked_pop_plan parked_len = ok plan) ↔
@@ -469,3 +469,87 @@ theorem parked_pop_plan_fate_iff :
       · rw [batch_is_empty_ok_iff_zero]
         exact hz
       · simp [hplan]
+
+/-- RFC-0157 stage 2 (atom `catalog:put_handler_plan`): the rustc-linked
+    `Db::put` → `apply_batch_with` script. Empty batch skips WAL; commit
+    Err restores the seq checkpoint; else commit-then-flush. Unfolds
+    `batch_is_empty` (the callee the plan calls). AS-IS always flushes. -/
+theorem put_handler_plan_fate_iff :
+    ∀ (n : U64) (commit_failed : Bool) (plan : PutHandlerPlan),
+      (put_handler_plan n commit_failed = ok plan) ↔
+        (((n = 0#u64 : Bool) = true ∧ plan = PutHandlerPlan.EmptyOk) ∨
+          ((n = 0#u64 : Bool) = false ∧ commit_failed = true ∧
+            plan = PutHandlerPlan.RestoreSeqOnCommitErr) ∨
+          ((n = 0#u64 : Bool) = false ∧ commit_failed = false ∧
+            plan = PutHandlerPlan.CommitThenFlush)) := by
+  intro n commit_failed plan
+  unfold put_handler_plan
+  cases commit_failed with
+  | true =>
+      constructor
+      · intro hval
+        obtain ⟨b, hw, hm⟩ := bind_ok_inv _ _ _ hval
+        rw [batch_is_empty_ok_iff_zero] at hw
+        cases b with
+        | true =>
+            simp at hm
+            subst hm
+            exact Or.inl ⟨hw, rfl⟩
+        | false =>
+            simp at hm
+            subst hm
+            exact Or.inr (Or.inl ⟨hw, rfl, rfl⟩)
+      · rintro (⟨hz, hplan⟩ | ⟨hz, _, hplan⟩ | ⟨_, hcf, _⟩)
+        · refine bind_intro true ?_ ?_
+          · rw [batch_is_empty_ok_iff_zero]; exact hz
+          · simp [hplan]
+        · refine bind_intro false ?_ ?_
+          · rw [batch_is_empty_ok_iff_zero]; exact hz
+          · simp [hplan]
+        · cases hcf
+  | false =>
+      constructor
+      · intro hval
+        obtain ⟨b, hw, hm⟩ := bind_ok_inv _ _ _ hval
+        rw [batch_is_empty_ok_iff_zero] at hw
+        cases b with
+        | true =>
+            simp at hm
+            subst hm
+            exact Or.inl ⟨hw, rfl⟩
+        | false =>
+            simp at hm
+            subst hm
+            exact Or.inr (Or.inr ⟨hw, rfl, rfl⟩)
+      · rintro (⟨hz, hplan⟩ | ⟨_, hcf, _⟩ | ⟨hz, _, hplan⟩)
+        · refine bind_intro true ?_ ?_
+          · rw [batch_is_empty_ok_iff_zero]; exact hz
+          · simp [hplan]
+        · cases hcf
+        · refine bind_intro false ?_ ?_
+          · rw [batch_is_empty_ok_iff_zero]; exact hz
+          · simp [hplan]
+
+/-- RFC-0157 stage 2 (atom `catalog:open_wal_head_plan`): the rustc-linked
+    `open_with_env_sourced` WAL-head script. Missing WAL skips recover;
+    Truncated(0) on a tiny file is empty-log (unfolds `torn_head_is_empty_log`);
+    else recover/escalate. AS-IS always recovers. -/
+theorem open_wal_head_plan_fate_iff :
+    ∀ (wal_exists truncated_zero : Bool) (wal_len : U64),
+      open_wal_head_plan wal_exists truncated_zero wal_len =
+        ok (if wal_exists = false then OpenWalHeadPlan.Skip
+            else if truncated_zero = true && decide (wal_len < TINY_WAL_EMPTY_MAX)
+              then OpenWalHeadPlan.EmptyTiny
+              else OpenWalHeadPlan.RecoverSpan) := by
+  intro wal_exists truncated_zero wal_len
+  unfold open_wal_head_plan
+  cases wal_exists with
+  | false => simp
+  | true =>
+      cases truncated_zero with
+      | false => simp
+      | true =>
+          simp [torn_head_is_empty_log]
+          split <;> rfl
+
+

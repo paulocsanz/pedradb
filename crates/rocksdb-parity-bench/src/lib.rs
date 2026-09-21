@@ -2,7 +2,7 @@
 //!
 //! One generic runner, two engine adapters (see [`engines`]) — the op schedule
 //! (rng seed, zipf CDF, read/insert/scan/RMW mix) is identical for both engines
-//! by construction. Same shape semantics as the Montanha `ycsb` suite (FDB
+//! by construction. Same shape semantics as the Distributed `ycsb` suite (FDB
 //! benchmark tool workloads): ycsb_a 50/50, b 95/5, c 100r, d 95r/5
 //! insert-latest, e 5 insert + short scans, f 50 read-modify-write.
 //!
@@ -14,71 +14,26 @@
 //! Opt-in suites grow the catalog (RFC-0043; never replace the official 16):
 //! `qs` (Quicksilver-inspired), `kvrocks` (Redis GET/SET/pipeline/SCAN),
 //! `myrocks` (sysbench point/range/tx + LinkBench-inspired mix), `rocksapi`
-//! (mixgraph / WBWI / compaction filter / ingest). See [`COMPARE_SHAPES`]
+//! (mixgraph / WBWI / compaction filter / ingest), `ladder` (RFC-0238
+//! Pedra-vs-fjall absolute-QPS shapes). See [`COMPARE_SHAPES`]
 //! and `docs/rocksdb-dependents-benchmarks.md`.
 
 #![forbid(unsafe_code)]
 
 pub mod column_a;
 pub mod engines;
-pub mod scale;
-
-/// RFC-0184: WRITEPHASE deltas → kernel diagnosis (per commit).
-pub(crate) fn diagnose_from_phases(
-    pedra_p50_ms: f64,
-    a: [u64; 7],
-    b: [u64; 7],
-    clients: u64,
-    avg_group: f64,
-    read_pct: u64,
-) -> pedradb_core::WriteDiagnosis {
-    diagnose_from_phases_n(
-        pedra_p50_ms,
-        a,
-        b,
-        clients,
-        avg_group,
-        read_pct,
-        b[0].saturating_sub(a[0]).max(1),
-    )
-}
-
-fn diagnose_from_phases_n(
-    pedra_p50_ms: f64,
-    a: [u64; 7],
-    b: [u64; 7],
-    clients: u64,
-    avg_group: f64,
-    read_pct: u64,
-    n: u64,
-) -> pedradb_core::WriteDiagnosis {
-    let n = n.max(1);
-    let per = |i: usize| b[i].saturating_sub(a[i]) / n;
-    pedradb_core::diagnose_write(pedradb_core::WriteGapInput {
-        pedra_ns: (pedra_p50_ms * 1_000_000.0) as u64,
-        rocks_ns: 0,
-        clients,
-        avg_group_bps: (avg_group * 10_000.0) as u64,
-        read_pct,
-        phases: pedradb_core::WritePhases {
-            prepare_ns: per(1),
-            wal_ns: per(2),
-            mem_ns: per(3),
-            publish_ns: per(4),
-            flush_check_ns: per(5),
-            lock_wait_ns: per(6),
-        },
-    })
-}
-
-pub(crate) fn eprint_write_diagnose(tag: &str, d: &pedradb_core::WriteDiagnosis) {
-    eprintln!("[rocks-parity] diagnose {tag} {}", d.line());
-}
 
 use std::time::{Duration, Instant};
 
-pub fn env_usize(key: &str, default: usize) -> usize {
-    std::env::var(key)
+/// RFC-0217 P2.6: post-seed settle is on by default (the timed window
+/// must not pay the seed's deferred flush/L0 debt). `ROCKS_PARITY_SETTLE=0`
+/// disables for A/B.
+#[must_use]
+pub fn settle_enabled() -> bool {
+    std::env::var("ROCKS_PARITY_SETTLE").map(|v| v != "0").unwrap_or(true)
+}
+
+pub fn env_usize(key: &str, default: usize) -> usize {    std::env::var(key)
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(default)
@@ -250,6 +205,16 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "ycsb_b_unif",
     "ycsb_c_unif",
     "ycsb_c_big",
+    // RFC-0238 P0.1: A9 leaves docs-only land — the multi-client harness
+    // now emits ycsb_b_mc (95/5 mix, mirror of the 1c row).
+    "ycsb_b_mc4",
+    // RFC-0238 P0.2/P1.1: Pedra-vs-fjall ladder (absolute QPS, never a
+    // Rocks ratio). Sequential key-order fill, random 50/50 rw over 1M
+    // keys, 1k-wide scan windows.
+    "fjall_seq_64k",
+    "fjall_seq_1m",
+    "fjall_rand_rw_1m",
+    "fjall_scan_1k",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -354,6 +319,17 @@ pub trait Engine {
     fn set_write_sync(&self, _sync: bool) {}
     /// Untimed settle after seed (flush memtable). Default no-op.
     fn flush(&self) -> bool {
+        true
+    }
+    /// RFC-0217 P2.6 settle: after the untimed seed, drive deferred
+    /// flush/compaction work to quiet so the timed window does not pay
+    /// the seed's L0 debt (finding 2026-09-13-rfc0217-p26-p27-escala:
+    /// 54 L0 files from the seed were live at the first scan ops —
+    /// setup 231 µs/op). Rocks compacts during its seed; Pedra parks
+    /// and defers — settle makes both start the timed phase from a
+    /// drained tree. Default no-op; engines bound the wait.
+    /// `ROCKS_PARITY_SETTLE=0` disables (A/B).
+    fn settle(&self) -> bool {
         true
     }
     /// Latest key under `prefix` in `latest_cf`, then get that key in `value_cf`.
@@ -515,6 +491,20 @@ impl YcsbRunner {
         } else {
             eprintln!("[rocks-parity] deps seed skipped (ROCKS_PARITY_ONLY)");
         }
+        if settle_enabled() {
+            let t0 = Instant::now();
+            if e.settle() {
+                eprintln!(
+                    "[rocks-parity] deps settle {:.1}s (L0 drained)",
+                    t0.elapsed().as_secs_f64()
+                );
+            } else {
+                eprintln!(
+                    "[rocks-parity] deps settle INCOMPLETE after {:.1}s (debt carries into the timed window)",
+                    t0.elapsed().as_secs_f64()
+                );
+            }
+        }
 
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(5);
@@ -599,6 +589,7 @@ impl YcsbRunner {
             e.reset_read_probe();
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut reads, mut errors) = (0u64, 0u64);
+            let l0_start = l0_files_now(e);
             let t0 = Instant::now();
             for _ in 0..cfg_ops {
                 let t = Instant::now();
@@ -609,11 +600,15 @@ impl YcsbRunner {
                 }
                 lats.push(ms(t));
             }
-            blocks.push(summarize(
-                "deps_mvcc_latest",
-                cfg_ops,
-                t0.elapsed(),
-                &mut lats,
+            blocks.push(attach_l0_at_start(
+                summarize(
+                    "deps_mvcc_latest",
+                    cfg_ops,
+                    t0.elapsed(),
+                    &mut lats,
+                ),
+                records,
+                l0_start,
             ));
             let probe = e.read_probe_json().unwrap_or_else(|| "null".into());
             blocks.push(format!(
@@ -632,6 +627,7 @@ impl YcsbRunner {
             e.reset_read_probe();
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut scans, mut errors) = (0u64, 0u64);
+            let l0_start = l0_files_now(e);
             let t0 = Instant::now();
             for _ in 0..cfg_ops {
                 let t = Instant::now();
@@ -642,7 +638,11 @@ impl YcsbRunner {
                 }
                 lats.push(ms(t));
             }
-            blocks.push(summarize("deps_scan", cfg_ops, t0.elapsed(), &mut lats));
+            blocks.push(attach_l0_at_start(
+                summarize("deps_scan", cfg_ops, t0.elapsed(), &mut lats),
+                records,
+                l0_start,
+            ));
             let probe = e.read_probe_json().unwrap_or_else(|| "null".into());
             blocks.push(format!(
                 r#"{{
@@ -677,6 +677,7 @@ impl YcsbRunner {
                 );
             }
             let phase0 = e.write_phase_snapshot();
+            let l0_start = l0_files_now(e);
             let t0 = Instant::now();
             for op in 0..cfg_ops {
                 let t = Instant::now();
@@ -708,7 +709,11 @@ impl YcsbRunner {
                 batch_ns.push(t_batch.as_nanos());
                 lats.push(ms(t));
             }
-            blocks.push(summarize("deps_raftlog", cfg_ops, t0.elapsed(), &mut lats));
+            blocks.push(attach_l0_at_start(
+                summarize("deps_raftlog", cfg_ops, t0.elapsed(), &mut lats),
+                records,
+                l0_start,
+            ));
             build_ns.sort_unstable();
             batch_ns.sort_unstable();
             let p50 = |v: &[u128]| v[v.len() / 2] as f64 / 1000.0;
@@ -745,6 +750,7 @@ impl YcsbRunner {
         if want("deps_cache_overwrite") {
             let mut lats = Vec::with_capacity(cfg_ops);
             let (mut writes, mut errors) = (0u64, 0u64);
+            let l0_start = l0_files_now(e);
             let t0 = Instant::now();
             for _ in 0..cfg_ops {
                 let t = Instant::now();
@@ -756,11 +762,15 @@ impl YcsbRunner {
                 }
                 lats.push(ms(t));
             }
-            blocks.push(summarize(
-                "deps_cache_overwrite",
-                cfg_ops,
-                t0.elapsed(),
-                &mut lats,
+            blocks.push(attach_l0_at_start(
+                summarize(
+                    "deps_cache_overwrite",
+                    cfg_ops,
+                    t0.elapsed(),
+                    &mut lats,
+                ),
+                records,
+                l0_start,
             ));
             eprintln!("[rocks-parity] deps_cache_overwrite done writes={writes} errors={errors}");
         }
@@ -2247,7 +2257,7 @@ impl YcsbRunner {
     }
 
     /// Run one workload; returns the bench JSON block (same schema as the
-    /// Montanha fdb-bench summarize).
+    /// Distributed fdb-bench summarize).
     #[allow(clippy::too_many_arguments)]
     pub fn run<E: Engine>(
         &mut self,
@@ -2270,6 +2280,7 @@ impl YcsbRunner {
         let mut errors = 0u64;
         let mut latest = records;
         let mut rng = std::mem::take(&mut self.rng);
+        let l0_start = l0_files_now(e);
         let t0 = Instant::now();
         for _ in 0..cfg_ops {
             let t = Instant::now();
@@ -2318,7 +2329,7 @@ impl YcsbRunner {
         }
         self.rng = rng;
         let wall = t0.elapsed();
-        let block = summarize(name, cfg_ops, wall, &mut lats);
+        let block = attach_l0_at_start(summarize(name, cfg_ops, wall, &mut lats), records, l0_start);
         eprintln!(
             "[rocks-parity] {name} done ops={cfg_ops} updates={updates} inserts={inserts} scans={scan_ops} errors={errors}"
         );
@@ -2393,6 +2404,154 @@ impl YcsbRunner {
         Some(block)
     }
 
+    /// RFC-0238 P0.2/P1.1: Pedra-vs-fjall ladder — **absolute QPS** on the
+    /// same binary/host/protocol (TRAJETORIA C1–C3; the fjall peer is never
+    /// a `compat_over_rocksdb` ratio). Replaces the retired scratch
+    /// `scale-parity-bench` with an in-tree suite on the generic `Engine`
+    /// trait (RFC-0182: no new bench crate). Shapes:
+    ///
+    /// - `fjall_seq_64k` / `fjall_seq_1m`: sequential key-order fill of a
+    ///   64k / 1M-key working set — the fill itself is the measured window.
+    /// - `fjall_rand_rw_1m`: untimed 1M fill, then measured 50/50 random
+    ///   put/get over the working set (uniform, xorshift `0x5EED_0001`).
+    /// - `fjall_scan_1k`: untimed 100k fill, then measured `scan_count`
+    ///   over 1000-wide windows (each must count exactly the window).
+    ///
+    /// `ROCKS_PARITY_ONLY` filters (experiments; never official tables),
+    /// `ROCKS_LADDER_OPS` overrides every measured window (0 = official
+    /// defaults).
+    pub fn run_ladder<E: Engine>(&mut self, e: &E) -> Vec<String> {
+        let ops = env_usize("ROCKS_LADDER_OPS", 0);
+        self.run_ladder_only(
+            e,
+            std::env::var("ROCKS_PARITY_ONLY").ok().as_deref(),
+            ops,
+            0,
+        )
+    }
+
+    /// Like [`Self::run_ladder`] with explicit filter + op/working-set
+    /// overrides (tests drive the shipped skips without mutating process
+    /// env). `ops`/`ws_cap` = 0 keep the official defaults.
+    pub fn run_ladder_only<E: Engine>(
+        &mut self,
+        e: &E,
+        only: Option<&str>,
+        ops: usize,
+        ws_cap: usize,
+    ) -> Vec<String> {
+        let val = vec![b'l'; self.cfg.payload];
+        let cap = |def: usize| if ws_cap > 0 { def.min(ws_cap) } else { def };
+        let n_ops = |def: usize| if ops > 0 { ops } else { def };
+        let mut blocks = Vec::new();
+
+        // Sequential key-order fill (the measured window is the fill).
+        let fills: [(&str, usize); 2] = [
+            ("fjall_seq_64k", LADDER_WS_64K),
+            ("fjall_seq_1m", LADDER_WS_1M),
+        ];
+        for (name, def_ws) in fills {
+            if !shape_wanted_in(name, only) {
+                continue;
+            }
+            let ws = cap(def_ws);
+            let n = n_ops(def_ws);
+            let mut lats = Vec::with_capacity(n);
+            let mut errors = 0u64;
+            let t0 = Instant::now();
+            for i in 0..n {
+                let t = Instant::now();
+                if !e.put(&fkey(i % ws), &val) {
+                    errors += 1;
+                }
+                lats.push(ms(t));
+            }
+            let block = attach_errors(summarize(name, n, t0.elapsed(), &mut lats), errors);
+            eprintln!("[rocks-parity] {name} done ops={n} ws={ws} errors={errors}");
+            blocks.push(block);
+        }
+
+        // Random 50/50 put/get over a (default 1M) working set. Untimed
+        // fill first so reads always probe present keys (self-contained
+        // under ROCKS_PARITY_ONLY).
+        if shape_wanted_in("fjall_rand_rw_1m", only) {
+            let ws = cap(LADDER_WS_1M);
+            let n = n_ops(100_000);
+            let t0 = Instant::now();
+            for i in 0..ws {
+                assert!(e.put(&fkey(i), &val), "ladder rand seed {i}");
+            }
+            eprintln!(
+                "[rocks-parity] fjall_rand_rw_1m seed {ws} keys in {:.1}s (untimed)",
+                t0.elapsed().as_secs_f64()
+            );
+            let mut rng = std::mem::take(&mut self.rng);
+            let mut lats = Vec::with_capacity(n);
+            let mut errors = 0u64;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                let t = Instant::now();
+                let u = (xorshift(&mut rng) as usize) % ws;
+                let ok = if xorshift(&mut rng) % 2 == 0 {
+                    e.put(&fkey(u), &val)
+                } else {
+                    e.get_probe(&fkey(u)).is_ok()
+                };
+                if !ok {
+                    errors += 1;
+                }
+                lats.push(ms(t));
+            }
+            self.rng = rng;
+            let block = attach_errors(
+                summarize("fjall_rand_rw_1m", n, t0.elapsed(), &mut lats),
+                errors,
+            );
+            eprintln!("[rocks-parity] fjall_rand_rw_1m done ops={n} ws={ws} errors={errors}");
+            blocks.push(block);
+        }
+
+        // scan_count over window-wide slices of a (default 100k) keyspace;
+        // every measured window must count exactly `window` keys.
+        if shape_wanted_in("fjall_scan_1k", only) {
+            let ws = cap(LADDER_SCAN_WS);
+            let window = LADDER_SCAN_WINDOW.min(ws);
+            let n = n_ops(20_000);
+            let t0 = Instant::now();
+            for i in 0..ws {
+                assert!(e.put(&fkey(i), &val), "ladder scan seed {i}");
+            }
+            eprintln!(
+                "[rocks-parity] fjall_scan_1k seed {ws} keys in {:.1}s (untimed)",
+                t0.elapsed().as_secs_f64()
+            );
+            let mut rng = std::mem::take(&mut self.rng);
+            let mut lats = Vec::with_capacity(n);
+            let mut errors = 0u64;
+            let span = ws - window + 1;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                let t = Instant::now();
+                let u = (xorshift(&mut rng) as usize) % span;
+                match e.scan_count(&fkey(u), &fkey(u + window), window) {
+                    Ok(c) if c == window => {}
+                    _ => errors += 1,
+                }
+                lats.push(ms(t));
+            }
+            self.rng = rng;
+            let block = attach_errors(
+                summarize("fjall_scan_1k", n, t0.elapsed(), &mut lats),
+                errors,
+            );
+            eprintln!(
+                "[rocks-parity] fjall_scan_1k done ops={n} ws={ws} window={window} errors={errors}"
+            );
+            blocks.push(block);
+        }
+        blocks
+    }
+
     /// RFC-0037 P2.2: multi-client A/F/overwrite shapes over a fixed seeded
     /// keyspace (no inserts — the window growth would be racy). `clients`
     /// threads, independent per-client schedules from the same zipf CDF,
@@ -2423,8 +2582,12 @@ impl YcsbRunner {
         let ytab = std::sync::Arc::new((0..records).map(ykey).collect::<Vec<Vec<u8>>>());
         let mut blocks = Vec::new();
         // (name, read_pct, rmw, overwrite) — mirrors run()/run_deps mixes.
-        let shapes: [(&str, u64, bool, bool); 3] = [
+        // RFC-0238 P0.1: ycsb_b joins the multi-client catalog (the 95/5
+        // mix of the 1c row; A9 was a docs-only name before — the harness
+        // could not emit it).
+        let shapes: [(&str, u64, bool, bool); 4] = [
             ("ycsb_a", 50, false, false),
+            ("ycsb_b", 95, false, false),
             ("ycsb_f", 50, true, false),
             ("deps_cache_overwrite", 0, false, true),
         ];
@@ -2773,6 +2936,18 @@ pub fn ykey(i: usize) -> Vec<u8> {
     format!("ycsb/{i:06}").into_bytes()
 }
 
+/// RFC-0238 ladder key (fjall shapes; independent of the YCSB keyspace).
+pub fn fkey(i: usize) -> Vec<u8> {
+    format!("f/{i:07}").into_bytes()
+}
+
+/// RFC-0238 ladder working sets / defaults (`ROCKS_LADDER_OPS` overrides
+/// every measured window; 0 = these).
+pub const LADDER_WS_64K: usize = 64 * 1024;
+pub const LADDER_WS_1M: usize = 1024 * 1024;
+pub const LADDER_SCAN_WS: usize = 100 * 1024;
+pub const LADDER_SCAN_WINDOW: usize = 1024;
+
 /// Kvrocks Redis-string key (independent of the YCSB keyspace).
 pub fn kkey(i: usize) -> Vec<u8> {
     format!("k/{i:06}").into_bytes()
@@ -2883,6 +3058,72 @@ fn pct(sorted: &[f64], p: f64) -> f64 {
     sorted[idx.min(sorted.len() - 1)]
 }
 
+/// RFC-0234 P2.2: @10M timed windows publish `l0_files_at_start`. Compare
+/// refuses a ratio when that count is above the compaction trigger.
+pub const L0_AT_START_RECORDS: usize = 10_000_000;
+
+fn json_number_in(s: &str, field: &str) -> Option<f64> {
+    let key = format!("\"{field}\"");
+    let i = s.find(&key)?;
+    let rest = &s[i + key.len()..];
+    let rest = rest.trim_start().strip_prefix(':')?.trim_start();
+    let num: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == 'e' || *c == 'E')
+        .collect();
+    num.parse().ok()
+}
+
+/// Live L0 file count from the engine probe, if the adapter publishes one.
+pub fn l0_files_now<E: Engine>(e: &E) -> Option<u64> {
+    let j = e.read_probe_json()?;
+    json_number_in(&j, "l0_files").map(|v| v as u64)
+}
+
+/// Attach `l0_files_at_start` on @10M shape JSON. Smaller seeds stay as-is.
+pub fn attach_l0_at_start(block: String, records: usize, l0: Option<u64>) -> String {
+    if records < L0_AT_START_RECORDS {
+        return block;
+    }
+    let Some(n) = l0 else {
+        return block;
+    };
+    block.replace(
+        "\"wall_s\"",
+        &format!("\"l0_files_at_start\": {n},\n    \"wall_s\""),
+    )
+}
+
+/// RFC-0234 P2.2: a @10M window that starts with L0 above the trigger
+/// must not publish `compat_over_rocksdb`. Returns the first offending
+/// (shape, l0) pair.
+pub fn l0_debt_at_10m(raw: &str) -> Option<(String, u64)> {
+    let records = json_number_in(raw, "records").map(|v| v as u64).unwrap_or(0);
+    if records < L0_AT_START_RECORDS as u64 {
+        return None;
+    }
+    let trigger = pedradb_core::L0_COMPACTION_TRIGGER as u64;
+    for chunk in raw.split("\"name\"") {
+        let Some(name) = json_string_after_colon(chunk) else {
+            continue;
+        };
+        if let Some(l0) = json_number_in(chunk, "l0_files_at_start") {
+            let l0 = l0 as u64;
+            if l0 > trigger {
+                return Some((name, l0));
+            }
+        }
+    }
+    None
+}
+
+fn json_string_after_colon(s: &str) -> Option<String> {
+    let rest = s.trim_start().strip_prefix(':')?.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
 fn summarize(name: &str, n: usize, wall: Duration, lats_ms: &mut [f64]) -> String {
     lats_ms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let wall_s = wall.as_secs_f64().max(1e-12);
@@ -2921,6 +3162,15 @@ fn summarize_mc(
     block.replace(
         "\"wall_s\"",
         &format!("\"clients\": {clients},\n    \"errors\": {errors},\n    \"wall_s\""),
+    )
+}
+
+/// `summarize` plus an `"errors"` field (RFC-0238 ladder blocks — errors
+/// are failed puts/probes and scan windows that did not count exactly).
+fn attach_errors(block: String, errors: u64) -> String {
+    block.replace(
+        "\"wall_s\"",
+        &format!("\"errors\": {errors},\n    \"wall_s\""),
     )
 }
 
@@ -3057,6 +3307,7 @@ pub fn report_json<E: Engine>(e: &E, cfg: &Cfg, benches: &[String], suites: &str
   "peer_policy": "{policy}",
   "durability": "{durability}",
   "changelog_interval": {changelog_interval},
+  "records": {records},
   "status": "ok",
   "notes": [{notes_json}],
   "benches": [
@@ -3067,6 +3318,7 @@ pub fn report_json<E: Engine>(e: &E, cfg: &Cfg, benches: &[String], suites: &str
         engine = e.label(),
         sync = e.sync(),
         durability = e.durability(),
+        records = cfg.records,
         benches = benches.join(",\n"),
     )
 }
@@ -3097,6 +3349,41 @@ mod tests {
         assert!(!rocks_full_sync_after_write(true, false));
         assert!(!rocks_full_sync_after_write(false, true));
         assert!(!rocks_full_sync_after_write(false, false));
+    }
+
+    #[test]
+    fn rfc0234_attach_l0_at_start_only_on_10m() {
+        let mut lats = [1.0_f64];
+        let small = attach_l0_at_start(
+            summarize("ycsb_e", 1, Duration::from_secs(1), &mut lats),
+            1024,
+            Some(9),
+        );
+        assert!(
+            !small.contains("l0_files_at_start"),
+            "smoke @1024 must not grow the JSON"
+        );
+        let mut lats = [1.0_f64];
+        let big = attach_l0_at_start(
+            summarize("ycsb_e", 1, Duration::from_secs(1), &mut lats),
+            L0_AT_START_RECORDS,
+            Some(9),
+        );
+        assert!(
+            big.contains("\"l0_files_at_start\": 9"),
+            "10M letter enter must publish the live L0, got {big}"
+        );
+    }
+
+    #[test]
+    fn rfc0234_l0_above_trigger_at_start_refuses_ratio() {
+        let raw = r#"{"records":10000000,"benches":[{"name":"ycsb_e","qps":1.0,"l0_files_at_start":9,"wall_s":1}]}"#;
+        let debt = l0_debt_at_10m(raw);
+        assert_eq!(debt, Some(("ycsb_e".into(), 9)));
+        let ok = r#"{"records":10000000,"benches":[{"name":"ycsb_e","qps":1.0,"l0_files_at_start":2,"wall_s":1}]}"#;
+        assert_eq!(l0_debt_at_10m(ok), None);
+        let smoke = r#"{"records":1024,"benches":[{"name":"ycsb_e","qps":1.0,"l0_files_at_start":9,"wall_s":1}]}"#;
+        assert_eq!(l0_debt_at_10m(smoke), None);
     }
 
     #[test]
@@ -3200,6 +3487,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 vec![
                     Some("ycsb_a_mc3"),
+                    Some("ycsb_b_mc3"),
                     Some("ycsb_f_mc3"),
                     Some("deps_cache_overwrite_mc3")
                 ]
@@ -3212,7 +3500,11 @@ mod tests {
 
             let mut r_only = YcsbRunner::new(cfg.clone());
             r_only.seed(&compat);
-            let only_blocks = r_only.run_clients_only(&compat, 3, Some("deps_cache_overwrite_mc3"));
+            let only_blocks = r_only.run_clients_only(
+                &compat,
+                3,
+                Some("deps_cache_overwrite_mc3"),
+            );
             assert_eq!(
                 only_blocks
                     .iter()
@@ -3230,10 +3522,109 @@ mod tests {
             let mut r2 = YcsbRunner::new(cfg.clone());
             r2.seed(&conc);
             let blocks2 = r2.run_clients(&conc, 3);
-            assert_eq!(blocks2.len(), 3);
+            assert_eq!(blocks2.len(), 4);
             assert!(conc.get(&ykey(0)).is_ok());
             assert!(conc.get(b"c/000000").is_ok());
         }
+    }
+
+    /// RFC-0238 P0.1: `ycsb_b_mc4` exists in the multi-client catalog —
+    /// the ONLY filter drives the shipped skip and the 95/5 mix runs
+    /// error-free against the real compat engine on a seeded keyspace.
+    #[test]
+    fn rfc0238_ycsb_b_mc4_only_filter_runs_b_mix() {
+        let dir = tempfile::tempdir().unwrap();
+        let compat = crate::engines::CompatEngine::open(dir.path());
+        let cfg = Cfg {
+            records: 64,
+            ops: 48,
+            payload: 16,
+            zipfian: false,
+            batch: 8,
+        };
+        let mut r = YcsbRunner::new(cfg);
+        r.seed(&compat);
+        let blocks = r.run_clients_only(&compat, 4, Some("ycsb_b_mc4"));
+        let names: Vec<_> = blocks
+            .iter()
+            .map(|b| {
+                b.split("\"name\": \"")
+                    .nth(1)
+                    .and_then(|s| s.split('"').next())
+            })
+            .collect();
+        assert_eq!(names, vec![Some("ycsb_b_mc4")]);
+        let b = &blocks[0];
+        assert!(b.contains("\"clients\": 4"), "{b}");
+        assert!(b.contains("\"errors\": 0"), "{b}");
+        assert!(b.contains("\"qps\":"), "{b}");
+        // 95/5 read-heavy mix over a seeded keyspace: writes only touch
+        // existing keys, so every seeded key stays readable afterwards.
+        assert!(compat.get(&ykey(0)).unwrap().is_some());
+        assert!(compat.get(&ykey(63)).unwrap().is_some());
+    }
+
+    /// RFC-0238 P0.2/P1.1: the ladder suite emits all four shapes on the
+    /// compat engine with zero errors (fill, rand 50/50 rw over present
+    /// keys, scan windows that count exactly). Small op/ws overrides keep
+    /// the test fast; official cells run the defaults.
+    #[test]
+    fn rfc0238_ladder_shapes_on_compat() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = crate::engines::CompatEngine::open(dir.path());
+        let cfg = Cfg {
+            records: 64,
+            ops: 8,
+            payload: 16,
+            zipfian: false,
+            batch: 4,
+        };
+        let mut r = YcsbRunner::new(cfg);
+        let blocks = r.run_ladder_only(&e, None, 256, 512);
+        let names: Vec<_> = blocks
+            .iter()
+            .map(|b| {
+                b.split("\"name\": \"")
+                    .nth(1)
+                    .and_then(|s| s.split('"').next())
+            })
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                Some("fjall_seq_64k"),
+                Some("fjall_seq_1m"),
+                Some("fjall_rand_rw_1m"),
+                Some("fjall_scan_1k")
+            ]
+        );
+        for b in &blocks {
+            assert!(b.contains("\"errors\": 0"), "{b}");
+            assert!(b.contains("\"qps\":"), "{b}");
+        }
+        // Fill + rand overwrites left the capped working set readable.
+        assert!(e.get(&fkey(0)).unwrap().is_some());
+        assert!(e.get(&fkey(511)).unwrap().is_some());
+
+        // ONLY filter drives the shipped skip: one shape, same guarantees.
+        let mut r2 = YcsbRunner::new(Cfg {
+            records: 64,
+            ops: 8,
+            payload: 16,
+            zipfian: false,
+            batch: 4,
+        });
+        let only = r2.run_ladder_only(&e, Some("fjall_seq_1m"), 64, 0);
+        assert_eq!(
+            only.iter()
+                .map(|b| b
+                    .split("\"name\": \"")
+                    .nth(1)
+                    .and_then(|s| s.split('"').next()))
+                .collect::<Vec<_>>(),
+            vec![Some("fjall_seq_1m")]
+        );
+        assert!(only[0].contains("\"errors\": 0"), "{}", only[0]);
     }
 
     /// RFC-0040 P1.1: apply + raftlog MC on compat (group commit / ConcurrentDb).
@@ -3394,9 +3785,11 @@ mod tests {
         let a = peer_anomalies(&peer);
         assert!(a.iter().any(|s| s.contains("collapsed")), "{a:?}");
         peer.insert("deps_cache_overwrite_mc4".into(), 270_000.0);
-        assert!(peer_anomalies(&peer)
-            .iter()
-            .all(|s| !s.contains("collapsed")));
+        assert!(
+            peer_anomalies(&peer)
+                .iter()
+                .all(|s| !s.contains("collapsed"))
+        );
     }
 
     #[test]
@@ -3516,6 +3909,7 @@ mod tests {
                 Some("myrocks_read_only"),
                 Some("myrocks_write_tx"),
                 Some("linkbench_mix"),
+                Some("linkbench_mix_probe"),
             ]
         );
         assert!(e.get(&nkey(0)).unwrap().is_some());
@@ -3660,5 +4054,74 @@ mod tests {
         assert!(e.compact_drop_prefix(b"drop/"));
         assert!(e.get(b"drop/z").unwrap().is_none());
         assert_eq!(e.get(b"keep/z").unwrap().as_deref(), Some(&b"1"[..]));
+    }
+
+    /// RFC-0217 P1.2 (named U-loss `ingest_sst`): a `get` right after
+    /// `ingest_external_file` must see the ingested key. Was red on
+    /// 2026-09-13 — the native direct-install ran with named CFs, where
+    /// the default CF is `default\0`-prefixed and the raw-key external
+    /// file was invisible to reads. The install path is now gated on
+    /// `codec.default_raw`; this test keeps the replay (CF) leg covered.
+    #[test]
+    fn rfc0217_p12_ingest_readback() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = crate::engines::CompatEngine::open(dir.path());
+        assert!(e.ingest_kvs(&[(b"ing-k".as_slice(), b"ing-v".as_slice())]));
+        assert_eq!(e.get(b"ing-k").unwrap().as_deref(), Some(&b"ing-v"[..]));
+    }
+
+    /// RFC-0238 P0.2: the fjall peer adapter round-trips put/get/scan, the
+    /// CF surface is total (deps trait methods map to keyspaces), and the
+    /// ladder suite emits shapes on it — same runner, same schedule as the
+    /// compat side of the absolute-QPS ladder.
+    #[cfg(feature = "fjall")]
+    #[test]
+    fn rfc0238_fjall_engine_roundtrip_and_ladder_shapes() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = crate::engines::FjallEngine::open(dir.path());
+        assert_eq!(e.label(), "fjall");
+        assert!(!e.sync(), "fjall peer column is async-journal");
+        assert!(e.put(b"f/0000000", b"v"));
+        assert_eq!(e.get(b"f/0000000").unwrap().unwrap(), b"v");
+        assert!(e.get(b"f/missing").unwrap().is_none());
+        assert!(e.put(b"f/0000001", b"v"));
+        assert!(e.put(b"f/0000002", b"v"));
+        assert_eq!(e.scan_count(b"f/0000000", b"f/0000002", 10).unwrap(), 2);
+        assert!(e.flush());
+        // CF surface is total (deps trait methods map to keyspaces).
+        assert!(e.put_cf("raftlog", b"r/1", b"v"));
+        assert_eq!(e.get_cf("raftlog", b"r/1").unwrap().unwrap(), b"v");
+        assert!(e.batch(vec![
+            CfWrite::Put {
+                cf: "write",
+                k: b"u/000001".to_vec(),
+                v: b"c".to_vec(),
+            },
+            CfWrite::Delete {
+                cf: "lock",
+                k: b"u/000001".to_vec(),
+            },
+        ]));
+        assert_eq!(e.get_cf("write", b"u/000001").unwrap().unwrap(), b"c");
+        // Ladder emission on the fjall side.
+        let cfg = Cfg {
+            records: 64,
+            ops: 8,
+            payload: 16,
+            zipfian: false,
+            batch: 4,
+        };
+        let mut r = YcsbRunner::new(cfg);
+        let blocks = r.run_ladder_only(&e, Some("fjall_seq_64k"), 128, 0);
+        let names: Vec<_> = blocks
+            .iter()
+            .map(|b| {
+                b.split("\"name\": \"")
+                    .nth(1)
+                    .and_then(|s| s.split('"').next())
+            })
+            .collect();
+        assert_eq!(names, vec![Some("fjall_seq_64k")]);
+        assert!(blocks[0].contains("\"errors\": 0"), "{}", blocks[0]);
     }
 }

@@ -313,6 +313,11 @@ pub open spec fn vlog_ptr_orphaned_spec(vlog_closed: bool) -> bool {
     vlog_closed
 }
 
+pub open spec fn vlog_ptr_orphaned_as_is_spec(_vlog_closed: bool) -> bool {
+    false
+}
+
+#[verifier::when_used_as_spec(vlog_ptr_orphaned_spec)]
 pub fn vlog_ptr_orphaned(vlog_closed: bool) -> (d: bool)
     ensures
         d == vlog_ptr_orphaned_spec(vlog_closed),
@@ -332,7 +337,7 @@ proof fn lemma_vlog_ptr_orphaned()
     ensures
         vlog_ptr_orphaned(true),
         !vlog_ptr_orphaned(false),
-        !vlog_ptr_orphaned_as_is(true),
+        !vlog_ptr_orphaned_as_is_spec(true),
 {
 }
 
@@ -350,7 +355,8 @@ mod tests {
             "AS-IS tooth: empty snap treated live"
         );
         assert!(!snap_is_empty(1));
-        let body = named_fn_src(include_str!("db.rs"), "count_in_range").expect("count_in_range");
+        let body =
+            named_fn_src(include_str!("db_kernel.rs"), "count_in_range").expect("count_in_range");
         assert!(
             body.contains("snap_is_empty("),
             "count_in_range must match snap_is_empty"
@@ -359,24 +365,25 @@ mod tests {
             !body.contains("batch_is_empty("),
             "count_in_range must not wrap seq==0 onto batch_is_empty"
         );
-        let last =
-            named_fn_src(include_str!("db.rs"), "last_under_prefix").expect("last_under_prefix");
+        let last = named_fn_src(include_str!("db_kernel.rs"), "last_under_prefix")
+            .expect("last_under_prefix");
         assert!(
             last.contains("snap_is_empty("),
             "last_under_prefix must match snap_is_empty"
         );
-        let user = named_fn_src(include_str!("db.rs"), "last_under_user_prefix")
+        let user = named_fn_src(include_str!("db_kernel.rs"), "last_under_user_prefix")
             .expect("last_under_user_prefix");
         assert!(
             user.contains("snap_is_empty("),
             "last_under_user_prefix must match snap_is_empty"
         );
-        let vis = named_fn_src(include_str!("db.rs"), "count_visible").expect("count_visible");
+        let vis =
+            named_fn_src(include_str!("db_kernel.rs"), "count_visible").expect("count_visible");
         assert!(
             vis.contains("snap_is_empty("),
             "count_visible must match snap_is_empty"
         );
-        let scan = named_fn_src(include_str!("db.rs"), "scan_at_raw").expect("scan_at_raw");
+        let scan = named_fn_src(include_str!("db_kernel.rs"), "scan_at_raw").expect("scan_at_raw");
         assert!(
             scan.contains("snap_is_empty("),
             "scan_at_raw must match snap_is_empty"
@@ -396,13 +403,13 @@ mod tests {
         );
         assert!(!snap_below_watermark(5, 5));
         assert!(!snap_below_watermark(7, 5));
-        let body = named_fn_src(include_str!("db.rs"), "ensure_snapshot_readable")
+        let body = named_fn_src(include_str!("db_kernel.rs"), "ensure_snapshot_readable")
             .expect("ensure_snapshot_readable");
         assert!(
             body.contains("snap_below_watermark("),
             "ensure_snapshot_readable must match snap_below_watermark"
         );
-        let ch = named_fn_src(include_str!("db.rs"), "changes").expect("changes");
+        let ch = named_fn_src(include_str!("db_kernel.rs"), "changes").expect("changes");
         assert!(
             ch.contains("snap_below_watermark("),
             "changes must match snap_below_watermark"
@@ -427,7 +434,7 @@ mod tests {
             !vlog_ptr_orphaned_as_is(true),
             "AS-IS tooth: closed vlog still serves the pointer"
         );
-        let body = named_fn_src(include_str!("db.rs"), "resolve_stored_value")
+        let body = named_fn_src(include_str!("db_kernel.rs"), "resolve_stored_value")
             .expect("resolve_stored_value");
         assert!(
             body.contains("vlog_ptr_orphaned("),
@@ -448,7 +455,7 @@ mod tests {
             prefer_newer_seq_as_is(true, 2, 4),
             "AS-IS tooth: first candidate always wins"
         );
-        let src = include_str!("sst/table.rs");
+        let src = include_str!("sst/table_kernel.rs");
         let body = src
             .split("fn best_point_in_entry_slice")
             .nth(1)
@@ -487,7 +494,7 @@ mod tests {
                 "published_seq.load(Ordering::Acquire) == snapshot",
             ),
         ] {
-            let body = named_fn_src(include_str!("db.rs"), fn_name)
+            let body = named_fn_src(include_str!("db_kernel.rs"), fn_name)
                 .unwrap_or_else(|| panic!("missing fn {fn_name}"));
             assert!(
                 body.contains("match crate::lookup_kernel::point_cache_validity("),
@@ -519,12 +526,12 @@ mod tests {
         );
         // Live: the four point gates match the kernel plan; the inline
         // visible_at(Value, ..) gate left the trampoline.
-        let lu = named_fn_src(include_str!("db.rs"), "lookup").expect("lookup");
+        let lu = named_fn_src(include_str!("db_kernel.rs"), "lookup").expect("lookup");
         assert!(
             lu.matches("point_tombstone_plan(").count() >= 2,
             "lookup must match point_tombstone_plan on both gates"
         );
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         assert_eq!(
             src.matches("point_tombstone_plan(").count(),
             4,
@@ -535,7 +542,7 @@ mod tests {
     /// RFC-0174 P1.2: data-fate `if`s on get_at / lookup must call a kernel.
     #[test]
     fn get_at_and_lookup_path_data_fate_ifs_call_kernels() {
-        let src = include_str!("db.rs");
+        let src = include_str!("db_kernel.rs");
         let get_fns = ["get_at", "lookup", "lookup_body", "scan_mem_for_lookup"];
         let mut bad = Vec::new();
         let mut seen = 0usize;

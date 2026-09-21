@@ -6,5 +6,8 @@ license.workspace = true
 description = "POSIX fdatasync / fadvise for PedraDB (core stays forbid(unsafe_code))"
 rust-version.workspace = true
 
+
+[lib]
+path = "src/lib_kernel.rs"
 [dependencies]
 libc = "0.2"

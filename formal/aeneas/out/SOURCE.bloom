@@ -1,4 +1,4 @@
-path=crates/pedradb-core/src/bloom.rs
-sha256=951aec1e0f568a88debde1723dcc8c782fe0b8034cc58427ffea038bc76a68cd
-aeneas=daa85d7
+path=crates/pedradb-core/src/bloom_kernel.rs
+sha256=9633a10dd3a276559962b5b3b4ef46c7eda9120341803e410bfc03de4327730b
+aeneas=f5a4c58-dirty
 charon=0.1.232

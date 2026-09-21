@@ -1102,14 +1102,14 @@ ATOM_REASON_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})$")
 AENEAS_EXTRACTS = (
     ("crates/pedradb-raft/src/vote_kernel.rs", "formal/aeneas/out/SOURCE"),
     ("crates/pedradb-fold/src/isolated_kernel.rs", "formal/aeneas/out/SOURCE.isolated"),
-    ("crates/pedradb-core/src/bloom.rs", "formal/aeneas/out/SOURCE.bloom"),
+    ("crates/pedradb-core/src/bloom_kernel.rs", "formal/aeneas/out/SOURCE.bloom"),
     ("crates/pedradb-raft/src/ae_kernel.rs", "formal/aeneas/out/SOURCE.ae"),
     ("crates/pedradb-raft/src/commit_kernel.rs", "formal/aeneas/out/SOURCE.commit"),
     ("crates/pedradb-core/src/group_commit_kernel.rs", "formal/aeneas/out/SOURCE.group_commit"),
     ("crates/pedradb-core/src/wal/reopen_kernel.rs", "formal/aeneas/out/SOURCE.reopen"),
     ("crates/pedradb-core/src/wal/recover_kernel.rs", "formal/aeneas/out/SOURCE.wal_recover"),
     ("crates/pedradb-raft/src/apply_kernel.rs", "formal/aeneas/out/SOURCE.apply"),
-    ("crates/pedradb-core/src/prefix.rs", "formal/aeneas/out/SOURCE.prefix"),
+    ("crates/pedradb-core/src/prefix_kernel.rs", "formal/aeneas/out/SOURCE.prefix"),
     (
         "crates/pedradb-core/src/write_admission_kernel.rs",
         "formal/aeneas/out/SOURCE.write_admission",
@@ -1140,12 +1140,12 @@ AENEAS_EXTRACTS = (
     ("crates/pedradb-stream/src/cursor_kernel.rs", "formal/aeneas/out/SOURCE.cursor"),
     ("crates/pedradb-http/src/cl_kernel.rs", "formal/aeneas/out/SOURCE.cl"),
     (
-        "crates/montanha-fdb-recipes/src/children_kernel.rs",
+        "crates/distributed-fdb-recipes/src/children_kernel.rs",
         "formal/aeneas/out/SOURCE.children",
     ),
     ("crates/pedradb-journal/src/pin_kernel.rs", "formal/aeneas/out/SOURCE.pin"),
     (
-        "crates/montanha-fdb-recipes/src/pack_kernel.rs",
+        "crates/distributed-fdb-recipes/src/pack_kernel.rs",
         "formal/aeneas/out/SOURCE.pack",
     ),
     ("crates/pedradb-replicate/src/ship_kernel.rs", "formal/aeneas/out/SOURCE.ship"),
@@ -1173,7 +1173,7 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-core/src/disk_pressure_kernel.rs",
         "formal/aeneas/out/SOURCE.disk_pressure",
     ),
-    ("crates/pedradb-core/src/wal/crc.rs", "formal/aeneas/out/SOURCE.crc"),
+    ("crates/pedradb-core/src/wal/crc_kernel.rs", "formal/aeneas/out/SOURCE.crc"),
     (
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "formal/aeneas/out/SOURCE.env_crash",
@@ -1210,7 +1210,7 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-store/src/vote_kernel.rs",
         "formal/aeneas/out/SOURCE.store_vote",
     ),
-    ("crates/pedradb-core/src/key.rs", "formal/aeneas/out/SOURCE.key"),
+    ("crates/pedradb-core/src/key_kernel.rs", "formal/aeneas/out/SOURCE.key"),
     (
         "crates/pedradb-dcs/src/lease_kernel.rs",
         "formal/aeneas/out/SOURCE.lease",
@@ -1239,8 +1239,8 @@ AENEAS_EXTRACTS = (
         "crates/pedradb-capi/src/handles.rs",
         "formal/aeneas/out/SOURCE.capi_handles",
     ),
-    ("crates/pedradb-core/src/batch.rs", "formal/aeneas/out/SOURCE.batch"),
-    ("crates/pedradb-core/src/merge.rs", "formal/aeneas/out/SOURCE.merge"),
+    ("crates/pedradb-core/src/batch_kernel.rs", "formal/aeneas/out/SOURCE.batch"),
+    ("crates/pedradb-core/src/merge_kernel.rs", "formal/aeneas/out/SOURCE.merge"),
     (
         "crates/pedradb-http/src/fail_closed.rs",
         "formal/aeneas/out/SOURCE.fail_closed",
@@ -1250,7 +1250,7 @@ AENEAS_EXTRACTS = (
         "formal/aeneas/out/SOURCE.probe_order",
     ),
     (
-        "crates/rocksdb-compat/src/locktab.rs",
+        "crates/rocksdb-compat/src/locktab_kernel.rs",
         "formal/aeneas/out/SOURCE.locktab",
     ),
     (
@@ -1262,7 +1262,7 @@ AENEAS_EXTRACTS = (
         "formal/aeneas/out/SOURCE.cf",
     ),
     (
-        "crates/montanha-fdb-recipes/src/fields_kernel.rs",
+        "crates/distributed-fdb-recipes/src/fields_kernel.rs",
         "formal/aeneas/out/SOURCE.fields",
     ),
     (
@@ -1270,11 +1270,11 @@ AENEAS_EXTRACTS = (
         "formal/aeneas/out/SOURCE.lsm_r1",
     ),
     (
-        "crates/pedradb-core/src/leveling.rs",
+        "crates/pedradb-core/src/leveling_kernel.rs",
         "formal/aeneas/out/SOURCE.leveling",
     ),
     (
-        "crates/pedradb-posix/src/lib.rs",
+        "crates/pedradb-posix/src/lib_kernel.rs",
         "formal/aeneas/out/SOURCE.posix",
     ),
     (
@@ -1720,7 +1720,7 @@ def check_extract(
             "aeneas extract artifact BloomKernel.lean missing (run ./scripts/aeneas_bloom.sh)"
         )
     bloom_stamp = root / "formal/aeneas/out/SOURCE.bloom"
-    bloom_src = root / "crates/pedradb-core/src/bloom.rs"
+    bloom_src = root / "crates/pedradb-core/src/bloom_kernel.rs"
     if bloom_stamp.is_file() and bloom_src.is_file():
         want = None
         for line in bloom_stamp.read_text(encoding="utf-8").splitlines():
@@ -1902,7 +1902,7 @@ def check_extract(
 
     # RFC-0170 P0.3: prefix.rs stamp.
     pref_stamp = root / "formal/aeneas/out/SOURCE.prefix"
-    pref_src = root / "crates/pedradb-core/src/prefix.rs"
+    pref_src = root / "crates/pedradb-core/src/prefix_kernel.rs"
     if pref_stamp.is_file() and pref_src.is_file():
         want = None
         for line in pref_stamp.read_text(encoding="utf-8").splitlines():
@@ -2083,7 +2083,7 @@ def check_extract(
             "formal/aeneas/out/lean/ChildrenKernel.lean",
             "def PACKED_CHILD_END",
             "./scripts/aeneas_children.sh",
-            "crates/montanha-fdb-recipes/src/children_kernel.rs",
+            "crates/distributed-fdb-recipes/src/children_kernel.rs",
             "formal/aeneas/lean/Children.lean",
             ("theorem packed_child_end_byte",),
         ),
@@ -2101,7 +2101,7 @@ def check_extract(
             "formal/aeneas/out/lean/PackKernel.lean",
             "def pack_cut_tag",
             "./scripts/aeneas_pack.sh",
-            "crates/montanha-fdb-recipes/src/pack_kernel.rs",
+            "crates/distributed-fdb-recipes/src/pack_kernel.rs",
             "formal/aeneas/lean/Pack.lean",
             ("theorem pack_cut_tag_identity",),
         ),
@@ -2230,7 +2230,7 @@ def check_extract(
             "formal/aeneas/out/lean/CrcKernel.lean",
             "def crc_match_ok",
             "./scripts/aeneas_crc.sh",
-            "crates/pedradb-core/src/wal/crc.rs",
+            "crates/pedradb-core/src/wal/crc_kernel.rs",
             "formal/aeneas/lean/Crc.lean",
             ("theorem crc_match_ok_equal",),
         ),

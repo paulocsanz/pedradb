@@ -128,11 +128,28 @@ fn main() {
         None => true,
         Some(list) => list.iter().any(|s| s == name),
     };
+    // RFC-0234 P2.2: @10M window that starts with L0 above the trigger
+    // is the same class of refusal as a `sync: true` peer — do not
+    // publish `compat_over_rocksdb` for the indebted shape.
+    let l0_debt = rocksdb_parity_bench::l0_debt_at_10m(&compat_raw);
+    if let Some((ref shape, l0)) = l0_debt {
+        eprintln!(
+            "rocks-parity-compare: {shape} @10M started with l0_files={l0} > trigger={} — \
+             that cell does not publish compat_over_rocksdb (RFC-0234 P2.2). \
+             Production ingest must compact L0 at trigger; settle of the bench is not a product path.",
+            pedradb_core::L0_COMPACTION_TRIGGER
+        );
+    }
     let mut real_ratios: Vec<f64> = Vec::new();
     let mut gated_ratios: Vec<f64> = Vec::new();
     let mut ratios = String::from("[\n");
     for (i, shape) in shapes.iter().enumerate() {
-        let c_kps = compat_metrics.get(*shape).copied();
+        let indebted = l0_debt.as_ref().is_some_and(|(s, _)| s == shape);
+        let c_kps = if indebted {
+            None
+        } else {
+            compat_metrics.get(*shape).copied()
+        };
         let r_kps = peer_metrics.get(*shape).copied();
         let (ratio, ratio_v) = match (c_kps, r_kps) {
             (Some(a), Some(b)) if b > 0.0 => {
@@ -348,6 +365,9 @@ fn main() {
         && std::env::var("ROCKS_PARITY_FAIL_PEER_ANOMALY").as_deref() == Ok("1")
     {
         eprintln!("parity gate FAILED: peer_anomalies={}", anomalies.len());
+        std::process::exit(2);
+    }
+    if l0_debt.is_some() {
         std::process::exit(2);
     }
 }

@@ -18,7 +18,7 @@ if [[ -z "$CHARON" || -z "$AENEAS" ]]; then
   echo "skip  $msg"; exit 0
 fi
 SRC="$ROOT/crates/pedradb-core/src/sst/magic_kernel.rs"
-TABLE="$ROOT/crates/pedradb-core/src/sst/table.rs"
+TABLE="$ROOT/crates/pedradb-core/src/sst/table_kernel.rs"
 # Const pin: shim SST_MAGIC must equal the production table.rs line.
 if ! grep -q 'pub const SST_MAGIC: &\[u8; 8\] = b"PEDRSST\\0";' "$TABLE"; then
   echo "FAIL  production table.rs SST_MAGIC line changed — update the shim const" >&2

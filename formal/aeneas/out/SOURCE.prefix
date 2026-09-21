@@ -1,4 +1,4 @@
-path=crates/pedradb-core/src/prefix.rs
-sha256=54502dc46e3213c6121098523e964fa3dd94ea478df58055cad15b4be44aeb70
+path=crates/pedradb-core/src/prefix_kernel.rs
+sha256=21c4e0ff1eba39d7f1cdb705e53bf907d2c1a5bf18ed47a2d6ea148f5731e63e
 aeneas=daa85d7
 charon=0.1.232

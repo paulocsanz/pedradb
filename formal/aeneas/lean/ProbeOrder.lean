@@ -55,10 +55,10 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P2.2 (atom `catalog:probe_order`, entry
-    `first_probe_on_equal_lo`): tie of lo probes EXACTLY the
-    newest — the result is the cited `newer` index. The AS-IS returns the
-    older one (resurrects on the tie — tooth planted). -/
+/-- RFC-0218 P2.2 (atom `catalog:probe_order`, entrada
+    `first_probe_on_equal_lo`): empate de lo probeia EXATAMENTE o mais
+    novo — o resultado é o índice `newer` citado. O AS-IS devolve o mais
+    velho (resurrect no empate — tooth plantado). -/
 theorem probe_order_fate_iff :
     ∀ (newer older : Usize) (v : Usize),
       (first_probe_on_equal_lo newer older = ok v) ↔ (v = newer) := by
@@ -72,9 +72,9 @@ theorem probe_order_fate_iff :
     unfold first_probe_on_equal_lo
     rfl
 
-/-- RFC-0218 P2.2 (atom `catalog:probe_order_covering`, entry
-    `probe_order_covering`): the list of candidatos is EXACTLY the loop
-    cited — newest_first with capacity len newest_first, of the zero, with
+/-- RFC-0218 P2.2 (atom `catalog:probe_order_covering`, entrada
+    `probe_order_covering`): a lista de candidatos é EXATAMENTE o loop
+    citado — newest_first com capacidade len newest_first, do zero, com
     o porte covering_pos e o gate covering_hi_ge decidindo push/skip. -/
 theorem probe_order_covering_fate_iff :
     ∀ (newest_first : Slice Usize) (by_lo : Slice Usize)
@@ -88,11 +88,11 @@ theorem probe_order_covering_fate_iff :
   unfold probe_order_covering
   exact Iff.rfl
 
-/-- RFC-0218 P2.2 (atom `catalog:run_disjoint`, entry
-    `run_pairwise_disjoint_los`): disjunction of run is EXACTLY the par
-    cited — n = min of the comprimentos, n >= 2 and the all cited over
-    1..n (closed hi[i-1] < lo[i]). The AS-IS uses <= (the tie arma the
-    bisect that ressuscita — tooth planted). -/
+/-- RFC-0218 P2.2 (atom `catalog:run_disjoint`, entrada
+    `run_pairwise_disjoint_los`): disjunção de run é EXATAMENTE o par
+    citado — n = min dos comprimentos, n >= 2 e o all citado sobre
+    1..n (fechado hi[i-1] < lo[i]). O AS-IS usa <= (o empate arma o
+    bisect que ressuscita — tooth plantado). -/
 theorem run_disjoint_fate_iff :
     ∀ (los his : Slice (Slice U8)) (v : Bool),
       (run_pairwise_disjoint_los los his = ok v) ↔

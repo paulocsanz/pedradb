@@ -9,4 +9,4 @@ publish = false
 description = "Standalone crate whose [lib] path is production prefix.rs (RFC-0170 P0.3)"
 
 [lib]
-path = "../../../crates/pedradb-core/src/prefix.rs"
+path = "../../../crates/pedradb-core/src/prefix_kernel.rs"

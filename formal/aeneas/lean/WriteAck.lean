@@ -138,14 +138,14 @@ theorem d1_holds_as_is_cut_below_barrier :
   simp [core.cmp.Ord.min.trait_default, core.cmp.Ord.min.default,
     core.cmp.Ord.min_body, core.cmp.impls.PartialOrdU64.lt]
 
-/-! ## RFC-0214 P1.1 — stitch WriteAck in the atom rung (fate ∀) -/
+/-! ## RFC-0214 P1.1 — costura WriteAck no degrau atom (fate ∀) -/
 
-/-- RFC-0214 P1.1 (atom `catalog:write_ack_append`): o step append
-of the ledger is the atom `wal_append` — `written` grows by `bytes`,
-`acked`/`synced` untouched (the append never fabricates barrier nem
-ack). Fate forall over the body extracted. The mutant AS-IS
-(`write_ack_ledger_as_is`) acka without barrier — the plants DST
-`verified_write_ack_on_live_profile_is_not_ok` refuses. -/
+/-- RFC-0214 P1.1 (atom `catalog:write_ack_append`): o passo append
+do ledger é o atom `wal_append` — `written` cresce por `bytes`,
+`acked`/`synced` intocados (o append nunca fabrica barreira nem
+ack). Fate forall sobre o corpo extraído. O mutante AS-IS
+(`write_ack_ledger_as_is`) acka sem barreira — a planta DST
+`verified_write_ack_on_live_profile_is_not_ok` recusa. -/
 theorem on_append_fate_iff :
     ∀ (l : write_ack_kernel.WriteAckLedger) (bytes w : U64),
       (write_ack_kernel.WriteAckLedger.on_append l bytes
@@ -175,13 +175,13 @@ theorem on_append_fate_iff :
     rw [h]
     simp only [bind_tc_ok]
 
-/-- RFC-0214 P1.1 (atom `catalog:write_ack_barrier`): the barrier step
-of the ledger is the Honest `wal_sync` atom — the Ok is EXACTLY the promoted
-state (`synced := written` via `fsync_promotes_pending`; the min of
-`CrashModel.of` is overridden by the Honest branch): there is no Ok that
-leaves `synced` behind `written`. Fate forall over the body extracted.
-The mutant AS-IS that skips the barrier (`write_ack_ledger_as_is`) is
-refused by the plants DST `verified_write_ack_on_live_profile_is_not_ok`. -/
+/-- RFC-0214 P1.1 (atom `catalog:write_ack_barrier`): o passo barrier
+do ledger é o atom `wal_sync` Honest — o Ok é EXATAMENTE o estado
+promovido (`synced := written` via `fsync_promotes_pending`; o min de
+`CrashModel.of` é sobrescrito pelo ramo Honest): não existe Ok que
+deixe `synced` atrás de `written`. Fate forall sobre o corpo extraído.
+O mutante AS-IS que pula a barreira (`write_ack_ledger_as_is`) é
+recusado pela planta DST `verified_write_ack_on_live_profile_is_not_ok`. -/
 theorem on_barrier_fate_iff :
     ∀ (l l' : write_ack_kernel.WriteAckLedger),
       (write_ack_kernel.WriteAckLedger.on_barrier l = ok l') ↔
@@ -212,15 +212,15 @@ theorem on_barrier_fate_iff :
       env_crash_kernel.SyncHonesty.read_discriminant]
     split <;> simp only [bind_tc_ok]
 
-/-- RFC-0214 P1.1 (atom `catalog:write_ack_ack`): o step ack do
-ledger is the atom `wal_ack` over the gap synced−acked — the Ok there is
-iff `acked ≤ synced` (the step requires the invariant) and is EXACTLY the
-state with `acked := synced`: the gap becomes acknowledged, nothing beyond
-(the saturated value of the body promotes only up to the barrier). Outside the
-invariant the checked subtraction of the gap fails — without Ok, the ack never
-fabricates durability. Fate forall over the body extracted. O
-mutant AS-IS (`write_ack_ledger_as_is`) acka without barrier —
-refused by the plants DST
+/-- RFC-0214 P1.1 (atom `catalog:write_ack_ack`): o passo ack do
+ledger é o atom `wal_ack` sobre o gap synced−acked — o Ok existe
+iff `acked ≤ synced` (o passo exige a invariante) e é EXATAMENTE o
+estado com `acked := synced`: o gap vira acknowledged, nada além
+(o saturado do corpo promove só até a barreira). Fora da
+invariante a subtração checada do gap falha — sem Ok, o ack nunca
+fabrica durabilidade. Fate forall sobre o corpo extraído. O
+mutante AS-IS (`write_ack_ledger_as_is`) acka sem barreira —
+recusado pela planta DST
 `verified_write_ack_on_live_profile_is_not_ok`. -/
 theorem on_ack_fate_iff :
     ∀ (l l' : write_ack_kernel.WriteAckLedger),
@@ -357,8 +357,8 @@ theorem on_ack_fate_iff :
         rw [hsub] at hzf
         cases hzf
 
-/-! ## RFC-0215 P1.2 — iff twin of the atom `catalog:d1_modelo` over
-the copy of the d1_modelo in this extract (leg of the crown composta). -/
+/-! ## RFC-0215 P1.2 — iff gêmea do atom `catalog:d1_modelo` sobre
+a cópia do d1_modelo neste extrato (perna da crown composta). -/
 
 /-- Any ok-valued Result bind forces the bound term to be ok
 (Cf.lean's `bind_ok_inv`, restated for this module). -/
@@ -389,12 +389,12 @@ def wa_d1m_loses (s : wal.wal_state_kernel.WalState)
         ∃ b1, env_crash_kernel.crash_legal cm cut = ok b1 ∧
           b1 = true ∧ cut < rec_end
 
-/-- RFC-0215 P1.2 leg: the iff of the atom `catalog:d1_modelo`
-(`d1_modelo_fate_iff`, D1Modelo.lean) re-proved with the same technique
-over the COPY of the `d1_modelo` that lives in this extract — the two
-environments cannot be imported together (generated names collide at the root), and the
-crown composta (`ComposeProductCrown.lean`) cites THIS twin over the
-ledger of the spine. Same sentence, body extracted not reopened. -/
+/-- RFC-0215 P1.2 perna: a iff do atom `catalog:d1_modelo`
+(`d1_modelo_fate_iff`, D1Modelo.lean) reprovada com a mesma técnica
+sobre a CÓPIA do `d1_modelo` que vive neste extrato — os dois
+ambientes não importam juntos (nomes gerados na raiz colidem), e a
+crown composta (`ComposeProductCrown.lean`) cita ESTA gêmea sobre o
+ledger da spine. Mesma sentença, corpo extraído não reaberto. -/
 theorem wa_d1_modelo_fate_iff :
     ∀ (s : wal.wal_state_kernel.WalState) (rec_end cut : U64) (v : Bool),
       (d1_modelo_kernel.d1_modelo s rec_end cut = ok v) ↔

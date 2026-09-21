@@ -74,12 +74,12 @@ theorem wal_sync_lying_does_not_promote :
     core.cmp.Ord.min_body, core.cmp.impls.PartialOrdU64.lt,
     env_crash_kernel.SyncHonesty.read_discriminant]
 
-/-! ## RFC-0191 P2.1 — Inv-WAL preservation (one step) + corollary D1 -/
+/-! ## RFC-0191 P2.1 — Inv-WAL preservação (um passo) + corolário D1 -/
 
-/-- Forma closed of `inv_wal`: the conjunction Booleana of the two containments
-(`acked ⊆ synced` and `synced ⊆ written`; the ceiling of the legal crash is
-`written`, therefore `synced ≤ written` is exactly "synced is in the
-prefix-recoverable"). -/
+/-- Forma fechada de `inv_wal`: a conjunção Booleana das duas contenções
+(`acked ⊆ synced` e `synced ⊆ written`; o teto de um crash legal é
+`written`, logo `synced ≤ written` é exatamente "synced está no
+prefixo-recuperável"). -/
 theorem wal_inv_closed :
     ∀ (s : wal.wal_state_kernel.WalState),
       wal.wal_state_kernel.inv_wal s =
@@ -93,8 +93,8 @@ theorem wal_inv_closed :
   · rename_i h1
     rw [decide_eq_false (by simpa using h1), Bool.false_and]
 
-/-- Forma closed of the append ok: writes `written + n`; barrier and
-prefix acked do not move. -/
+/-- Forma fechada de um append ok: escreve `written + n`; barreira e
+prefixo acked não se movem. -/
 theorem wal_append_closed :
     ∀ (s : wal.wal_state_kernel.WalState) (n w : U64),
       s.written + n = ok w →
@@ -105,9 +105,9 @@ theorem wal_append_closed :
   rw [hw]
   simp only [bind_tc_ok]
 
-/-- Inv-WAL (one step, RFC-0191 P2.1): any `ok` outcome of
-`wal_append` preserves `acked ⊆ synced ⊆ prefix-recoverable` — the
-barrier and the acked do not move and the log only grows. -/
+/-- Inv-WAL (um passo, RFC-0191 P2.1): qualquer desfecho `ok` de
+`wal_append` preserva `acked ⊆ synced ⊆ prefixo-recuperável` — a
+barreira e o acked não se movem e o log só cresce. -/
 theorem wal_append_preserves_inv_wal :
     ∀ (s s' : wal.wal_state_kernel.WalState) (n : U64),
       wal.wal_state_kernel.inv_wal s = ok true →
@@ -144,11 +144,11 @@ theorem wal_append_preserves_inv_wal :
     rw [hadd] at happ
     simp at happ
 
-/-- Corollary D1 (RFC-0191 P2.1): when the plan of the kernel that the rustc
-turns on (`wal_commit_plan`) sends Sync before of Apply/Ok (close P1.2), the
-step of append that the precede preserves Inv-WAL — the Ok of the client only
-there is with `acked ⊆ synced ⊆ prefix-recoverable`. Cites the close P1.2
-(`d1_wal_commit_plan`) e o lemma `wal_append_preserves_inv_wal`. -/
+/-- Corolário D1 (RFC-0191 P2.1): quando o plano do kernel que o rustc
+liga (`wal_commit_plan`) manda Sync antes de Apply/Ok (close P1.2), o
+passo de append que o precede preserva Inv-WAL — o Ok do cliente só
+existe com `acked ⊆ synced ⊆ prefixo-recuperável`. Cita o close P1.2
+(`d1_wal_commit_plan`) e o lema `wal_append_preserves_inv_wal`. -/
 theorem d1_plan_append_preserves_inv_wal :
     ∀ (need_sync sync_fail : Bool)
       (s s' : wal.wal_state_kernel.WalState) (n : U64),
@@ -165,23 +165,23 @@ theorem d1_plan_append_preserves_inv_wal :
     · exact wal_append_preserves_inv_wal s s' n hinv happ
     · exact absurd hplan (by intro hh; simp at hh)
 
-/-! ## RFC-0198 P1.1 — base initial + reachability inductive (Inv-WAL) -/
+/-! ## RFC-0198 P1.1 — base inicial + alcançabilidade indutiva (Inv-WAL) -/
 
-/-- State initial of the WAL (log empty): the three watermarks in zero — the
-that the production builds for the log new (`wal_state_of 0 0 0`: only there is the
-prefix empty, nothing acked, nothing synced). -/
+/-- Estado inicial do WAL (log vazio): os três watermarks em zero — o
+que a produção constrói para um log novo (`wal_state_of 0 0 0`: só há o
+prefixo vazio, nada acked, nada synced). -/
 def wal_state_init : wal.wal_state_kernel.WalState :=
   { acked := 0#u64, synced := 0#u64, written := 0#u64 }
 
-/-- BASE of the induction: the log empty satisfaz Inv-WAL (zero ⊆ zero ⊆ zero). -/
+/-- BASE da indução: o log vazio satisfaz Inv-WAL (zero ⊆ zero ⊆ zero). -/
 theorem inv_wal_init :
     wal.wal_state_kernel.inv_wal wal_state_init = ok true := by
   unfold wal.wal_state_kernel.inv_wal
   rfl
 
-/-- Reachability by n appends ok (forma inductive seL4): the state is
-reachable when there is the chain of `n` steps `wal_append` that
-retornam ok starting from the state initial. -/
+/-- Alcançabilidade por n appends ok (forma indutiva seL4): um estado é
+alcançável quando existe uma cadeia de `n` passos `wal_append` que
+retornam ok a partir do estado inicial. -/
 inductive wal_append_reach :
     Nat → wal.wal_state_kernel.WalState → Prop
   | zero : wal_append_reach 0 wal_state_init
@@ -190,10 +190,10 @@ inductive wal_append_reach :
       wal.wal_state_kernel.wal_append s k = ok s' →
       wal_append_reach (m + 1) s'
 
-/-- COROLLARY DE REACHABILITY (RFC-0198 P1.1): every state reachable
-by n appends satisfaz Inv-WAL. A base is `inv_wal_init`; each step is the
-lemma one-step REGISTRADO `wal_append_preserves_inv_wal` (RFC-0191 P2.1)
-— the inductive only chains the steps, does not re-prove them. -/
+/-- COROLÁRIO DE ALCANÇABILIDADE (RFC-0198 P1.1): todo estado alcançável
+por n appends satisfaz Inv-WAL. A base é `inv_wal_init`; cada passo é o
+lema um-passo REGISTRADO `wal_append_preserves_inv_wal` (RFC-0191 P2.1)
+— o indutivo apenas encadeia os passos, não os re-prova. -/
 theorem inv_wal_reachable :
     ∀ (n : Nat) (s : wal.wal_state_kernel.WalState),
       wal_append_reach n s →
@@ -204,12 +204,12 @@ theorem inv_wal_reachable :
   | @succ m s s' k _hreach happ ih =>
       exact wal_append_preserves_inv_wal s s' k ih happ
 
-/-! ## RFC-0198 P1.2 — step sync/fence preserves Inv-WAL -/
+/-! ## RFC-0198 P1.2 — passo sync/fence preserva Inv-WAL -/
 
-/-- Forma closed of the step of barrier honest (∀ states): the sync
-Honest promotes `synced` the `written` — the min of `CrashModel.of` is
-discartado by the step itself (only decides if the bind failure, and the two
-legs of the min are `ok`). -/
+/-- Forma fechada do passo de barreira honesto (∀ estados): o sync
+Honest promove `synced` a `written` — o min de `CrashModel.of` é
+discartado pelo próprio passo (só decide se o bind falha, e as duas
+pernas do min são `ok`). -/
 private theorem wal_sync_honest_closed :
     ∀ (s : wal.wal_state_kernel.WalState),
       wal.wal_state_kernel.wal_sync s env_crash_kernel.SyncHonesty.Honest
@@ -225,10 +225,10 @@ private theorem wal_sync_honest_closed :
     env_crash_kernel.SyncHonesty.read_discriminant, bind_tc_ok]
   split_ifs <;> simp_all
 
-/-- Closed form of the lying barrier step (∀ states): the
-watermarks stay where they are — `CrashModel.of` only cuts `synced` back by the
-min with `written` (never widens), and the Lying sync returns the model
-itself. -/
+/-- Forma fechada do passo de barreira mentiroso (∀ estados): as
+watermarks ficam onde estão — `CrashModel.of` só recorta `synced` pelo
+min com `written` (nunca amplia), e o sync Lying devolve o próprio
+modelo. -/
 private theorem wal_sync_lying_closed :
     ∀ (s : wal.wal_state_kernel.WalState),
       wal.wal_state_kernel.wal_sync s env_crash_kernel.SyncHonesty.Lying
@@ -247,10 +247,10 @@ private theorem wal_sync_lying_closed :
     env_crash_kernel.SyncHonesty.read_discriminant, bind_tc_ok]
   split_ifs <;> simp_all
 
-/-- Inv-WAL (sync step, RFC-0198 P1.2): any `ok` outcome of
-`wal_sync` preserves Inv-WAL, under both Env honesty modes — the honest
-sync promotes the barrier up to `written` (never beyond); the lying sync
-leaves the watermarks where they are (the min only cuts back, never widens). -/
+/-- Inv-WAL (passo sync, RFC-0198 P1.2): qualquer desfecho `ok` de
+`wal_sync` preserva Inv-WAL, nas duas honestidades do Env — o sync
+honest promove a barreira até `written` (nunca além); o sync mentiroso
+deixa as watermarks onde estão (o min só recorta, nunca amplia). -/
 theorem wal_sync_preserves_inv_wal :
     ∀ (h : env_crash_kernel.SyncHonesty)
       (s s' : wal.wal_state_kernel.WalState),
@@ -296,10 +296,10 @@ theorem wal_sync_preserves_inv_wal :
       · next hlt =>
           exact finish s.written hBval (Nat.le_refl _)
 
-/-- Inv-WAL (ack step, RFC-0198 P1.2): any `ok` outcome of
-`wal_ack` preserves Inv-WAL — the ack only advances `acked` when the
-saturated value fits in `synced`; when the checked add overflows the step is not even
-`ok`, therefore the client Ok never breaks `acked ⊆ synced`. -/
+/-- Inv-WAL (passo ack, RFC-0198 P1.2): qualquer desfecho `ok` de
+`wal_ack` preserva Inv-WAL — o ack só avança `acked` quando o valor
+saturado cabe em `synced`; quando o add checado estoura o passo nem é
+`ok`, logo o Ok do cliente nunca quebra `acked ⊆ synced`. -/
 theorem wal_ack_preserves_inv_wal :
     ∀ (s s' : wal.wal_state_kernel.WalState) (n : U64),
       wal.wal_state_kernel.inv_wal s = ok true →
@@ -314,7 +314,7 @@ theorem wal_ack_preserves_inv_wal :
   simp only [lift, bind_tc_ok] at happ
   split at happ
   · next hle =>
-      -- hle (after split): the containment of the value saturated, already in coercion
+      -- hle (após split): a contenção do valor saturado, já em coerção
       cases hadd : s.acked + n with
       | ok a =>
           rw [hadd] at happ
@@ -360,7 +360,7 @@ theorem wal_ack_preserves_inv_wal :
       rw [wal_inv_closed]
       exact hinv
 
-/-- Classe of step of the write path that toca the WAL: append, sync or ack. -/
+/-- Classe de passo do write path que toca o WAL: append, sync ou ack. -/
 inductive wal_write_step :
     wal.wal_state_kernel.WalState → wal.wal_state_kernel.WalState → Prop
   | append (s s' : wal.wal_state_kernel.WalState) (n : U64) :
@@ -371,11 +371,11 @@ inductive wal_write_step :
   | ack (s s' : wal.wal_state_kernel.WalState) (n : U64) :
       wal.wal_state_kernel.wal_ack s n = ok s' → wal_write_step s s'
 
-/-- Corollary of the classe complete (RFC-0198 P1.2, closes the sentence): TODO
-step of the write path that toca the WAL preserves Inv-WAL — each constructor
-cites the lemma one-step corresponding (`wal_append_preserves_inv_wal`
+/-- Corolário da classe completa (RFC-0198 P1.2, fecha a frase): TODO
+passo do write path que toca o WAL preserva Inv-WAL — cada construtor
+cita o lema um-passo correspontooth (`wal_append_preserves_inv_wal`
 RFC-0191 P2.1; `wal_sync_preserves_inv_wal` e `wal_ack_preserves_inv_wal`
-P1.2); nothing is re-proved here. -/
+P1.2); nada é re-provado aqui. -/
 theorem wal_write_step_preserves_inv_wal :
     ∀ (s s' : wal.wal_state_kernel.WalState),
       wal.wal_state_kernel.inv_wal s = ok true →
@@ -387,10 +387,10 @@ theorem wal_write_step_preserves_inv_wal :
   | sync h hs => exact wal_sync_preserves_inv_wal h _ _ hinv hs
   | ack n hack => exact wal_ack_preserves_inv_wal _ _ n hinv hack
 
-/-- RFC-0200 P0.1: chain of k steps of the write path starting from the state
-initial — ANY constructor of the family (append, sync, ack), in
-any order. This is the real physics of group commit, not only
-append-accounting. -/
+/-- RFC-0200 P0.1: cadeia de k passos do write path a partir do estado
+inicial — QUALQUER construtor da família (append, sync, ack), em
+qualquer ordem. Esta é a física real do group commit, não só
+append-contas. -/
 inductive wal_write_step_reach :
     Nat → wal.wal_state_kernel.WalState → Prop
   | init : wal_write_step_reach 0 wal_state_init
@@ -399,12 +399,12 @@ inductive wal_write_step_reach :
       wal_write_step_reach k s →
       wal_write_step_reach (k + 1) s'
 
-/-- RFC-0200 P0.1 COROLLARY: every state reachable by any
-sequence of steps of the write path (append/sync/ack intercalados, the
-partir of the log empty) satisfaz Inv-WAL — the sentence seL4 complete of the WAL.
-Induction over the chain; base = `inv_wal_init` (RFC-0198 P1.1), step =
-CITA `wal_write_step_preserves_inv_wal` (RFC-0198 P1.2, registered);
-nothing is re-proved here. -/
+/-- RFC-0200 P0.1 COROLÁRIO: TODO estado alcançável por qualquer
+sequência de passos do write path (append/sync/ack intercalados, a
+partir do log vazio) satisfaz Inv-WAL — a frase seL4 completa do WAL.
+Indução sobre a cadeia; base = `inv_wal_init` (RFC-0198 P1.1), passo =
+CITA `wal_write_step_preserves_inv_wal` (RFC-0198 P1.2, registrado);
+nada é re-provado aqui. -/
 theorem inv_wal_write_reachable :
     ∀ (k : Nat) (s : wal.wal_state_kernel.WalState),
       wal_write_step_reach k s →
@@ -415,16 +415,16 @@ theorem inv_wal_write_reachable :
   | step k' s0 s1 hstep _ IH =>
       exact wal_write_step_preserves_inv_wal _ _ IH hstep
 
-/-! ## RFC-0214 P0.1 — durability spine in the atom rung (fate ∀) -/
+/-! ## RFC-0214 P0.1 — spine de durabilidade no degrau atom (fate ∀) -/
 
-/-- RFC-0214 P0.1 (atom `catalog:wal_state`): the outcome of `inv_wal`
-is EXACTLY the Boolean conjunction of the two containments — `acked ⊆
-synced` and `synced ⊆ written` (the ceiling of the legal crash is `written`,
-therefore `synced ≤ written` is "synced is in the prefix-recoverable").
-Fate forall over the body extracted (pattern `fate_iff` of the RFCs
-0205–0213); CITES the closed ∀ `wal_inv_closed` (RFC-0191 P2.1) on the
-leg — nothing is re-proved. The mutant AS-IS forgets the
-acked⊆synced arm (tooth `inv_wal_as_is_tooth`). -/
+/-- RFC-0214 P0.1 (atom `catalog:wal_state`): o desfecho de `inv_wal`
+é EXATAMENTE a conjunção Booleana das duas contenções — `acked ⊆
+synced` e `synced ⊆ written` (o teto de um crash legal é `written`,
+logo `synced ≤ written` é "synced está no prefixo-recuperável").
+Fate forall sobre o corpo extraído (padrão `fate_iff` dos RFCs
+0205–0213); CITA o fechado ∀ `wal_inv_closed` (RFC-0191 P2.1) como
+perna — nada é re-provado. O mutante AS-IS esquece o braço
+acked⊆synced (tooth `inv_wal_as_is_tooth`). -/
 theorem inv_wal_fate_iff :
     ∀ (s : wal.wal_state_kernel.WalState) (v : Bool),
       (wal.wal_state_kernel.inv_wal s = ok v) ↔
@@ -438,13 +438,13 @@ theorem inv_wal_fate_iff :
   · intro h
     rw [h]
 
-/-- RFC-0214 P0.1 (atom `catalog:wal_append`): the append has outcome
-ok EXACTLY when the byte add does not overflow — and on that match the
-single possible future is `{s with written := w}` (barrier and acked
-prefix do not move; the log only grows). Fate forall over the body
-extracted; the ← route CITES the closed ∀ `wal_append_closed`
-(RFC-0191 P2.1). The mutant AS-IS acks the same bytes together with the
-write — before any barrier. -/
+/-- RFC-0214 P0.1 (atom `catalog:wal_append`): o append tem desfecho
+ok EXATAMENTE quando a soma dos bytes não estoura — e nesse caso o
+único futuro possível é `{s with written := w}` (barreira e prefixo
+acked não se movem; o log só cresce). Fate forall sobre o corpo
+extraído; a rota ← CITA o fechado ∀ `wal_append_closed`
+(RFC-0191 P2.1). O mutante AS-IS acka os mesmos bytes junto com o
+write — antes de qualquer barreira. -/
 theorem wal_append_fate_iff :
     ∀ (s : wal.wal_state_kernel.WalState) (n w : U64),
       (wal.wal_state_kernel.wal_append s n = ok { s with written := w }) ↔
@@ -469,13 +469,13 @@ theorem wal_append_fate_iff :
   · intro h
     exact wal_append_closed s n w h
 
-/-- RFC-0214 P0.1 (atom `catalog:wal_sync`): the sync has outcome ok
-with EXACTLY two futures, decided by the Env honesty — Honest
-promotes the barrier to `written`; Lying returns the watermarks
-recortadas by the min of `CrashModel.of` (never widens). Fate forall
-over the body extracted; both the routes CITAM the closed ∀ privados
+/-- RFC-0214 P0.1 (atom `catalog:wal_sync`): o sync tem desfecho ok
+com EXATAMENTE dois futuros, um por honestidade do Env — Honest
+promove a barreira a `written`; Lying devolve as watermarks
+recortadas pelo min de `CrashModel.of` (nunca amplia). Fate forall
+sobre o corpo extraído; ambas as rotas CITAM os fechados ∀ privados
 `wal_sync_honest_closed`/`wal_sync_lying_closed` (RFC-0198 P1.2).
-The mutant AS-IS promotes always — even with a lying sync. -/
+O mutante AS-IS promove sempre — mesmo sync mentiroso. -/
 theorem wal_sync_fate_iff :
     ∀ (s : wal.wal_state_kernel.WalState)
       (h : env_crash_kernel.SyncHonesty)
@@ -510,14 +510,14 @@ theorem wal_sync_fate_iff :
             (fun hh => env_crash_kernel.SyncHonesty.noConfusion hh)
         · rw [he]
 
-/-- RFC-0214 P0.1 (atom `catalog:wal_ack`): the ack has EXACTLY
-two ok futures — inside the barrier (`acked+n = ok a` with the
-saturated value contained in `synced`): `{s with acked := a}`; outside it:
-refused, the state rolls back whole (`s' = s`). The client Ok never
-advances `acked` beyond what the barrier made durable — fail-closed.
-Fate forall over the body extracted (the containment is the body's: the
-saturated value against `synced`). The mutant AS-IS acks
-unconditionally — `acked` passes the barrier. -/
+/-- RFC-0214 P0.1 (atom `catalog:wal_ack`): o ack tem EXATAMENTE
+dois futuros ok — dentro da barreira (`acked+n = ok a` com o valor
+saturado contido em `synced`): `{s with acked := a}`; fora dela:
+recusado, o estado inteiro volta (`s' = s`). O Ok do cliente nunca
+avança `acked` além do que a barreira tornou durável — fail-closed.
+Fate forall sobre o corpo extraído (a contenção é a do corpo: o
+valor SATURADO contra `synced`). O mutante AS-IS acka
+incondicionalmente — `acked` passa da barreira. -/
 theorem wal_ack_fate_iff :
     ∀ (s : wal.wal_state_kernel.WalState) (n : U64)
       (s' : wal.wal_state_kernel.WalState),
@@ -560,12 +560,12 @@ theorem wal_ack_fate_iff :
       · next hbad => exact absurd hbad hle
       · rfl
 
-/-- RFC-0214 P0.1 (atom `catalog:wal_rotate`): the rotate has
-EXACTLY two ok futures — the whole log durable and acked
-(`acked = synced = written`): the log is zeroed; any non-durable
-tail: refused, the state rolls back whole (acked bytes do not
-vanish). Fate forall over the body extracted. The mutant AS-IS
-derruba the log always — same with non-durable tail. -/
+/-- RFC-0214 P0.1 (atom `catalog:wal_rotate`): o rotate tem
+EXATAMENTE dois futuros ok — log todo durável e acked
+(`acked = synced = written`): o log é zerado; qualquer cauda
+não-durável: recusado, o estado volta inteiro (bytes acked não
+somem). Fate forall sobre o corpo extraído. O mutante AS-IS
+derruba o log sempre — mesmo com cauda não durável. -/
 theorem wal_rotate_fate_iff :
     ∀ (s s' : wal.wal_state_kernel.WalState),
       (wal.wal_state_kernel.wal_rotate s = ok s') ↔
@@ -606,15 +606,15 @@ theorem wal_rotate_fate_iff :
         · exact absurd ha h1
         · rw [he]
 
-/-- RFC-0214 P0.1 (atom `catalog:wal_acked_survives`): the survival
-corollary has outcome ok with EXACTLY two futures, decided
-by the Env stitch (`CrashModel.of` + `crash_legal`): legal cut →
-`v = (cut ≥ acked)`; illegal cut → `v = true` (nothing to lose). The
-acked prefix is only judged LOSABLE by cuts the stitch calls
-legal — the legality is the Env's, not re-proved here (P0.2 of the
-RFC-0214 will pin `crash_legal`). Fate forall over the body
-extracted. The mutant AS-IS calls the cut below the
-barrier floor survivable — and loses acked bytes. -/
+/-- RFC-0214 P0.1 (atom `catalog:wal_acked_survives`): a corolária de
+sobrevivência tem desfecho ok com EXATAMENTE dois futuros, decididos
+pela costura Env (`CrashModel.of` + `crash_legal`): corte legal →
+`v = (cut ≥ acked)`; corte ilegal → `v = true` (nada a perder). O
+prefixo acked só é julgado PERDÍVEL por cortes que a costura chama
+legais — a legalidade é a do Env, não re-provada aqui (P0.2 do
+RFC-0214 pinará o `crash_legal`). Fate forall sobre o corpo
+extraído. O mutante AS-IS chama sobrevivável um corte abaixo do
+piso da barreira — e perde bytes acked. -/
 theorem acked_survives_fate_iff :
     ∀ (s : wal.wal_state_kernel.WalState) (cut : U64) (v : Bool),
       (wal.wal_state_kernel.acked_survives_every_legal_crash s cut

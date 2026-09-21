@@ -36,11 +36,11 @@ theorem wait_for_deadlock_loop_vs_as_is
   · unfold wait_for_deadlock; rfl
   · unfold wait_for_deadlock_as_is; rfl
 
-/-! ### Step bridges (RFC-0202 P1.1, queue deadlock)
-    Each edge of output of UM step of the detector, with hypotheses of
-    lookup: the body extracted calls HashMap/HashSet the axioms; the
-    hypotheses fixam the result dessas calls and the body reduz by
-    defeq. The iff complete of the cycle (map semantics) stays TCB —
+/-! ### Step bridges (RFC-0202 P1.1, fila deadlock)
+    Cada aresta de saída de UM passo do detector, com hipóteses de
+    lookup: o corpo extraído chama HashMap/HashSet como axiomas; as
+    hipóteses fixam o resultado dessas chamadas e o corpo reduz por
+    defeq. O iff completo do ciclo (semântica de mapa) fica TCB —
     fronteira datada em `formal/aeneas/EXTRACT.md`. -/
 
 /-- Step edge: fresh owner that waits for NOBODY is reported alive

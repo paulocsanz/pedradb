@@ -9,7 +9,7 @@ publish = false
 description = "Standalone crate whose [lib] path is production locktab.rs"
 
 [lib]
-path = "../../../crates/rocksdb-compat/src/locktab.rs"
+path = "../../../crates/rocksdb-compat/src/locktab_kernel.rs"
 
 [dependencies]
 bytes = "1"

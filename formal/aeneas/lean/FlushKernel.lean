@@ -34,7 +34,7 @@ axiom Bool.Insts.CoreHashHash.hash
   {H : Type} (HasherInst : core.hash.Hasher H) : Bool → H → Result H
 
 /-- [pedra_aeneas_flush_kernel::FlushPlan]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 119:0-128:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 126:0-135:1
     Visibility: public -/
 @[discriminant isize]
 inductive FlushPlan where
@@ -43,7 +43,7 @@ inductive FlushPlan where
 | RotateOnly : FlushPlan
 
 /-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::FlushPlan}::fmt]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 118:9-118:14
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 125:9-125:14
     Visibility: public -/
 def FlushPlan.Insts.CoreFmtDebug.fmt
   (self : FlushPlan) (f : core.fmt.Formatter) :
@@ -57,42 +57,42 @@ def FlushPlan.Insts.CoreFmtDebug.fmt
   | FlushPlan.RotateOnly => core.fmt.Formatter.write_str f (toStr "RotateOnly")
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::FlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 118:9-118:14 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 125:9-125:14 -/
 @[reducible]
 def FlushPlan.Insts.CoreFmtDebug : core.fmt.Debug FlushPlan := {
   fmt := FlushPlan.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::FlushPlan}::clone]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 118:16-118:21
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 125:16-125:21
     Visibility: public -/
 def FlushPlan.Insts.CoreCloneClone.clone
   (self : FlushPlan) : Result FlushPlan := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::FlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 118:16-118:21 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 125:16-125:21 -/
 @[reducible]
 def FlushPlan.Insts.CoreCloneClone : core.clone.Clone FlushPlan := {
   clone := FlushPlan.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::FlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 118:23-118:27 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 125:23-125:27 -/
 @[reducible]
 def FlushPlan.Insts.CoreMarkerCopy : core.marker.Copy FlushPlan := {
   cloneInst := FlushPlan.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::FlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 118:29-118:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 125:29-125:38 -/
 @[reducible]
 def FlushPlan.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq FlushPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::FlushPlan> for pedra_aeneas_flush_kernel::FlushPlan}::eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 118:29-118:38
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 125:29-125:38
     Visibility: public -/
 def FlushPlan.Insts.CoreCmpPartialEqFlushPlan.eq
   (self : FlushPlan) (other : FlushPlan) : Result Bool := do
@@ -101,7 +101,7 @@ def FlushPlan.Insts.CoreCmpPartialEqFlushPlan.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::FlushPlan> for pedra_aeneas_flush_kernel::FlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 118:29-118:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 125:29-125:38 -/
 @[reducible]
 def FlushPlan.Insts.CoreCmpPartialEqFlushPlan : core.cmp.PartialEq FlushPlan
   FlushPlan := {
@@ -109,14 +109,14 @@ def FlushPlan.Insts.CoreCmpPartialEqFlushPlan : core.cmp.PartialEq FlushPlan
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::FlushPlan}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 118:40-118:42
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 125:40-125:42
     Visibility: public -/
 def FlushPlan.Insts.CoreCmpEq.assert_fields_are_eq
   (self : FlushPlan) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::FlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 118:40-118:42 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 125:40-125:42 -/
 @[reducible]
 def FlushPlan.Insts.CoreCmpEq : core.cmp.Eq FlushPlan := {
   partialEqInst := FlushPlan.Insts.CoreCmpPartialEqFlushPlan
@@ -124,7 +124,7 @@ def FlushPlan.Insts.CoreCmpEq : core.cmp.Eq FlushPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::FlushPlan}::hash]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 118:44-118:48
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 125:44-125:48
     Visibility: public -/
 def FlushPlan.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H) (self : FlushPlan)
@@ -135,7 +135,7 @@ def FlushPlan.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::FlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 118:44-118:48 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 125:44-125:48 -/
 @[reducible]
 def FlushPlan.Insts.CoreHashHash : core.hash.Hash FlushPlan := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -143,7 +143,7 @@ def FlushPlan.Insts.CoreHashHash : core.hash.Hash FlushPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::flush_plan]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 133:0-135:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 140:0-142:1
     Visibility: public -/
 def flush_plan (mem_empty : Bool) (imm_present : Bool) : Result FlushPlan := do
   if imm_present
@@ -154,26 +154,26 @@ def flush_plan (mem_empty : Bool) (imm_present : Bool) : Result FlushPlan := do
     else ok FlushPlan.WriteSstThenRotate
 
 /-- [pedra_aeneas_flush_kernel::flush_plan_as_is_lose_tail]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 140:0-142:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 147:0-149:1
     Visibility: public -/
 def flush_plan_as_is_lose_tail
   (mem_empty : Bool) (imm_present : Bool) : Result FlushPlan := do
   ok FlushPlan.RotateOnly
 
 /-- [pedra_aeneas_flush_kernel::may_publish_manifest]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 147:0-149:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 154:0-156:1
     Visibility: public -/
 def may_publish_manifest (sst_durable : Bool) : Result Bool := do
   ok sst_durable
 
 /-- [pedra_aeneas_flush_kernel::may_publish_manifest_as_is]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 154:0-156:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 161:0-163:1
     Visibility: public -/
 def may_publish_manifest_as_is (_sst_durable : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_flush_kernel::ManifestPublishPlan]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 161:0-166:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 168:0-173:1
     Visibility: public -/
 @[discriminant isize]
 inductive ManifestPublishPlan where
@@ -181,14 +181,14 @@ inductive ManifestPublishPlan where
 | HoldUnsyncedFailClosed : ManifestPublishPlan
 
 /-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::ManifestPublishPlan}::clone]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 160:9-160:14
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 167:9-167:14
     Visibility: public -/
 def ManifestPublishPlan.Insts.CoreCloneClone.clone
   (self : ManifestPublishPlan) : Result ManifestPublishPlan := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::ManifestPublishPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 160:9-160:14 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 167:9-167:14 -/
 @[reducible]
 def ManifestPublishPlan.Insts.CoreCloneClone : core.clone.Clone
   ManifestPublishPlan := {
@@ -196,7 +196,7 @@ def ManifestPublishPlan.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::ManifestPublishPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 160:16-160:20 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 167:16-167:20 -/
 @[reducible]
 def ManifestPublishPlan.Insts.CoreMarkerCopy : core.marker.Copy
   ManifestPublishPlan := {
@@ -204,7 +204,7 @@ def ManifestPublishPlan.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::ManifestPublishPlan}::fmt]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 160:22-160:27
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 167:22-167:27
     Visibility: public -/
 def ManifestPublishPlan.Insts.CoreFmtDebug.fmt
   (self : ManifestPublishPlan) (f : core.fmt.Formatter) :
@@ -217,7 +217,7 @@ def ManifestPublishPlan.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "HoldUnsyncedFailClosed")
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::ManifestPublishPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 160:22-160:27 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 167:22-167:27 -/
 @[reducible]
 def ManifestPublishPlan.Insts.CoreFmtDebug : core.fmt.Debug ManifestPublishPlan
   := {
@@ -225,14 +225,14 @@ def ManifestPublishPlan.Insts.CoreFmtDebug : core.fmt.Debug ManifestPublishPlan
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::ManifestPublishPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 160:29-160:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 167:29-167:38 -/
 @[reducible]
 def ManifestPublishPlan.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq ManifestPublishPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::ManifestPublishPlan> for pedra_aeneas_flush_kernel::ManifestPublishPlan}::eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 160:29-160:38
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 167:29-167:38
     Visibility: public -/
 def ManifestPublishPlan.Insts.CoreCmpPartialEqManifestPublishPlan.eq
   (self : ManifestPublishPlan) (other : ManifestPublishPlan) :
@@ -243,7 +243,7 @@ def ManifestPublishPlan.Insts.CoreCmpPartialEqManifestPublishPlan.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::ManifestPublishPlan> for pedra_aeneas_flush_kernel::ManifestPublishPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 160:29-160:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 167:29-167:38 -/
 @[reducible]
 def ManifestPublishPlan.Insts.CoreCmpPartialEqManifestPublishPlan :
   core.cmp.PartialEq ManifestPublishPlan ManifestPublishPlan := {
@@ -251,14 +251,14 @@ def ManifestPublishPlan.Insts.CoreCmpPartialEqManifestPublishPlan :
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::ManifestPublishPlan}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 160:40-160:42
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 167:40-167:42
     Visibility: public -/
 def ManifestPublishPlan.Insts.CoreCmpEq.assert_fields_are_eq
   (self : ManifestPublishPlan) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::ManifestPublishPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 160:40-160:42 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 167:40-167:42 -/
 @[reducible]
 def ManifestPublishPlan.Insts.CoreCmpEq : core.cmp.Eq ManifestPublishPlan := {
   partialEqInst :=
@@ -268,7 +268,7 @@ def ManifestPublishPlan.Insts.CoreCmpEq : core.cmp.Eq ManifestPublishPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::manifest_publish_plan]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 172:0-178:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 179:0-185:1
     Visibility: public -/
 def manifest_publish_plan
   (sst_durable : Bool) : Result ManifestPublishPlan := do
@@ -278,14 +278,14 @@ def manifest_publish_plan
   else ok ManifestPublishPlan.HoldUnsyncedFailClosed
 
 /-- [pedra_aeneas_flush_kernel::manifest_publish_plan_as_is]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 184:0-186:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 191:0-193:1
     Visibility: public -/
 def manifest_publish_plan_as_is
   (_sst_durable : Bool) : Result ManifestPublishPlan := do
   ok ManifestPublishPlan.PublishManifest
 
 /-- [pedra_aeneas_flush_kernel::CfFlushPlan]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 191:0-196:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 198:0-203:1
     Visibility: public -/
 @[discriminant isize]
 inductive CfFlushPlan where
@@ -293,28 +293,28 @@ inductive CfFlushPlan where
 | CfNotDueSkip : CfFlushPlan
 
 /-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::CfFlushPlan}::clone]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 190:9-190:14
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 197:9-197:14
     Visibility: public -/
 def CfFlushPlan.Insts.CoreCloneClone.clone
   (self : CfFlushPlan) : Result CfFlushPlan := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::CfFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 190:9-190:14 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 197:9-197:14 -/
 @[reducible]
 def CfFlushPlan.Insts.CoreCloneClone : core.clone.Clone CfFlushPlan := {
   clone := CfFlushPlan.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::CfFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 190:16-190:20 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 197:16-197:20 -/
 @[reducible]
 def CfFlushPlan.Insts.CoreMarkerCopy : core.marker.Copy CfFlushPlan := {
   cloneInst := CfFlushPlan.Insts.CoreCloneClone
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::CfFlushPlan}::fmt]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 190:22-190:27
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 197:22-197:27
     Visibility: public -/
 def CfFlushPlan.Insts.CoreFmtDebug.fmt
   (self : CfFlushPlan) (f : core.fmt.Formatter) :
@@ -327,21 +327,21 @@ def CfFlushPlan.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "CfNotDueSkip")
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::CfFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 190:22-190:27 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 197:22-197:27 -/
 @[reducible]
 def CfFlushPlan.Insts.CoreFmtDebug : core.fmt.Debug CfFlushPlan := {
   fmt := CfFlushPlan.Insts.CoreFmtDebug.fmt
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::CfFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 190:29-190:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 197:29-197:38 -/
 @[reducible]
 def CfFlushPlan.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq CfFlushPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::CfFlushPlan> for pedra_aeneas_flush_kernel::CfFlushPlan}::eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 190:29-190:38
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 197:29-197:38
     Visibility: public -/
 def CfFlushPlan.Insts.CoreCmpPartialEqCfFlushPlan.eq
   (self : CfFlushPlan) (other : CfFlushPlan) : Result Bool := do
@@ -350,7 +350,7 @@ def CfFlushPlan.Insts.CoreCmpPartialEqCfFlushPlan.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::CfFlushPlan> for pedra_aeneas_flush_kernel::CfFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 190:29-190:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 197:29-197:38 -/
 @[reducible]
 def CfFlushPlan.Insts.CoreCmpPartialEqCfFlushPlan : core.cmp.PartialEq
   CfFlushPlan CfFlushPlan := {
@@ -358,14 +358,14 @@ def CfFlushPlan.Insts.CoreCmpPartialEqCfFlushPlan : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::CfFlushPlan}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 190:40-190:42
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 197:40-197:42
     Visibility: public -/
 def CfFlushPlan.Insts.CoreCmpEq.assert_fields_are_eq
   (self : CfFlushPlan) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::CfFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 190:40-190:42 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 197:40-197:42 -/
 @[reducible]
 def CfFlushPlan.Insts.CoreCmpEq : core.cmp.Eq CfFlushPlan := {
   partialEqInst := CfFlushPlan.Insts.CoreCmpPartialEqCfFlushPlan
@@ -373,7 +373,7 @@ def CfFlushPlan.Insts.CoreCmpEq : core.cmp.Eq CfFlushPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::auto_flush_due]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 296:0-298:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 418:0-420:1
     Visibility: public -/
 def auto_flush_due
   (mem_bytes : Std.U64) (armed : Bool) (limit : Std.U64) : Result Bool := do
@@ -382,7 +382,7 @@ def auto_flush_due
   else ok false
 
 /-- [pedra_aeneas_flush_kernel::cf_flush_plan]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 203:0-209:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 210:0-216:1
     Visibility: public -/
 def cf_flush_plan
   (mem_bytes : Std.U64) (limit : Std.U64) : Result CfFlushPlan := do
@@ -392,14 +392,340 @@ def cf_flush_plan
   else ok CfFlushPlan.CfNotDueSkip
 
 /-- [pedra_aeneas_flush_kernel::cf_flush_plan_as_is]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 215:0-217:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 222:0-224:1
     Visibility: public -/
 def cf_flush_plan_as_is
   (_mem_bytes : Std.U64) (_limit : Std.U64) : Result CfFlushPlan := do
   ok CfFlushPlan.CfNotDueSkip
 
+/-- [pedra_aeneas_flush_kernel::FamilyFlushMode]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 235:0-243:1
+    Visibility: public -/
+@[discriminant isize]
+inductive FamilyFlushMode where
+| StageWholeMem : FamilyFlushMode
+| PartitionFamily : FamilyFlushMode
+
+/-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::FamilyFlushMode}::clone]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 234:9-234:14
+    Visibility: public -/
+def FamilyFlushMode.Insts.CoreCloneClone.clone
+  (self : FamilyFlushMode) : Result FamilyFlushMode := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::FamilyFlushMode}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 234:9-234:14 -/
+@[reducible]
+def FamilyFlushMode.Insts.CoreCloneClone : core.clone.Clone FamilyFlushMode
+  := {
+  clone := FamilyFlushMode.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::FamilyFlushMode}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 234:16-234:20 -/
+@[reducible]
+def FamilyFlushMode.Insts.CoreMarkerCopy : core.marker.Copy FamilyFlushMode
+  := {
+  cloneInst := FamilyFlushMode.Insts.CoreCloneClone
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::FamilyFlushMode}::fmt]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 234:22-234:27
+    Visibility: public -/
+def FamilyFlushMode.Insts.CoreFmtDebug.fmt
+  (self : FamilyFlushMode) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | FamilyFlushMode.StageWholeMem =>
+    core.fmt.Formatter.write_str f (toStr "StageWholeMem")
+  | FamilyFlushMode.PartitionFamily =>
+    core.fmt.Formatter.write_str f (toStr "PartitionFamily")
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::FamilyFlushMode}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 234:22-234:27 -/
+@[reducible]
+def FamilyFlushMode.Insts.CoreFmtDebug : core.fmt.Debug FamilyFlushMode := {
+  fmt := FamilyFlushMode.Insts.CoreFmtDebug.fmt
+}
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::FamilyFlushMode}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 234:29-234:38 -/
+@[reducible]
+def FamilyFlushMode.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq FamilyFlushMode := {
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::FamilyFlushMode> for pedra_aeneas_flush_kernel::FamilyFlushMode}::eq]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 234:29-234:38
+    Visibility: public -/
+def FamilyFlushMode.Insts.CoreCmpPartialEqFamilyFlushMode.eq
+  (self : FamilyFlushMode) (other : FamilyFlushMode) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::FamilyFlushMode> for pedra_aeneas_flush_kernel::FamilyFlushMode}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 234:29-234:38 -/
+@[reducible]
+def FamilyFlushMode.Insts.CoreCmpPartialEqFamilyFlushMode : core.cmp.PartialEq
+  FamilyFlushMode FamilyFlushMode := {
+  eq := FamilyFlushMode.Insts.CoreCmpPartialEqFamilyFlushMode.eq
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::FamilyFlushMode}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 234:40-234:42
+    Visibility: public -/
+def FamilyFlushMode.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : FamilyFlushMode) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::FamilyFlushMode}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 234:40-234:42 -/
+@[reducible]
+def FamilyFlushMode.Insts.CoreCmpEq : core.cmp.Eq FamilyFlushMode := {
+  partialEqInst := FamilyFlushMode.Insts.CoreCmpPartialEqFamilyFlushMode
+  assert_fields_are_eq := FamilyFlushMode.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_flush_kernel::DOMINANT_FAMILY_NUM]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 248:0-248:39
+    Visibility: public -/
+@[global_simps, irreducible] def DOMINANT_FAMILY_NUM : Std.U64 := 3#u64
+
+/-- [pedra_aeneas_flush_kernel::DOMINANT_FAMILY_DEN]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 249:0-249:39
+    Visibility: public -/
+@[global_simps, irreducible] def DOMINANT_FAMILY_DEN : Std.U64 := 4#u64
+
+/-- [pedra_aeneas_flush_kernel::dominant_family_stage_plan]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 256:0-262:1
+    Visibility: public -/
+def dominant_family_stage_plan
+  (fam_bytes : Std.U64) (total_bytes : Std.U64) : Result FamilyFlushMode := do
+  let i ← fam_bytes * DOMINANT_FAMILY_DEN
+  let i1 ← total_bytes * DOMINANT_FAMILY_NUM
+  if i >= i1
+  then ok FamilyFlushMode.StageWholeMem
+  else ok FamilyFlushMode.PartitionFamily
+
+/-- [pedra_aeneas_flush_kernel::dominant_family_stage_plan_as_is]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 268:0-270:1
+    Visibility: public -/
+def dominant_family_stage_plan_as_is
+  (_fam_bytes : Std.U64) (_total_bytes : Std.U64) :
+  Result FamilyFlushMode
+  := do
+  ok FamilyFlushMode.PartitionFamily
+
+/-- [pedra_aeneas_flush_kernel::FlusherGate]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 279:0-285:1
+    Visibility: public -/
+@[discriminant isize]
+inductive FlusherGate where
+| Workerless : FlusherGate
+| WorkerDrains : FlusherGate
+
+/-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::FlusherGate}::clone]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 278:9-278:14
+    Visibility: public -/
+def FlusherGate.Insts.CoreCloneClone.clone
+  (self : FlusherGate) : Result FlusherGate := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::FlusherGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 278:9-278:14 -/
+@[reducible]
+def FlusherGate.Insts.CoreCloneClone : core.clone.Clone FlusherGate := {
+  clone := FlusherGate.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::FlusherGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 278:16-278:20 -/
+@[reducible]
+def FlusherGate.Insts.CoreMarkerCopy : core.marker.Copy FlusherGate := {
+  cloneInst := FlusherGate.Insts.CoreCloneClone
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::FlusherGate}::fmt]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 278:22-278:27
+    Visibility: public -/
+def FlusherGate.Insts.CoreFmtDebug.fmt
+  (self : FlusherGate) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | FlusherGate.Workerless =>
+    core.fmt.Formatter.write_str f (toStr "Workerless")
+  | FlusherGate.WorkerDrains =>
+    core.fmt.Formatter.write_str f (toStr "WorkerDrains")
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::FlusherGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 278:22-278:27 -/
+@[reducible]
+def FlusherGate.Insts.CoreFmtDebug : core.fmt.Debug FlusherGate := {
+  fmt := FlusherGate.Insts.CoreFmtDebug.fmt
+}
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::FlusherGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 278:29-278:38 -/
+@[reducible]
+def FlusherGate.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq FlusherGate := {
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::FlusherGate> for pedra_aeneas_flush_kernel::FlusherGate}::eq]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 278:29-278:38
+    Visibility: public -/
+def FlusherGate.Insts.CoreCmpPartialEqFlusherGate.eq
+  (self : FlusherGate) (other : FlusherGate) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::FlusherGate> for pedra_aeneas_flush_kernel::FlusherGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 278:29-278:38 -/
+@[reducible]
+def FlusherGate.Insts.CoreCmpPartialEqFlusherGate : core.cmp.PartialEq
+  FlusherGate FlusherGate := {
+  eq := FlusherGate.Insts.CoreCmpPartialEqFlusherGate.eq
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::FlusherGate}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 278:40-278:42
+    Visibility: public -/
+def FlusherGate.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : FlusherGate) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::FlusherGate}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 278:40-278:42 -/
+@[reducible]
+def FlusherGate.Insts.CoreCmpEq : core.cmp.Eq FlusherGate := {
+  partialEqInst := FlusherGate.Insts.CoreCmpPartialEqFlusherGate
+  assert_fields_are_eq := FlusherGate.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_flush_kernel::flusher_gate_plan]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 291:0-297:1
+    Visibility: public -/
+def flusher_gate_plan (attached : Bool) : Result FlusherGate := do
+  if attached
+  then ok FlusherGate.WorkerDrains
+  else ok FlusherGate.Workerless
+
+/-- [pedra_aeneas_flush_kernel::flusher_gate_plan_as_is]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 303:0-305:1
+    Visibility: public -/
+def flusher_gate_plan_as_is (_attached : Bool) : Result FlusherGate := do
+  ok FlusherGate.WorkerDrains
+
+/-- [pedra_aeneas_flush_kernel::ParkedDebtPlan]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 313:0-319:1
+    Visibility: public -/
+@[discriminant isize]
+inductive ParkedDebtPlan where
+| DebtAtCap : ParkedDebtPlan
+| NoDebtBelowCap : ParkedDebtPlan
+
+/-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::ParkedDebtPlan}::clone]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 312:9-312:14
+    Visibility: public -/
+def ParkedDebtPlan.Insts.CoreCloneClone.clone
+  (self : ParkedDebtPlan) : Result ParkedDebtPlan := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::ParkedDebtPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 312:9-312:14 -/
+@[reducible]
+def ParkedDebtPlan.Insts.CoreCloneClone : core.clone.Clone ParkedDebtPlan := {
+  clone := ParkedDebtPlan.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::ParkedDebtPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 312:16-312:20 -/
+@[reducible]
+def ParkedDebtPlan.Insts.CoreMarkerCopy : core.marker.Copy ParkedDebtPlan := {
+  cloneInst := ParkedDebtPlan.Insts.CoreCloneClone
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::ParkedDebtPlan}::fmt]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 312:22-312:27
+    Visibility: public -/
+def ParkedDebtPlan.Insts.CoreFmtDebug.fmt
+  (self : ParkedDebtPlan) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | ParkedDebtPlan.DebtAtCap =>
+    core.fmt.Formatter.write_str f (toStr "DebtAtCap")
+  | ParkedDebtPlan.NoDebtBelowCap =>
+    core.fmt.Formatter.write_str f (toStr "NoDebtBelowCap")
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::ParkedDebtPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 312:22-312:27 -/
+@[reducible]
+def ParkedDebtPlan.Insts.CoreFmtDebug : core.fmt.Debug ParkedDebtPlan := {
+  fmt := ParkedDebtPlan.Insts.CoreFmtDebug.fmt
+}
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::ParkedDebtPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 312:29-312:38 -/
+@[reducible]
+def ParkedDebtPlan.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq ParkedDebtPlan := {
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::ParkedDebtPlan> for pedra_aeneas_flush_kernel::ParkedDebtPlan}::eq]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 312:29-312:38
+    Visibility: public -/
+def ParkedDebtPlan.Insts.CoreCmpPartialEqParkedDebtPlan.eq
+  (self : ParkedDebtPlan) (other : ParkedDebtPlan) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::ParkedDebtPlan> for pedra_aeneas_flush_kernel::ParkedDebtPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 312:29-312:38 -/
+@[reducible]
+def ParkedDebtPlan.Insts.CoreCmpPartialEqParkedDebtPlan : core.cmp.PartialEq
+  ParkedDebtPlan ParkedDebtPlan := {
+  eq := ParkedDebtPlan.Insts.CoreCmpPartialEqParkedDebtPlan.eq
+}
+
+/-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::ParkedDebtPlan}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 312:40-312:42
+    Visibility: public -/
+def ParkedDebtPlan.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : ParkedDebtPlan) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::ParkedDebtPlan}]
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 312:40-312:42 -/
+@[reducible]
+def ParkedDebtPlan.Insts.CoreCmpEq : core.cmp.Eq ParkedDebtPlan := {
+  partialEqInst := ParkedDebtPlan.Insts.CoreCmpPartialEqParkedDebtPlan
+  assert_fields_are_eq := ParkedDebtPlan.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_flush_kernel::parked_debt_plan]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 324:0-330:1
+    Visibility: public -/
+def parked_debt_plan
+  (parked : Std.U64) (cap : Std.U64) : Result ParkedDebtPlan := do
+  if parked < cap
+  then ok ParkedDebtPlan.NoDebtBelowCap
+  else ok ParkedDebtPlan.DebtAtCap
+
+/-- [pedra_aeneas_flush_kernel::parked_debt_plan_as_is]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 337:0-339:1
+    Visibility: public -/
+def parked_debt_plan_as_is
+  (_parked : Std.U64) (_cap : Std.U64) : Result ParkedDebtPlan := do
+  ok ParkedDebtPlan.NoDebtBelowCap
+
 /-- [pedra_aeneas_flush_kernel::WalPinState]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 222:0-233:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 344:0-355:1
     Visibility: public -/
 structure WalPinState where
   mem_empty : Bool
@@ -409,7 +735,7 @@ structure WalPinState where
   commit_inflight : Bool
 
 /-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::WalPinState}::fmt]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 221:9-221:14
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 343:9-343:14
     Visibility: public -/
 def WalPinState.Insts.CoreFmtDebug.fmt
   (self : WalPinState) (f : core.fmt.Formatter) :
@@ -426,42 +752,42 @@ def WalPinState.Insts.CoreFmtDebug.fmt
     "parked_unflushed") dyn3 (toStr "commit_inflight") dyn4
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::WalPinState}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 221:9-221:14 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 343:9-343:14 -/
 @[reducible]
 def WalPinState.Insts.CoreFmtDebug : core.fmt.Debug WalPinState := {
   fmt := WalPinState.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::WalPinState}::clone]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 221:16-221:21
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 343:16-343:21
     Visibility: public -/
 def WalPinState.Insts.CoreCloneClone.clone
   (self : WalPinState) : Result WalPinState := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::WalPinState}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 221:16-221:21 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 343:16-343:21 -/
 @[reducible]
 def WalPinState.Insts.CoreCloneClone : core.clone.Clone WalPinState := {
   clone := WalPinState.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::WalPinState}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 221:23-221:27 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 343:23-343:27 -/
 @[reducible]
 def WalPinState.Insts.CoreMarkerCopy : core.marker.Copy WalPinState := {
   cloneInst := WalPinState.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::WalPinState}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 221:29-221:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 343:29-343:38 -/
 @[reducible]
 def WalPinState.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq WalPinState := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::WalPinState> for pedra_aeneas_flush_kernel::WalPinState}::eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 221:29-221:38
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 343:29-343:38
     Visibility: public -/
 def WalPinState.Insts.CoreCmpPartialEqWalPinState.eq
   (self : WalPinState) (other : WalPinState) : Result Bool := do
@@ -479,7 +805,7 @@ def WalPinState.Insts.CoreCmpPartialEqWalPinState.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::WalPinState> for pedra_aeneas_flush_kernel::WalPinState}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 221:29-221:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 343:29-343:38 -/
 @[reducible]
 def WalPinState.Insts.CoreCmpPartialEqWalPinState : core.cmp.PartialEq
   WalPinState WalPinState := {
@@ -487,14 +813,14 @@ def WalPinState.Insts.CoreCmpPartialEqWalPinState : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::WalPinState}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 221:40-221:42
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 343:40-343:42
     Visibility: public -/
 def WalPinState.Insts.CoreCmpEq.assert_fields_are_eq
   (self : WalPinState) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::WalPinState}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 221:40-221:42 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 343:40-343:42 -/
 @[reducible]
 def WalPinState.Insts.CoreCmpEq : core.cmp.Eq WalPinState := {
   partialEqInst := WalPinState.Insts.CoreCmpPartialEqWalPinState
@@ -502,7 +828,7 @@ def WalPinState.Insts.CoreCmpEq : core.cmp.Eq WalPinState := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::WalPinState}::hash]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 221:44-221:48
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 343:44-343:48
     Visibility: public -/
 def WalPinState.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H) (self : WalPinState)
@@ -521,7 +847,7 @@ def WalPinState.Insts.CoreHashHash.hash
   Bool.Insts.CoreHashHash.hash corehashHasherInst self.commit_inflight state4
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::WalPinState}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 221:44-221:48 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 343:44-343:48 -/
 @[reducible]
 def WalPinState.Insts.CoreHashHash : core.hash.Hash WalPinState := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -529,7 +855,7 @@ def WalPinState.Insts.CoreHashHash : core.hash.Hash WalPinState := {
 }
 
 /-- [pedra_aeneas_flush_kernel::WalRotateAction]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 238:0-244:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 360:0-366:1
     Visibility: public -/
 @[discriminant isize]
 inductive WalRotateAction where
@@ -537,7 +863,7 @@ inductive WalRotateAction where
 | KeepWal : WalRotateAction
 
 /-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::WalRotateAction}::fmt]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 237:9-237:14
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 359:9-359:14
     Visibility: public -/
 def WalRotateAction.Insts.CoreFmtDebug.fmt
   (self : WalRotateAction) (f : core.fmt.Formatter) :
@@ -549,21 +875,21 @@ def WalRotateAction.Insts.CoreFmtDebug.fmt
   | WalRotateAction.KeepWal => core.fmt.Formatter.write_str f (toStr "KeepWal")
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::WalRotateAction}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 237:9-237:14 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 359:9-359:14 -/
 @[reducible]
 def WalRotateAction.Insts.CoreFmtDebug : core.fmt.Debug WalRotateAction := {
   fmt := WalRotateAction.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::WalRotateAction}::clone]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 237:16-237:21
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 359:16-359:21
     Visibility: public -/
 def WalRotateAction.Insts.CoreCloneClone.clone
   (self : WalRotateAction) : Result WalRotateAction := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::WalRotateAction}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 237:16-237:21 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 359:16-359:21 -/
 @[reducible]
 def WalRotateAction.Insts.CoreCloneClone : core.clone.Clone WalRotateAction
   := {
@@ -571,7 +897,7 @@ def WalRotateAction.Insts.CoreCloneClone : core.clone.Clone WalRotateAction
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::WalRotateAction}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 237:23-237:27 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 359:23-359:27 -/
 @[reducible]
 def WalRotateAction.Insts.CoreMarkerCopy : core.marker.Copy WalRotateAction
   := {
@@ -579,14 +905,14 @@ def WalRotateAction.Insts.CoreMarkerCopy : core.marker.Copy WalRotateAction
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::WalRotateAction}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 237:29-237:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 359:29-359:38 -/
 @[reducible]
 def WalRotateAction.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq WalRotateAction := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::WalRotateAction> for pedra_aeneas_flush_kernel::WalRotateAction}::eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 237:29-237:38
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 359:29-359:38
     Visibility: public -/
 def WalRotateAction.Insts.CoreCmpPartialEqWalRotateAction.eq
   (self : WalRotateAction) (other : WalRotateAction) : Result Bool := do
@@ -595,7 +921,7 @@ def WalRotateAction.Insts.CoreCmpPartialEqWalRotateAction.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::WalRotateAction> for pedra_aeneas_flush_kernel::WalRotateAction}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 237:29-237:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 359:29-359:38 -/
 @[reducible]
 def WalRotateAction.Insts.CoreCmpPartialEqWalRotateAction : core.cmp.PartialEq
   WalRotateAction WalRotateAction := {
@@ -603,14 +929,14 @@ def WalRotateAction.Insts.CoreCmpPartialEqWalRotateAction : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::WalRotateAction}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 237:40-237:42
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 359:40-359:42
     Visibility: public -/
 def WalRotateAction.Insts.CoreCmpEq.assert_fields_are_eq
   (self : WalRotateAction) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::WalRotateAction}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 237:40-237:42 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 359:40-359:42 -/
 @[reducible]
 def WalRotateAction.Insts.CoreCmpEq : core.cmp.Eq WalRotateAction := {
   partialEqInst := WalRotateAction.Insts.CoreCmpPartialEqWalRotateAction
@@ -618,7 +944,7 @@ def WalRotateAction.Insts.CoreCmpEq : core.cmp.Eq WalRotateAction := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::WalRotateAction}::hash]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 237:44-237:48
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 359:44-359:48
     Visibility: public -/
 def WalRotateAction.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -629,7 +955,7 @@ def WalRotateAction.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::WalRotateAction}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 237:44-237:48 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 359:44-359:48 -/
 @[reducible]
 def WalRotateAction.Insts.CoreHashHash : core.hash.Hash WalRotateAction := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -637,7 +963,7 @@ def WalRotateAction.Insts.CoreHashHash : core.hash.Hash WalRotateAction := {
 }
 
 /-- [pedra_aeneas_flush_kernel::wal_rotate_decision]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 249:0-251:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:0-373:1
     Visibility: public -/
 def wal_rotate_decision (s : WalPinState) : Result WalRotateAction := do
   if s.mem_empty
@@ -657,7 +983,7 @@ def wal_rotate_decision (s : WalPinState) : Result WalRotateAction := do
   else ok WalRotateAction.KeepWal
 
 /-- [pedra_aeneas_flush_kernel::wal_rotate_decision_as_is_ignore_pin]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 256:0-258:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 378:0-380:1
     Visibility: public -/
 def wal_rotate_decision_as_is_ignore_pin
   (s : WalPinState) : Result WalRotateAction := do
@@ -675,19 +1001,19 @@ def wal_rotate_decision_as_is_ignore_pin
   else ok WalRotateAction.KeepWal
 
 /-- [pedra_aeneas_flush_kernel::occ_snap_uses_published]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 265:0-267:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 387:0-389:1
     Visibility: public -/
 def occ_snap_uses_published (commit_inflight : Bool) : Result Bool := do
   ok commit_inflight
 
 /-- [pedra_aeneas_flush_kernel::occ_snap_uses_published_as_is]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 272:0-274:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 394:0-396:1
     Visibility: public -/
 def occ_snap_uses_published_as_is (_commit_inflight : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_flush_kernel::occ_snap_lock_order]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 282:0-284:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 404:0-406:1
     Visibility: public -/
 def occ_snap_lock_order
   (read_held : Bool) (inflight : Bool) : Result Bool := do
@@ -697,33 +1023,46 @@ def occ_snap_lock_order
   else ok true
 
 /-- [pedra_aeneas_flush_kernel::occ_snap_lock_order_as_is]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 289:0-291:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 411:0-413:1
     Visibility: public -/
 def occ_snap_lock_order_as_is
   (_read_held : Bool) (_inflight : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_flush_kernel::auto_flush_due_as_is]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 303:0-305:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 425:0-427:1
     Visibility: public -/
 def auto_flush_due_as_is
   (_mem_bytes : Std.U64) (_armed : Bool) (_limit : Std.U64) : Result Bool := do
   ok false
 
+/-- [pedra_aeneas_flush_kernel::l0_compact_due]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 434:0-436:1
+    Visibility: public -/
+def l0_compact_due (l0_files : Std.U64) (trigger : Std.U64) : Result Bool := do
+  ok (l0_files >= trigger)
+
+/-- [pedra_aeneas_flush_kernel::l0_compact_due_as_is]:
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 441:0-443:1
+    Visibility: public -/
+def l0_compact_due_as_is
+  (_l0_files : Std.U64) (_trigger : Std.U64) : Result Bool := do
+  ok false
+
 /-- [pedra_aeneas_flush_kernel::wal_segment_is_empty]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 310:0-312:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 448:0-450:1
     Visibility: public -/
 def wal_segment_is_empty (pos : Std.U64) : Result Bool := do
   ok (pos = 0#u64)
 
 /-- [pedra_aeneas_flush_kernel::wal_segment_is_empty_as_is]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 317:0-319:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 455:0-457:1
     Visibility: public -/
 def wal_segment_is_empty_as_is (_pos : Std.U64) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_flush_kernel::skip_auto_flush]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 324:0-326:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 462:0-464:1
     Visibility: public -/
 def skip_auto_flush (global_under : Bool) (cf_under : Bool) : Result Bool := do
   if global_under
@@ -731,14 +1070,14 @@ def skip_auto_flush (global_under : Bool) (cf_under : Bool) : Result Bool := do
   else ok false
 
 /-- [pedra_aeneas_flush_kernel::skip_auto_flush_as_is]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 331:0-333:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 469:0-471:1
     Visibility: public -/
 def skip_auto_flush_as_is
   (_global_under : Bool) (_cf_under : Bool) : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_flush_kernel::ParkedPairPlan]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 341:0-346:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 479:0-484:1
     Visibility: public -/
 @[discriminant isize]
 inductive ParkedPairPlan where
@@ -746,7 +1085,7 @@ inductive ParkedPairPlan where
 | HandOutOldestPair : ParkedPairPlan
 
 /-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::ParkedPairPlan}::fmt]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:9-340:14
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 478:9-478:14
     Visibility: public -/
 def ParkedPairPlan.Insts.CoreFmtDebug.fmt
   (self : ParkedPairPlan) (f : core.fmt.Formatter) :
@@ -759,42 +1098,42 @@ def ParkedPairPlan.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "HandOutOldestPair")
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::ParkedPairPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:9-340:14 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 478:9-478:14 -/
 @[reducible]
 def ParkedPairPlan.Insts.CoreFmtDebug : core.fmt.Debug ParkedPairPlan := {
   fmt := ParkedPairPlan.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::ParkedPairPlan}::clone]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:16-340:21
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 478:16-478:21
     Visibility: public -/
 def ParkedPairPlan.Insts.CoreCloneClone.clone
   (self : ParkedPairPlan) : Result ParkedPairPlan := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::ParkedPairPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:16-340:21 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 478:16-478:21 -/
 @[reducible]
 def ParkedPairPlan.Insts.CoreCloneClone : core.clone.Clone ParkedPairPlan := {
   clone := ParkedPairPlan.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::ParkedPairPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:23-340:27 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 478:23-478:27 -/
 @[reducible]
 def ParkedPairPlan.Insts.CoreMarkerCopy : core.marker.Copy ParkedPairPlan := {
   cloneInst := ParkedPairPlan.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::ParkedPairPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:29-340:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 478:29-478:38 -/
 @[reducible]
 def ParkedPairPlan.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq ParkedPairPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::ParkedPairPlan> for pedra_aeneas_flush_kernel::ParkedPairPlan}::eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:29-340:38
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 478:29-478:38
     Visibility: public -/
 def ParkedPairPlan.Insts.CoreCmpPartialEqParkedPairPlan.eq
   (self : ParkedPairPlan) (other : ParkedPairPlan) : Result Bool := do
@@ -803,7 +1142,7 @@ def ParkedPairPlan.Insts.CoreCmpPartialEqParkedPairPlan.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::ParkedPairPlan> for pedra_aeneas_flush_kernel::ParkedPairPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:29-340:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 478:29-478:38 -/
 @[reducible]
 def ParkedPairPlan.Insts.CoreCmpPartialEqParkedPairPlan : core.cmp.PartialEq
   ParkedPairPlan ParkedPairPlan := {
@@ -811,14 +1150,14 @@ def ParkedPairPlan.Insts.CoreCmpPartialEqParkedPairPlan : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::ParkedPairPlan}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:40-340:42
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 478:40-478:42
     Visibility: public -/
 def ParkedPairPlan.Insts.CoreCmpEq.assert_fields_are_eq
   (self : ParkedPairPlan) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::ParkedPairPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:40-340:42 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 478:40-478:42 -/
 @[reducible]
 def ParkedPairPlan.Insts.CoreCmpEq : core.cmp.Eq ParkedPairPlan := {
   partialEqInst := ParkedPairPlan.Insts.CoreCmpPartialEqParkedPairPlan
@@ -826,7 +1165,7 @@ def ParkedPairPlan.Insts.CoreCmpEq : core.cmp.Eq ParkedPairPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::ParkedPairPlan}::hash]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:44-340:48
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 478:44-478:48
     Visibility: public -/
 def ParkedPairPlan.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -837,7 +1176,7 @@ def ParkedPairPlan.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::ParkedPairPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 340:44-340:48 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 478:44-478:48 -/
 @[reducible]
 def ParkedPairPlan.Insts.CoreHashHash : core.hash.Hash ParkedPairPlan := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -845,7 +1184,7 @@ def ParkedPairPlan.Insts.CoreHashHash : core.hash.Hash ParkedPairPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::parked_pair_plan]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 350:0-356:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 488:0-494:1
     Visibility: public -/
 def parked_pair_plan (parked_len : Std.U64) : Result ParkedPairPlan := do
   if parked_len < 2#u64
@@ -853,14 +1192,14 @@ def parked_pair_plan (parked_len : Std.U64) : Result ParkedPairPlan := do
   else ok ParkedPairPlan.HandOutOldestPair
 
 /-- [pedra_aeneas_flush_kernel::parked_pair_plan_as_is]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 362:0-364:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 500:0-502:1
     Visibility: public -/
 def parked_pair_plan_as_is
   (_parked_len : Std.U64) : Result ParkedPairPlan := do
   ok ParkedPairPlan.HandOutOldestPair
 
 /-- [pedra_aeneas_flush_kernel::AutoFlushGate]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 372:0-377:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 510:0-515:1
     Visibility: public -/
 @[discriminant isize]
 inductive AutoFlushGate where
@@ -868,7 +1207,7 @@ inductive AutoFlushGate where
 | ScanColumnFamilies : AutoFlushGate
 
 /-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::AutoFlushGate}::fmt]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:9-371:14
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 509:9-509:14
     Visibility: public -/
 def AutoFlushGate.Insts.CoreFmtDebug.fmt
   (self : AutoFlushGate) (f : core.fmt.Formatter) :
@@ -881,42 +1220,42 @@ def AutoFlushGate.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "ScanColumnFamilies")
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::AutoFlushGate}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:9-371:14 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 509:9-509:14 -/
 @[reducible]
 def AutoFlushGate.Insts.CoreFmtDebug : core.fmt.Debug AutoFlushGate := {
   fmt := AutoFlushGate.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::AutoFlushGate}::clone]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:16-371:21
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 509:16-509:21
     Visibility: public -/
 def AutoFlushGate.Insts.CoreCloneClone.clone
   (self : AutoFlushGate) : Result AutoFlushGate := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::AutoFlushGate}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:16-371:21 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 509:16-509:21 -/
 @[reducible]
 def AutoFlushGate.Insts.CoreCloneClone : core.clone.Clone AutoFlushGate := {
   clone := AutoFlushGate.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::AutoFlushGate}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:23-371:27 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 509:23-509:27 -/
 @[reducible]
 def AutoFlushGate.Insts.CoreMarkerCopy : core.marker.Copy AutoFlushGate := {
   cloneInst := AutoFlushGate.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::AutoFlushGate}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:29-371:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 509:29-509:38 -/
 @[reducible]
 def AutoFlushGate.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq AutoFlushGate := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::AutoFlushGate> for pedra_aeneas_flush_kernel::AutoFlushGate}::eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:29-371:38
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 509:29-509:38
     Visibility: public -/
 def AutoFlushGate.Insts.CoreCmpPartialEqAutoFlushGate.eq
   (self : AutoFlushGate) (other : AutoFlushGate) : Result Bool := do
@@ -925,7 +1264,7 @@ def AutoFlushGate.Insts.CoreCmpPartialEqAutoFlushGate.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::AutoFlushGate> for pedra_aeneas_flush_kernel::AutoFlushGate}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:29-371:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 509:29-509:38 -/
 @[reducible]
 def AutoFlushGate.Insts.CoreCmpPartialEqAutoFlushGate : core.cmp.PartialEq
   AutoFlushGate AutoFlushGate := {
@@ -933,14 +1272,14 @@ def AutoFlushGate.Insts.CoreCmpPartialEqAutoFlushGate : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::AutoFlushGate}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:40-371:42
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 509:40-509:42
     Visibility: public -/
 def AutoFlushGate.Insts.CoreCmpEq.assert_fields_are_eq
   (self : AutoFlushGate) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::AutoFlushGate}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:40-371:42 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 509:40-509:42 -/
 @[reducible]
 def AutoFlushGate.Insts.CoreCmpEq : core.cmp.Eq AutoFlushGate := {
   partialEqInst := AutoFlushGate.Insts.CoreCmpPartialEqAutoFlushGate
@@ -948,7 +1287,7 @@ def AutoFlushGate.Insts.CoreCmpEq : core.cmp.Eq AutoFlushGate := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::AutoFlushGate}::hash]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:44-371:48
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 509:44-509:48
     Visibility: public -/
 def AutoFlushGate.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -959,7 +1298,7 @@ def AutoFlushGate.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::AutoFlushGate}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 371:44-371:48 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 509:44-509:48 -/
 @[reducible]
 def AutoFlushGate.Insts.CoreHashHash : core.hash.Hash AutoFlushGate := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -967,7 +1306,7 @@ def AutoFlushGate.Insts.CoreHashHash : core.hash.Hash AutoFlushGate := {
 }
 
 /-- [pedra_aeneas_flush_kernel::auto_flush_gate]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 381:0-387:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 519:0-525:1
     Visibility: public -/
 def auto_flush_gate
   (global_under : Bool) (cf_under : Bool) : Result AutoFlushGate := do
@@ -977,14 +1316,14 @@ def auto_flush_gate
   else ok AutoFlushGate.ScanColumnFamilies
 
 /-- [pedra_aeneas_flush_kernel::auto_flush_gate_as_is]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 393:0-395:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 531:0-533:1
     Visibility: public -/
 def auto_flush_gate_as_is
   (_global_under : Bool) (_cf_under : Bool) : Result AutoFlushGate := do
   ok AutoFlushGate.ScanColumnFamilies
 
 /-- [pedra_aeneas_flush_kernel::MemAutoFlushPlan]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 402:0-407:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 540:0-545:1
     Visibility: public -/
 @[discriminant isize]
 inductive MemAutoFlushPlan where
@@ -992,7 +1331,7 @@ inductive MemAutoFlushPlan where
 | NotDueKeepMem : MemAutoFlushPlan
 
 /-- [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::MemAutoFlushPlan}::fmt]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 401:9-401:14
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 539:9-539:14
     Visibility: public -/
 def MemAutoFlushPlan.Insts.CoreFmtDebug.fmt
   (self : MemAutoFlushPlan) (f : core.fmt.Formatter) :
@@ -1005,21 +1344,21 @@ def MemAutoFlushPlan.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "NotDueKeepMem")
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::fmt::Debug for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 401:9-401:14 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 539:9-539:14 -/
 @[reducible]
 def MemAutoFlushPlan.Insts.CoreFmtDebug : core.fmt.Debug MemAutoFlushPlan := {
   fmt := MemAutoFlushPlan.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::MemAutoFlushPlan}::clone]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 401:16-401:21
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 539:16-539:21
     Visibility: public -/
 def MemAutoFlushPlan.Insts.CoreCloneClone.clone
   (self : MemAutoFlushPlan) : Result MemAutoFlushPlan := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::clone::Clone for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 401:16-401:21 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 539:16-539:21 -/
 @[reducible]
 def MemAutoFlushPlan.Insts.CoreCloneClone : core.clone.Clone MemAutoFlushPlan
   := {
@@ -1027,7 +1366,7 @@ def MemAutoFlushPlan.Insts.CoreCloneClone : core.clone.Clone MemAutoFlushPlan
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::Copy for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 401:23-401:27 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 539:23-539:27 -/
 @[reducible]
 def MemAutoFlushPlan.Insts.CoreMarkerCopy : core.marker.Copy MemAutoFlushPlan
   := {
@@ -1035,14 +1374,14 @@ def MemAutoFlushPlan.Insts.CoreMarkerCopy : core.marker.Copy MemAutoFlushPlan
 }
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 401:29-401:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 539:29-539:38 -/
 @[reducible]
 def MemAutoFlushPlan.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq MemAutoFlushPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::MemAutoFlushPlan> for pedra_aeneas_flush_kernel::MemAutoFlushPlan}::eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 401:29-401:38
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 539:29-539:38
     Visibility: public -/
 def MemAutoFlushPlan.Insts.CoreCmpPartialEqMemAutoFlushPlan.eq
   (self : MemAutoFlushPlan) (other : MemAutoFlushPlan) : Result Bool := do
@@ -1051,7 +1390,7 @@ def MemAutoFlushPlan.Insts.CoreCmpPartialEqMemAutoFlushPlan.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::PartialEq<pedra_aeneas_flush_kernel::MemAutoFlushPlan> for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 401:29-401:38 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 539:29-539:38 -/
 @[reducible]
 def MemAutoFlushPlan.Insts.CoreCmpPartialEqMemAutoFlushPlan :
   core.cmp.PartialEq MemAutoFlushPlan MemAutoFlushPlan := {
@@ -1059,14 +1398,14 @@ def MemAutoFlushPlan.Insts.CoreCmpPartialEqMemAutoFlushPlan :
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::MemAutoFlushPlan}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 401:40-401:42
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 539:40-539:42
     Visibility: public -/
 def MemAutoFlushPlan.Insts.CoreCmpEq.assert_fields_are_eq
   (self : MemAutoFlushPlan) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::cmp::Eq for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 401:40-401:42 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 539:40-539:42 -/
 @[reducible]
 def MemAutoFlushPlan.Insts.CoreCmpEq : core.cmp.Eq MemAutoFlushPlan := {
   partialEqInst := MemAutoFlushPlan.Insts.CoreCmpPartialEqMemAutoFlushPlan
@@ -1074,7 +1413,7 @@ def MemAutoFlushPlan.Insts.CoreCmpEq : core.cmp.Eq MemAutoFlushPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::MemAutoFlushPlan}::hash]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 401:44-401:48
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 539:44-539:48
     Visibility: public -/
 def MemAutoFlushPlan.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -1085,7 +1424,7 @@ def MemAutoFlushPlan.Insts.CoreHashHash.hash
   Isize.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_flush_kernel::{impl core::hash::Hash for pedra_aeneas_flush_kernel::MemAutoFlushPlan}]
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 401:44-401:48 -/
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 539:44-539:48 -/
 @[reducible]
 def MemAutoFlushPlan.Insts.CoreHashHash : core.hash.Hash MemAutoFlushPlan := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -1093,7 +1432,7 @@ def MemAutoFlushPlan.Insts.CoreHashHash : core.hash.Hash MemAutoFlushPlan := {
 }
 
 /-- [pedra_aeneas_flush_kernel::mem_auto_flush_plan]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 411:0-417:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 549:0-555:1
     Visibility: public -/
 def mem_auto_flush_plan
   (mem_bytes : Std.U64) (armed : Bool) (limit : Std.U64) :
@@ -1105,7 +1444,7 @@ def mem_auto_flush_plan
   else ok MemAutoFlushPlan.NotDueKeepMem
 
 /-- [pedra_aeneas_flush_kernel::mem_auto_flush_plan_as_is]:
-    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 423:0-429:1
+    Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 561:0-567:1
     Visibility: public -/
 def mem_auto_flush_plan_as_is
   (_mem_bytes : Std.U64) (_armed : Bool) (_limit : Std.U64) :

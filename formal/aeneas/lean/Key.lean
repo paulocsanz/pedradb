@@ -306,12 +306,12 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P1.2 3/11 (atom `catalog:ikey_pack`, entry
-    `key.pack_sequence_and_type`): pack ikey is EXACTLY the chain
-    cited — the ceiling MAX_SEQUENCE_NUMBER is read and afirmado (massert),
-    the sequence desloca 8, the type becomes u8 and goes up the u64, and the package is the
-    or bit the bit. The AS-IS descarta the sequence (collision seq/kind —
-    tooth planted). -/
+/-- RFC-0218 P1.2 3/11 (atom `catalog:ikey_pack`, entrada
+    `key.pack_sequence_and_type`): empacotar ikey é EXATAMENTE a cadeia
+    citada — o teto MAX_SEQUENCE_NUMBER é lido e afirmado (massert),
+    a sequência desloca 8, o tipo vira u8 e sobe a u64, e o pacote é o
+    ou bit a bit. O AS-IS descarta a sequência (colisão seq/kind —
+    tooth plantado). -/
 theorem pack_sequence_and_type_fate_iff :
     ∀ (sequence : U64) (kind : key.ValueType) (r : U64),
       (key.pack_sequence_and_type sequence kind = ok r) ↔

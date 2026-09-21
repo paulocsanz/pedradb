@@ -1,7 +1,7 @@
 //! Pure flush-pipeline decisions (RFC-0056 P0.2 / RFC-0174 P0.3).
 //!
 //! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). No twin copy.
+//! proves (`cfg(verus_keep_ghost)`). No twin-copy.
 //!
 //!   ./scripts/verus_flush_decision.sh
 //!
@@ -66,6 +66,13 @@ macro_rules! wal_rotate_as_is_body {
 macro_rules! auto_flush_due_body {
     ($mem_bytes:expr, $armed:expr, $limit:expr) => {
         $armed && $mem_bytes >= $limit
+    };
+}
+
+/// L0 is due for compact EXACTLY at/above the trigger (RFC-0234 P0.1).
+macro_rules! l0_compact_due_body {
+    ($l0_files:expr, $trigger:expr) => {
+        $l0_files >= $trigger
     };
 }
 
@@ -216,6 +223,121 @@ pub fn cf_flush_plan_as_is(_mem_bytes: u64, _limit: u64) -> CfFlushPlan {
     CfFlushPlan::CfNotDueSkip
 }
 
+#[cfg(not(verus_keep_ghost))]
+/// RFC-0223 P1.1: how a due family leaves the commit path under
+/// `defer_auto_compact`. The O(n) per-family partition
+/// (`MemTable::take_family`) under the write lock was the whole
+/// in-commit "flush work" @10M (split `7f2758d4`: work 99,85%, gate
+/// 58ns/commit) — staging the whole table is the O(1) swap the global
+/// branch already uses, and `write_imm_l0_files` splits parked tables
+/// per family at materialize time anyway.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FamilyFlushMode {
+    /// The due family dominates the memtable: swap the whole table to
+    /// `imm` (O(1) in-commit); the host worker parks and materializes
+    /// per-family L0 files.
+    StageWholeMem,
+    /// Small family (e.g. `lock`): partition it out in-commit; the rest
+    /// of the table keeps accumulating.
+    PartitionFamily,
+}
+
+/// `fam_bytes/total_bytes >= 3/4` — the dominant-family bar. Below it a
+/// whole-mem stage would flush too many not-due bytes to be worth the
+/// earlier commit return.
+pub const DOMINANT_FAMILY_NUM: u64 = 3;
+pub const DOMINANT_FAMILY_DEN: u64 = 4;
+
+#[cfg(not(verus_keep_ghost))]
+/// Stage the WHOLE memtable EXACTLY when the due family dominates it
+/// (≥ 3/4 of usage): in-commit cost becomes the O(1) swap, the O(n)
+/// partition moves to the worker's materialize pass.
+#[must_use]
+pub fn dominant_family_stage_plan(fam_bytes: u64, total_bytes: u64) -> FamilyFlushMode {
+    if fam_bytes * DOMINANT_FAMILY_DEN >= total_bytes * DOMINANT_FAMILY_NUM {
+        FamilyFlushMode::StageWholeMem
+    } else {
+        FamilyFlushMode::PartitionFamily
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: always partitions the family out in-commit (the O(n)
+/// `take_family` under the write lock — tooth).
+#[must_use]
+pub fn dominant_family_stage_plan_as_is(_fam_bytes: u64, _total_bytes: u64) -> FamilyFlushMode {
+    FamilyFlushMode::PartitionFamily
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// RFC-0219 P2.2: which flush-pipeline regime a submit/park/assist
+/// decision is in — decided by whether a host flush worker is attached.
+/// The five concurrent.rs trampoline gates (`await_flush_debt`,
+/// `await_l0_park`, `submit_one`, `submit_inner`, `assist_flush_debt`)
+/// match this plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlusherGate {
+    /// No worker: parking could only hang — workerless paths keep the
+    /// honest admission error / lone fast path.
+    Workerless,
+    /// Worker attached: park/retry/assist flows are bounded by the drain.
+    WorkerDrains,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Park/assist EXACTLY when a host flush worker is attached to drain
+/// the debt/stall the writer would sleep on.
+#[must_use]
+pub fn flusher_gate_plan(attached: bool) -> FlusherGate {
+    if attached {
+        FlusherGate::WorkerDrains
+    } else {
+        FlusherGate::Workerless
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: treats a workerless Db as drained — writers park on debt/stall
+/// with nobody to drain them (unbounded sleep — tooth plantado).
+#[must_use]
+pub fn flusher_gate_plan_as_is(_attached: bool) -> FlusherGate {
+    FlusherGate::WorkerDrains
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// RFC-0219 P2.2: whether parked-unflushed bytes are real debt —
+/// at/above one table's worth (`flush_debt_cap`) a writer must
+/// throttle. The trampolines `concurrent.rs await_flush_debt` and
+/// `assist_flush_debt` match this plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParkedDebtPlan {
+    /// Parked bytes at/above the cap — park (bounded) / assist
+    /// (materialize one table inline).
+    DebtAtCap,
+    /// Below the cap — no debt to drain; proceed with the submit.
+    NoDebtBelowCap,
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Debt EXACTLY when parked-unflushed bytes reach one table's worth.
+#[must_use]
+pub fn parked_debt_plan(parked: u64, cap: u64) -> ParkedDebtPlan {
+    if parked < cap {
+        ParkedDebtPlan::NoDebtBelowCap
+    } else {
+        ParkedDebtPlan::DebtAtCap
+    }
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never throttles — a lone fast writer parks tables faster than
+/// the worker materializes them and the mem layer grows without bound
+/// (the 25M slipstream OOM, v11–v15 — tooth plantado).
+#[must_use]
+pub fn parked_debt_plan_as_is(_parked: u64, _cap: u64) -> ParkedDebtPlan {
+    ParkedDebtPlan::NoDebtBelowCap
+}
+
 /// Every way acked keys can still depend on the WAL.
 #[cfg(not(verus_keep_ghost))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -301,6 +423,22 @@ pub fn auto_flush_due(mem_bytes: u64, armed: bool, limit: u64) -> bool {
 /// AS-IS: never auto-flush.
 #[must_use]
 pub fn auto_flush_due_as_is(_mem_bytes: u64, _armed: bool, _limit: u64) -> bool {
+    false
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// Compact L0 EXACTLY when the live file count is at/above the trigger
+/// (RFC-0234 P0.1). The trampolines `maybe_auto_compact` and
+/// `maybe_compact_l0_at_trigger` match this — not a raw `>=`.
+#[must_use]
+pub fn l0_compact_due(l0_files: u64, trigger: u64) -> bool {
+    l0_compact_due_body!(l0_files, trigger)
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never compact L0 (the park of today — seed piles 54–773 files).
+#[must_use]
+pub fn l0_compact_due_as_is(_l0_files: u64, _trigger: u64) -> bool {
     false
 }
 
@@ -612,6 +750,30 @@ pub fn auto_flush_due_as_is(mem_bytes: u64, armed: bool, limit: u64) -> (d: bool
     false
 }
 
+pub open spec fn l0_compact_due_spec(l0_files: u64, trigger: u64) -> bool {
+    l0_files >= trigger
+}
+
+pub fn l0_compact_due(l0_files: u64, trigger: u64) -> (d: bool)
+    ensures
+        d == l0_compact_due_spec(l0_files, trigger),
+{
+    l0_compact_due_body!(l0_files, trigger)
+}
+
+pub open spec fn l0_compact_due_as_is_spec(_l0_files: u64, _trigger: u64) -> bool {
+    false
+}
+
+pub fn l0_compact_due_as_is(l0_files: u64, trigger: u64) -> (d: bool)
+    ensures
+        d == l0_compact_due_as_is_spec(l0_files, trigger),
+        d == false,
+{
+    let _ = (l0_files, trigger);
+    false
+}
+
 pub open spec fn wal_segment_is_empty_spec(pos: u64) -> bool {
     pos == 0
 }
@@ -730,6 +892,13 @@ proof fn lemma_as_is_never_auto_flushes()
     ensures
         auto_flush_due_spec(100, true, 50),
         !auto_flush_due_as_is_spec(100, true, 50),
+{
+}
+
+proof fn lemma_as_is_never_compacts_l0()
+    ensures
+        l0_compact_due_spec(4, 4),
+        !l0_compact_due_as_is_spec(4, 4),
 {
 }
 
@@ -903,7 +1072,8 @@ mod tests {
             ManifestPublishPlan::PublishManifest,
             "AS-IS tooth: publishes with unsynced SST"
         );
-        let pm = named_fn_src(include_str!("db.rs"), "persist_manifest").expect("persist_manifest");
+        let pm = named_fn_src(include_str!("db_kernel.rs"), "persist_manifest")
+            .expect("persist_manifest");
         assert!(
             pm.contains("match crate::flush_kernel::manifest_publish_plan("),
             "persist_manifest must match manifest_publish_plan"
@@ -912,6 +1082,151 @@ mod tests {
             !pm.contains("may_publish_manifest("),
             "the raw publish gate left the trampoline"
         );
+    }
+
+    #[test]
+    fn trampoline_drains_match_kernel_plans() {
+        // RFC-0219 P2.1 drains: the already-paired kernel decisions
+        // leave the `if` shape — the trampoline matches the kernel.
+        let trw =
+            named_fn_src(include_str!("db_kernel.rs"), "try_rotate_wal").expect("try_rotate_wal");
+        assert!(
+            trw.contains("match crate::flush_kernel::wal_rotate_decision("),
+            "try_rotate_wal matches wal_rotate_decision"
+        );
+        assert!(
+            trw.contains("match crate::flush_kernel::wal_segment_is_empty("),
+            "try_rotate_wal matches wal_segment_is_empty"
+        );
+        let ewr = named_fn_src(include_str!("db_kernel.rs"), "ensure_wal_rotated_for_gc")
+            .expect("ensure_wal_rotated_for_gc");
+        assert!(
+            ewr.contains("match crate::flush_kernel::wal_rotate_decision("),
+            "ensure_wal_rotated_for_gc matches wal_rotate_decision"
+        );
+        let cv =
+            named_fn_src(include_str!("db_kernel.rs"), "count_visible").expect("count_visible");
+        assert_eq!(
+            cv.matches("match visible").count(),
+            2,
+            "both scan-count sites match the visible_at result"
+        );
+    }
+
+    #[test]
+    fn flusher_gate_plan_on_live_workerless_parks_nowhere() {
+        // RFC-0219 P2.2: park/assist/workerless-submit regimes are decided
+        // by flusher_gate_plan — a workerless Db never sleeps on a drain
+        // nobody runs. AS-IS says WorkerDrains always (workerless writers
+        // park forever — tooth).
+        assert_eq!(flusher_gate_plan(true), FlusherGate::WorkerDrains);
+        assert_eq!(flusher_gate_plan(false), FlusherGate::Workerless);
+        assert_eq!(
+            flusher_gate_plan_as_is(false),
+            FlusherGate::WorkerDrains,
+            "AS-IS tooth: workerless Db parks on a drain nobody runs"
+        );
+        let cc = include_str!("concurrent_kernel.rs");
+        for (name, field) in [
+            ("await_flush_debt", "self"),
+            ("await_l0_park", "self"),
+            ("submit_one", "self"),
+            ("submit_inner", "self"),
+            ("assist_flush_debt", "self.writes"),
+        ] {
+            let body = named_fn_src(cc, name).unwrap_or_else(|| panic!("{name}"));
+            assert!(
+                body.contains("match crate::flush_kernel::flusher_gate_plan("),
+                "{name} must match flusher_gate_plan"
+            );
+            assert!(
+                !body.contains(&format!("if !{field}.flusher_attached.load")),
+                "{name}: the raw worker gate left the trampoline"
+            );
+        }
+    }
+
+    #[test]
+    fn parked_debt_plan_on_live_at_cap_parks() {
+        // RFC-0219 P2.2: debt is real EXACTLY when parked-unflushed bytes
+        // reach one table's worth — the writer throttles (park/assist).
+        // AS-IS never throttles (mem layer grows without bound — the 25M
+        // slipstream OOM — tooth).
+        assert_eq!(parked_debt_plan(255, 256), ParkedDebtPlan::NoDebtBelowCap);
+        assert_eq!(parked_debt_plan(256, 256), ParkedDebtPlan::DebtAtCap);
+        assert_eq!(parked_debt_plan(1 << 30, 256), ParkedDebtPlan::DebtAtCap);
+        assert_eq!(
+            parked_debt_plan_as_is(1 << 30, 256),
+            ParkedDebtPlan::NoDebtBelowCap,
+            "AS-IS tooth: a table's worth of parked debt never throttles"
+        );
+        let cc = include_str!("concurrent_kernel.rs");
+        let afd = named_fn_src(cc, "await_flush_debt").expect("await_flush_debt");
+        assert!(
+            afd.contains("match crate::flush_kernel::parked_debt_plan("),
+            "await_flush_debt must match parked_debt_plan"
+        );
+        let assist = named_fn_src(cc, "assist_flush_debt").expect("assist_flush_debt");
+        assert!(
+            assist.contains("match crate::flush_kernel::parked_debt_plan("),
+            "assist_flush_debt must match parked_debt_plan"
+        );
+        assert!(
+            !assist.contains("parked_unflushed_bytes() < cap"),
+            "the raw debt compare left the trampoline"
+        );
+    }
+
+    #[test]
+    fn trampoline_drains_p22_match_kernel_plans() {
+        // RFC-0219 P2.2 drains: the already-paired kernel decisions
+        // leave the `if` shape in concurrent.rs — the trampoline matches
+        // the kernel (or its plan).
+        let cc = include_str!("concurrent_kernel.rs");
+        let fate_drains = [
+            ("submit_after_begin", "lone/async 3-way"),
+            ("lead", "catchup bound"),
+            ("finish_group_off_lock", "wal-sync note + ledger barrier"),
+        ];
+        for (name, what) in fate_drains {
+            let body = named_fn_src(cc, name).unwrap_or_else(|| panic!("{name}"));
+            assert_eq!(
+                body.matches("match crate::changelog_kernel::changelog_durable_commit_fate(")
+                    .count(),
+                if name == "finish_group_off_lock" {
+                    2
+                } else {
+                    1
+                },
+                "{name} ({what}) must match changelog_durable_commit_fate"
+            );
+        }
+        let occ = named_fn_src(cc, "occ_snapshot").expect("occ_snapshot");
+        assert!(
+            occ.contains("match crate::flush_kernel::occ_snap_lock_order("),
+            "occ_snapshot matches occ_snap_lock_order"
+        );
+        let idle = named_fn_src(cc, "writes_idle_for").expect("writes_idle_for");
+        assert!(
+            idle.contains("match crate::flush_kernel::occ_snap_uses_published("),
+            "writes_idle_for matches occ_snap_uses_published"
+        );
+        let rec = named_fn_src(cc, "recover_from_fence").expect("recover_from_fence");
+        assert!(
+            rec.contains("match crate::write_admission_kernel::fence_admission_plan("),
+            "recover_from_fence matches fence_admission_plan"
+        );
+        for name in ["persist_unsynced_l0s_off_lock", "install_prepared_one"] {
+            let body = named_fn_src(cc, name).unwrap_or_else(|| panic!("{name}"));
+            assert!(
+                body.contains("match crate::flush_kernel::manifest_publish_plan("),
+                "{name} matches manifest_publish_plan"
+            );
+            assert!(
+                !body.contains("may_publish_manifest("),
+                "{name}: the raw publish gate left the trampoline"
+            );
+        }
     }
 
     #[test]
@@ -927,8 +1242,8 @@ mod tests {
             CfFlushPlan::CfNotDueSkip,
             "AS-IS tooth: armed family over the limit never flushes"
         );
-        let maf =
-            named_fn_src(include_str!("db.rs"), "maybe_auto_flush").expect("maybe_auto_flush");
+        let maf = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_flush")
+            .expect("maybe_auto_flush");
         assert!(
             maf.contains("match crate::flush_kernel::cf_flush_plan("),
             "maybe_auto_flush must match cf_flush_plan"
@@ -948,7 +1263,7 @@ mod tests {
             !occ_snap_uses_published_as_is(true),
             "AS-IS tooth: last_seq while inflight"
         );
-        let src = include_str!("concurrent.rs");
+        let src = include_str!("concurrent_kernel.rs");
         assert!(
             src.contains("occ_snap_uses_published("),
             "occ_snapshot must match occ_snap_uses_published"
@@ -978,7 +1293,7 @@ mod tests {
             !occ_snap_lock_order_as_is(false, true),
             "AS-IS tooth: last_seq while write lock held"
         );
-        let snap = include_str!("concurrent.rs")
+        let snap = include_str!("concurrent_kernel.rs")
             .split("fn occ_snapshot(")
             .nth(1)
             .expect("occ_snapshot");
@@ -1013,7 +1328,7 @@ mod tests {
             "AS-IS tooth: rotate empty segment"
         );
         assert!(!wal_segment_is_empty(1));
-        let rot = include_str!("db.rs")
+        let rot = include_str!("db_kernel.rs")
             .split("fn try_rotate_wal(&mut self)")
             .nth(1)
             .and_then(|s| s.split("fn wal_pin_state").next())
@@ -1025,6 +1340,15 @@ mod tests {
         assert!(
             rot.contains("wal_rotate_decision("),
             "try_rotate_wal must match wal_rotate_decision"
+        );
+        let pin = include_str!("db_kernel.rs")
+            .split("fn wal_pin_state(")
+            .nth(1)
+            .and_then(|s| s.split("fn ensure_wal_rotated_for_gc").next())
+            .expect("wal_pin_state");
+        assert!(
+            pin.contains("commit_inflight:"),
+            "wal_pin_state feeds commit_inflight into wal_rotate_decision"
         );
         let flush_th = include_str!("../../../formal/aeneas/lean/Flush.lean");
         assert!(
@@ -1046,6 +1370,44 @@ mod tests {
     }
 
     #[test]
+    fn l0_compact_due_on_live_at_trigger_is_not_ok() {
+        // RFC-0234 P0.1: L0 compact is due EXACTLY at/above the trigger.
+        // AS-IS never fires (the park that left 54–773 L0 after a 10M seed).
+        assert!(l0_compact_due(4, 4));
+        assert!(l0_compact_due(5, 4));
+        assert!(!l0_compact_due(3, 4));
+        assert!(
+            !l0_compact_due_as_is(4, 4),
+            "AS-IS tooth: never compacta L0"
+        );
+        assert!(!l0_compact_due_as_is(773, 4));
+        let mac = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_compact")
+            .expect("maybe_auto_compact");
+        assert!(
+            mac.contains("crate::flush_kernel::l0_compact_due("),
+            "maybe_auto_compact must match l0_compact_due"
+        );
+        let cc = include_str!("concurrent_kernel.rs");
+        let mct =
+            named_fn_src(cc, "maybe_compact_l0_at_trigger").expect("maybe_compact_l0_at_trigger");
+        assert!(
+            mct.contains("crate::flush_kernel::l0_compact_due("),
+            "maybe_compact_l0_at_trigger must match l0_compact_due"
+        );
+        let drain = named_fn_src(cc, "drain_l0_below_trigger").expect("drain_l0_below_trigger");
+        assert!(
+            drain.contains("crate::flush_kernel::l0_compact_due("),
+            "drain_l0_below_trigger must match l0_compact_due"
+        );
+        let compat = include_str!("../../../crates/rocksdb-compat/src/lib_kernel.rs");
+        let spawn = named_fn_src(compat, "spawn_compact_worker").expect("spawn_compact_worker");
+        assert!(
+            spawn.contains("l0_compact_due("),
+            "compat compact worker must match l0_compact_due"
+        );
+    }
+
+    #[test]
     fn skip_auto_flush_on_live_both_under_is_not_ok() {
         assert!(skip_auto_flush(true, true));
         assert!(!skip_auto_flush_as_is(true, true));
@@ -1055,8 +1417,10 @@ mod tests {
 
     /// Balanced-brace slice of one `fn` from a source file (plant lens).
     fn named_fn_src(src: &str, name: &str) -> Option<String> {
-        let needle = format!("fn {name}(");
-        let start = src.find(&needle)?;
+        // plain fns (`fn name(`) and generic fns (`fn name<E: Env>(`) alike
+        let start = src
+            .find(&format!("fn {name}("))
+            .or_else(|| src.find(&format!("fn {name}<")))?;
         let rest = &src[start..];
         let bytes = rest.as_bytes();
         let brace = bytes.iter().position(|&b| b == b'{')?;
@@ -1087,7 +1451,7 @@ mod tests {
             ParkedPairPlan::HandOutOldestPair,
             "AS-IS tooth: pair handed out of a short queue"
         );
-        let popa = named_fn_src(include_str!("db.rs"), "parked_oldest_pair_arcs")
+        let popa = named_fn_src(include_str!("db_kernel.rs"), "parked_oldest_pair_arcs")
             .expect("parked_oldest_pair_arcs");
         assert!(
             popa.contains("match crate::flush_kernel::parked_pair_plan("),
@@ -1118,8 +1482,8 @@ mod tests {
             AutoFlushGate::ScanColumnFamilies,
             "AS-IS tooth: scan even when both axes are under"
         );
-        let maf =
-            named_fn_src(include_str!("db.rs"), "maybe_auto_flush").expect("maybe_auto_flush");
+        let maf = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_flush")
+            .expect("maybe_auto_flush");
         assert!(
             maf.contains("match crate::flush_kernel::auto_flush_gate("),
             "maybe_auto_flush must match auto_flush_gate"
@@ -1127,6 +1491,38 @@ mod tests {
         assert!(
             !maf.contains("skip_auto_flush(global_under, cf_under)"),
             "the raw both-under gate left the trampoline"
+        );
+    }
+
+    #[test]
+    fn dominant_family_stage_plan_on_live_dominant_stages() {
+        // RFC-0223 P1.1: fam >= 3/4 of total stages the WHOLE mem
+        // (O(1) swap in-commit; the worker splits per family at
+        // materialize). Below the bar the family partitions out.
+        // AS-IS always partitions (O(n) take_family under the write
+        // lock — the whole in-commit flush work @10M, split 7f2758d4).
+        assert_eq!(
+            dominant_family_stage_plan(80, 100),
+            FamilyFlushMode::StageWholeMem
+        );
+        assert_eq!(
+            dominant_family_stage_plan(75, 100),
+            FamilyFlushMode::StageWholeMem
+        );
+        assert_eq!(
+            dominant_family_stage_plan(74, 100),
+            FamilyFlushMode::PartitionFamily
+        );
+        assert_eq!(
+            dominant_family_stage_plan_as_is(99, 100),
+            FamilyFlushMode::PartitionFamily,
+            "AS-IS tooth: always partitions in-commit"
+        );
+        let maf = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_flush")
+            .expect("maybe_auto_flush");
+        assert!(
+            maf.contains("dominant_family_stage_plan("),
+            "maybe_auto_flush defer branch must route through dominant_family_stage_plan"
         );
     }
 
@@ -1153,8 +1549,8 @@ mod tests {
             MemAutoFlushPlan::NotDueKeepMem,
             "AS-IS tooth: armed limit ignored, mem grows unbounded"
         );
-        let maf =
-            named_fn_src(include_str!("db.rs"), "maybe_auto_flush").expect("maybe_auto_flush");
+        let maf = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_flush")
+            .expect("maybe_auto_flush");
         assert!(
             maf.contains("match crate::flush_kernel::mem_auto_flush_plan("),
             "maybe_auto_flush must match mem_auto_flush_plan on the mem gate"

@@ -1,4 +1,4 @@
-path=crates/rocksdb-compat/src/locktab.rs
-sha256=f14008dbbcf655705712d1eedb4f27969c889fcc627a6912f9243ded18e81105
+path=crates/rocksdb-compat/src/locktab_kernel.rs
+sha256=c9ced8101ae6a457fafd25684edaeee201f9f92f3e88c5cf215ccce148e4fee6
 aeneas=daa85d7
 charon=0.1.232

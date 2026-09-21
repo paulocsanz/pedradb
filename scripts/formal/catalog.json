@@ -14,13 +14,13 @@
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "changelog_needs_sst_rebuild",
       "as_is": "changelog_needs_sst_rebuild_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "maybe_rebuild_feed_from_live"
         }
       ],
@@ -38,18 +38,18 @@
       "finding": "F30",
       "twin_kind": "model",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/merge.rs",
-      "twin": "crates/pedradb-core/src/merge.rs",
+      "kernel": "crates/pedradb-core/src/merge_kernel.rs",
+      "twin": "crates/pedradb-core/src/merge_kernel.rs",
       "aeneas": "scripts/aeneas_merge.sh",
       "callers": [
-        "crates/pedradb-core/src/merge.rs",
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/merge_kernel.rs",
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "range_tombstone_covers",
       "as_is": "range_tombstone_covers_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/merge.rs",
+          "file": "crates/pedradb-core/src/merge_kernel.rs",
           "handler": "range_deleted"
         }
       ]
@@ -63,24 +63,24 @@
       "finding": "F30",
       "twin_kind": "model",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/merge.rs",
-      "twin": "crates/pedradb-core/src/merge.rs",
+      "kernel": "crates/pedradb-core/src/merge_kernel.rs",
+      "twin": "crates/pedradb-core/src/merge_kernel.rs",
       "aeneas": "scripts/aeneas_merge.sh",
       "callers": [
-        "crates/pedradb-core/src/merge.rs",
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/merge_kernel.rs",
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "write_op_range_end",
       "as_is": "write_op_range_end_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "stage_unapplied"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/merge.rs",
+        "file": "crates/pedradb-core/src/merge_kernel.rs",
         "test": "write_op_range_end_on_live_stage_unapplied_is_not_ok"
       }
     },
@@ -89,23 +89,23 @@
       "finding": "RFC-0187 P1.3 / RFC-0188 P0.2",
       "twin_kind": "close",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/merge.rs",
-      "twin": "crates/pedradb-core/src/merge.rs",
+      "kernel": "crates/pedradb-core/src/merge_kernel.rs",
+      "twin": "crates/pedradb-core/src/merge_kernel.rs",
       "aeneas": "scripts/aeneas_merge.sh",
       "callers": [
-        "crates/pedradb-core/src/merge.rs"
+        "crates/pedradb-core/src/merge_kernel.rs"
       ],
       "entry": "sift_step",
       "as_is": "sift_step_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/merge.rs",
+          "file": "crates/pedradb-core/src/merge_kernel.rs",
           "handler": "sift_down"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/merge.rs",
+        "file": "crates/pedradb-core/src/merge_kernel.rs",
         "test": "merge_heap_sift_kernel_three_teeth"
       }
     },
@@ -119,8 +119,8 @@
       "twin_kind": "close",
       "atom": "bump_non_ff",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/prefix.rs",
-      "twin": "crates/pedradb-core/src/prefix.rs",
+      "kernel": "crates/pedradb-core/src/prefix_kernel.rs",
+      "twin": "crates/pedradb-core/src/prefix_kernel.rs",
       "aeneas": "scripts/aeneas_prefix.sh",
       "callers": [],
       "entry": "prefix_exclusive_end",
@@ -137,7 +137,7 @@
       "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "aeneas": "scripts/aeneas_wal_recover.sh",
       "callers": [
-        "crates/pedradb-core/src/wal/reader.rs"
+        "crates/pedradb-core/src/wal/reader_kernel.rs"
       ],
       "entry": "recover_collect_act",
       "as_is": "recover_collect_act_as_is",
@@ -159,23 +159,23 @@
       "finding": "F166",
       "twin_kind": "close",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/bloom.rs",
-      "twin": "crates/pedradb-core/src/bloom.rs",
+      "kernel": "crates/pedradb-core/src/bloom_kernel.rs",
+      "twin": "crates/pedradb-core/src/bloom_kernel.rs",
       "aeneas": "scripts/aeneas_bloom.sh",
       "callers": [
-        "crates/pedradb-core/src/bloom.rs"
+        "crates/pedradb-core/src/bloom_kernel.rs"
       ],
       "entry": "bloom_header_ok",
       "as_is": "bloom_header_ok_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/bloom.rs",
+          "file": "crates/pedradb-core/src/bloom_kernel.rs",
           "handler": "decode"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/bloom.rs",
+        "file": "crates/pedradb-core/src/bloom_kernel.rs",
         "test": "bloom_header_ok_on_live_decode_is_not_ok"
       }
     },
@@ -188,23 +188,23 @@
       "finding": "T1 (docs/formal/bloom-filter-theorems.md)",
       "twin_kind": "close",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/bloom.rs",
-      "twin": "crates/pedradb-core/src/bloom.rs",
+      "kernel": "crates/pedradb-core/src/bloom_kernel.rs",
+      "twin": "crates/pedradb-core/src/bloom_kernel.rs",
       "aeneas": "scripts/aeneas_bloom.sh",
       "callers": [
-        "crates/pedradb-core/src/sst/table.rs"
+        "crates/pedradb-core/src/sst/table_kernel.rs"
       ],
       "entry": "insert",
       "as_is": "insert_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/sst/table.rs",
+          "file": "crates/pedradb-core/src/sst/table_kernel.rs",
           "handler": "write_sst_try_sorted_on"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/bloom.rs",
+        "file": "crates/pedradb-core/src/bloom_kernel.rs",
         "test": "insert_on_live_sst_is_not_ok"
       }
     },
@@ -217,23 +217,23 @@
       "finding": "T1/T4 (docs/formal/bloom-filter-theorems.md)",
       "twin_kind": "close",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/bloom.rs",
-      "twin": "crates/pedradb-core/src/bloom.rs",
+      "kernel": "crates/pedradb-core/src/bloom_kernel.rs",
+      "twin": "crates/pedradb-core/src/bloom_kernel.rs",
       "aeneas": "scripts/aeneas_bloom.sh",
       "callers": [
-        "crates/pedradb-core/src/sst/table.rs"
+        "crates/pedradb-core/src/sst/table_kernel.rs"
       ],
       "entry": "may_contain",
       "as_is": "may_contain_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/sst/table.rs",
+          "file": "crates/pedradb-core/src/sst/table_kernel.rs",
           "handler": "point_at"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/bloom.rs",
+        "file": "crates/pedradb-core/src/bloom_kernel.rs",
         "test": "may_contain_on_live_sst_is_not_ok"
       }
     },
@@ -246,14 +246,14 @@
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "aeneas": "scripts/aeneas_scan.sh",
       "callers": [
-        "crates/pedradb-core/src/sst/table.rs"
+        "crates/pedradb-core/src/sst/table_kernel.rs"
       ],
       "entry": "scan_reads_file",
       "as_is": "scan_reads_file_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/sst/table.rs",
+          "file": "crates/pedradb-core/src/sst/table_kernel.rs",
           "handler": "entries_in_user_range_capped"
         }
       ],
@@ -275,7 +275,7 @@
       "twin": "crates/pedradb-core/src/manifest_kernel.rs",
       "aeneas": "scripts/aeneas_manifest.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "sst_recover_action",
       "handlers": [
@@ -302,7 +302,7 @@
       "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "aeneas": "scripts/aeneas_reopen.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "reopen_outcome",
       "handlers": [
@@ -328,7 +328,7 @@
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "wal_rotate_decision",
       "handlers": [
@@ -353,7 +353,7 @@
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "wal_rotate_decision",
       "handlers": [
@@ -374,7 +374,7 @@
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
+        "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "occ_snap_uses_published",
       "handlers": [
@@ -395,14 +395,14 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
+        "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "occ_conflict",
       "as_is": "occ_conflict_as_is_serialized",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/concurrent.rs",
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
           "handler": "validate_occ_batch"
         }
       ],
@@ -423,14 +423,14 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "fence_publish_seq",
       "as_is": "fence_publish_seq_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "max_appended_seq"
         }
       ],
@@ -452,7 +452,7 @@
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "compact_pick",
       "handlers": [
@@ -479,7 +479,7 @@
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
-        "crates/pedradb-core/src/merge.rs"
+        "crates/pedradb-core/src/merge_kernel.rs"
       ],
       "entry": "point_version_fate",
       "handlers": [
@@ -505,7 +505,7 @@
       "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "reopen_outcome",
       "handlers": [
@@ -530,7 +530,7 @@
       "twin": "crates/pedradb-core/src/vlog_gc_kernel.rs",
       "aeneas": "scripts/aeneas_vlog_gc.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "vlog_recover_action",
       "handlers": [
@@ -557,7 +557,7 @@
       "twin": "crates/pedradb-core/src/vlog_gc_kernel.rs",
       "aeneas": "scripts/aeneas_vlog_gc.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "blob_gc_action",
       "handlers": [
@@ -583,19 +583,19 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
+        "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "may_publish_group",
       "as_is": "may_publish_group_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/concurrent.rs",
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
           "handler": "finish_group_off_lock"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/concurrent.rs",
+        "file": "crates/pedradb-core/src/concurrent_kernel.rs",
         "test": "may_publish_group_on_live_group_is_not_ok"
       }
     },
@@ -607,7 +607,7 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
+        "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "rwlock_client_may_mutate",
       "handlers": [
@@ -616,7 +616,7 @@
       "as_is": "rwlock_client_may_mutate_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/concurrent.rs",
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
           "handler": "finish_group_off_lock"
         }
       ],
@@ -638,19 +638,19 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
+        "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "forall_schedules_admitted",
       "as_is": "forall_schedules_admitted_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/concurrent.rs",
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
           "handler": "claim_forall_schedules"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/concurrent.rs",
+        "file": "crates/pedradb-core/src/concurrent_kernel.rs",
         "test": "forall_schedules_admitted_on_live_group_is_not_ok"
       }
     },
@@ -690,19 +690,19 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "media_durable_admitted",
       "as_is": "media_durable_admitted_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "claim_media_durable"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/db.rs",
+        "file": "crates/pedradb-core/src/db_kernel.rs",
         "test": "media_durable_admitted_on_live_db_is_not_ok"
       }
     },
@@ -711,23 +711,23 @@
       "finding": "RFC-0073",
       "twin_kind": "close",
       "single_artifact": true,
-      "kernel": "crates/pedradb-posix/src/lib.rs",
-      "twin": "crates/pedradb-posix/src/lib.rs",
+      "kernel": "crates/pedradb-posix/src/lib_kernel.rs",
+      "twin": "crates/pedradb-posix/src/lib_kernel.rs",
       "aeneas": "scripts/aeneas_posix.sh",
       "callers": [
-        "crates/pedradb-posix/src/lib.rs"
+        "crates/pedradb-posix/src/lib_kernel.rs"
       ],
       "entry": "fdatasync_rc_ok",
       "as_is": "fdatasync_rc_ok_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-posix/src/lib.rs",
+          "file": "crates/pedradb-posix/src/lib_kernel.rs",
           "handler": "fdatasync_file"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-posix/src/lib.rs",
+        "file": "crates/pedradb-posix/src/lib_kernel.rs",
         "test": "fdatasync_rc_ok_on_live_posix_is_not_ok"
       }
     },
@@ -744,19 +744,19 @@
       "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
       "aeneas": "scripts/aeneas_cqe.sh",
       "callers": [
-        "crates/pedradb-io-uring/src/ring.rs"
+        "crates/pedradb-io-uring/src/ring_kernel.rs"
       ],
       "entry": "cqe_res_ok",
       "as_is": "cqe_res_ok_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-io-uring/src/ring.rs",
+          "file": "crates/pedradb-io-uring/src/ring_kernel.rs",
           "handler": "fsync"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-io-uring/src/lib.rs",
+        "file": "crates/pedradb-io-uring/src/lib_kernel.rs",
         "test": "cqe_res_ok_on_live_uring_is_not_ok"
       }
     },
@@ -773,14 +773,14 @@
       "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
       "aeneas": "scripts/aeneas_cqe.sh",
       "callers": [
-        "crates/pedradb-io-uring/src/ring.rs"
+        "crates/pedradb-io-uring/src/ring_kernel.rs"
       ],
       "entry": "next_user_data",
       "as_is": "next_user_data_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-io-uring/src/ring.rs",
+          "file": "crates/pedradb-io-uring/src/ring_kernel.rs",
           "handler": "submit_sqe"
         }
       ],
@@ -802,14 +802,14 @@
       "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
       "aeneas": "scripts/aeneas_cqe.sh",
       "callers": [
-        "crates/pedradb-io-uring/src/ring.rs"
+        "crates/pedradb-io-uring/src/ring_kernel.rs"
       ],
       "entry": "cqe_act",
       "as_is": "cqe_act_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-io-uring/src/ring.rs",
+          "file": "crates/pedradb-io-uring/src/ring_kernel.rs",
           "handler": "harvest_ready_cqe"
         }
       ],
@@ -831,14 +831,14 @@
       "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
       "aeneas": "scripts/aeneas_cqe.sh",
       "callers": [
-        "crates/pedradb-io-uring/src/ring.rs"
+        "crates/pedradb-io-uring/src/ring_kernel.rs"
       ],
       "entry": "submit_complete_act",
       "as_is": "submit_complete_act_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-io-uring/src/ring.rs",
+          "file": "crates/pedradb-io-uring/src/ring_kernel.rs",
           "handler": "submit_sqe"
         }
       ],
@@ -875,28 +875,28 @@
       "finding": "RFC-0076/0081/0082/0083/0084/0085/0086/0087/0088/0089/0092/0093",
       "twin_kind": "close",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/wal/crc.rs",
-      "twin": "crates/pedradb-core/src/wal/crc.rs",
+      "kernel": "crates/pedradb-core/src/wal/crc_kernel.rs",
+      "twin": "crates/pedradb-core/src/wal/crc_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/wal/reader.rs",
+        "crates/pedradb-core/src/wal/reader_kernel.rs",
         "crates/pedradb-core/src/sst/scan_kernel.rs",
-        "crates/pedradb-core/src/vlog.rs",
-        "crates/pedradb-core/src/manifest.rs",
-        "crates/pedradb-core/src/history.rs",
-        "crates/pedradb-core/src/change_feed.rs",
-        "crates/pedradb-core/src/verify.rs"
+        "crates/pedradb-core/src/vlog_kernel.rs",
+        "crates/pedradb-core/src/manifest_mod_kernel.rs",
+        "crates/pedradb-core/src/history_kernel.rs",
+        "crates/pedradb-core/src/change_feed_kernel.rs",
+        "crates/pedradb-core/src/verify_kernel.rs"
       ],
       "entry": "crc_match_ok",
       "as_is": "crc_match_ok_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/wal/reader.rs",
+          "file": "crates/pedradb-core/src/wal/reader_kernel.rs",
           "handler": "read_record"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/wal/reader.rs",
+        "file": "crates/pedradb-core/src/wal/reader_kernel.rs",
         "test": "crc_match_ok_on_live_wal_is_not_ok"
       },
       "atom_reason": {
@@ -913,19 +913,19 @@
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "aeneas": "scripts/aeneas_scan.sh",
       "callers": [
-        "crates/pedradb-core/src/sst/table.rs"
+        "crates/pedradb-core/src/sst/table_kernel.rs"
       ],
       "entry": "sst_crc_fate",
       "as_is": "sst_crc_fate_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/sst/table.rs",
+          "file": "crates/pedradb-core/src/sst/table_kernel.rs",
           "handler": "decode"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/sst/table.rs",
+        "file": "crates/pedradb-core/src/sst/table_kernel.rs",
         "test": "sst_crc_fate_on_live_sst_is_not_ok"
       },
       "atom_reason": {
@@ -943,15 +943,15 @@
       "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
-        "crates/pedradb-core/src/memtable.rs",
-        "crates/pedradb-core/src/sst/table.rs",
-        "crates/pedradb-core/src/db.rs",
-        "crates/rocksdb-compat/src/lib.rs"
+        "crates/pedradb-core/src/memtable_kernel.rs",
+        "crates/pedradb-core/src/sst/table_kernel.rs",
+        "crates/pedradb-core/src/db_kernel.rs",
+        "crates/rocksdb-compat/src/lib_kernel.rs"
       ],
       "entry": "key_in_cf_family",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/sst/table.rs",
+          "file": "crates/pedradb-core/src/sst/table_kernel.rs",
           "handler": "write_l0_sst_for_family"
         }
       ],
@@ -1003,12 +1003,12 @@
       "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
-        "crates/rocksdb-compat/src/lib.rs"
+        "crates/rocksdb-compat/src/lib_kernel.rs"
       ],
       "entry": "cf_encode_effective",
       "live_callers": [
         {
-          "file": "crates/rocksdb-compat/src/lib.rs",
+          "file": "crates/rocksdb-compat/src/lib_kernel.rs",
           "handler": "encode_pooled"
         }
       ],
@@ -1034,17 +1034,17 @@
       "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
-        "crates/pedradb-core/src/db.rs",
-        "crates/rocksdb-compat/src/lib.rs"
+        "crates/pedradb-core/src/db_kernel.rs",
+        "crates/rocksdb-compat/src/lib_kernel.rs"
       ],
       "entry": "encode_cf_key",
       "live_callers": [
         {
-          "file": "crates/rocksdb-compat/src/lib.rs",
+          "file": "crates/rocksdb-compat/src/lib_kernel.rs",
           "handler": "encode"
         },
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "compact_ssts_only_cf"
         }
       ],
@@ -1070,12 +1070,12 @@
       "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
-        "crates/rocksdb-compat/src/lib.rs"
+        "crates/rocksdb-compat/src/lib_kernel.rs"
       ],
       "entry": "decode_cf_key",
       "live_callers": [
         {
-          "file": "crates/rocksdb-compat/src/lib.rs",
+          "file": "crates/rocksdb-compat/src/lib_kernel.rs",
           "handler": "decode"
         }
       ],
@@ -1101,12 +1101,12 @@
       "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
-        "crates/pedradb-core/src/sst/table.rs"
+        "crates/pedradb-core/src/sst/table_kernel.rs"
       ],
       "entry": "infer_sst_cf",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/sst/table.rs",
+          "file": "crates/pedradb-core/src/sst/table_kernel.rs",
           "handler": "write_l0_sst_for_family"
         }
       ],
@@ -1132,12 +1132,12 @@
       "aeneas": "scripts/aeneas_cf.sh",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "compact_rewrites_sst_cf",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "compact_ssts_only_cf"
         }
       ],
@@ -1162,13 +1162,13 @@
         "why": "filter of get of the merge decides exactly by the route extraida: Value live if and so if none range covers the key; Deletion and RangeDeletion never live, any coverage; the as-is responde live for every versao and the plants DST refuta"
       },
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/merge.rs",
-      "twin": "crates/pedradb-core/src/merge.rs",
+      "kernel": "crates/pedradb-core/src/merge_kernel.rs",
+      "twin": "crates/pedradb-core/src/merge_kernel.rs",
       "aeneas": "scripts/aeneas_merge.sh",
       "callers": [
-        "crates/pedradb-core/src/merge.rs",
-        "crates/pedradb-core/src/memtable.rs",
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/merge_kernel.rs",
+        "crates/pedradb-core/src/memtable_kernel.rs",
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "visible_at",
       "as_is": "visible_at_as_is",
@@ -1186,23 +1186,23 @@
       "finding": "RFC-0150 P1",
       "twin_kind": "close",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/key.rs",
-      "twin": "crates/pedradb-core/src/key.rs",
+      "kernel": "crates/pedradb-core/src/key_kernel.rs",
+      "twin": "crates/pedradb-core/src/key_kernel.rs",
       "aeneas": "scripts/aeneas_key.sh",
       "callers": [
-        "crates/pedradb-core/src/key.rs"
+        "crates/pedradb-core/src/key_kernel.rs"
       ],
       "entry": "pack_sequence_and_type",
       "as_is": "pack_sequence_and_type_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/key.rs",
+          "file": "crates/pedradb-core/src/key_kernel.rs",
           "handler": "encode_into"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/key.rs",
+        "file": "crates/pedradb-core/src/key_kernel.rs",
         "test": "pack_sequence_and_type_on_live_db_is_not_ok"
       }
     },
@@ -1211,11 +1211,11 @@
       "finding": "RFC-0150 P2a",
       "twin_kind": "close",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/batch.rs",
-      "twin": "crates/pedradb-core/src/batch.rs",
+      "kernel": "crates/pedradb-core/src/batch_kernel.rs",
+      "twin": "crates/pedradb-core/src/batch_kernel.rs",
       "aeneas": "scripts/aeneas_batch.sh",
       "callers": [
-        "crates/pedradb-core/src/batch.rs"
+        "crates/pedradb-core/src/batch_kernel.rs"
       ],
       "entry": "write_record_count_ok",
       "as_is": "write_record_count_ok_as_is",
@@ -1237,7 +1237,7 @@
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
       "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "gc_oldest_from_pin",
       "handlers": [
@@ -1260,16 +1260,16 @@
       "finding": "RFC-0150 P2c",
       "twin_kind": "close",
       "single_artifact": true,
-      "kernel": "crates/rocksdb-compat/src/locktab.rs",
-      "twin": "crates/rocksdb-compat/src/locktab.rs",
+      "kernel": "crates/rocksdb-compat/src/locktab_kernel.rs",
+      "twin": "crates/rocksdb-compat/src/locktab_kernel.rs",
       "aeneas": "scripts/aeneas_locktab.sh",
       "callers": [
-        "crates/rocksdb-compat/src/locktab.rs"
+        "crates/rocksdb-compat/src/locktab_kernel.rs"
       ],
       "entry": "wait_for_deadlock",
       "as_is": "wait_for_deadlock_as_is",
       "dst_plant": {
-        "file": "crates/rocksdb-compat/src/locktab.rs",
+        "file": "crates/rocksdb-compat/src/locktab_kernel.rs",
         "test": "wait_for_deadlock_on_live_cycle_is_not_ok"
       },
       "atom_reason": {
@@ -1339,7 +1339,7 @@
       "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
       "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "run_pairwise_disjoint_los",
       "handlers": [
@@ -1347,7 +1347,7 @@
       ],
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "rebuild_sst_runs"
         }
       ],
@@ -1366,7 +1366,7 @@
       "twin": "crates/rocksdb-compat/src/iter_kernel.rs",
       "aeneas": "scripts/aeneas_iter.sh",
       "callers": [
-        "crates/rocksdb-compat/src/lib.rs"
+        "crates/rocksdb-compat/src/lib_kernel.rs"
       ],
       "entry": "iter_window_keep",
       "handlers": [
@@ -1375,7 +1375,7 @@
       ],
       "as_is": "iter_window_keep_as_is",
       "dst_plant": {
-        "file": "crates/rocksdb-compat/src/lib.rs",
+        "file": "crates/rocksdb-compat/src/lib_kernel.rs",
         "test": "iter_window_keep_on_live_hidden_is_not_ok"
       },
       "atom_reason": {
@@ -1392,19 +1392,19 @@
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "aeneas": "scripts/aeneas_scan.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "zero_glue_admitted",
       "as_is": "zero_glue_admitted_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "claim_zero_glue"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/db.rs",
+        "file": "crates/pedradb-core/src/db_kernel.rs",
         "test": "zero_glue_admitted_on_live_db_is_not_ok"
       },
       "atom_reason": {
@@ -1420,19 +1420,19 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
+        "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "lock_interleavings_admitted",
       "as_is": "lock_interleavings_admitted_as_is",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/concurrent.rs",
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
           "handler": "claim_lock_interleavings_proven"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/concurrent.rs",
+        "file": "crates/pedradb-core/src/concurrent_kernel.rs",
         "test": "claim_lock_interleavings_refused_after_put"
       }
     },
@@ -1441,11 +1441,11 @@
       "finding": "F-leveling-sweep",
       "twin_kind": "atom",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/src/leveling.rs",
+      "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
+      "twin": "crates/pedradb-core/src/leveling_kernel.rs",
       "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "level_target_bytes",
       "handlers": [
@@ -1454,13 +1454,13 @@
       ],
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "prepare_pushdown_compact"
         }
       ],
       "as_is": "level_target_bytes_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-core/src/leveling.rs",
+        "file": "crates/pedradb-core/src/leveling_kernel.rs",
         "test": "level_target_bytes_on_live_deep_level_is_not_ok"
       },
       "atom": "level_target_bytes",
@@ -1476,11 +1476,11 @@
       "twin_kind": "close",
       "atom": "pick_l0_to_l1_model",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/src/leveling.rs",
+      "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
+      "twin": "crates/pedradb-core/src/leveling_kernel.rs",
       "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "pick_l0_to_l1",
       "handlers": [
@@ -1489,13 +1489,13 @@
       ],
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "prepare_l0_compact"
         }
       ],
       "as_is": "pick_l0_to_l1_as_is_whole_level",
       "dst_plant": {
-        "file": "crates/pedradb-core/src/leveling.rs",
+        "file": "crates/pedradb-core/src/leveling_kernel.rs",
         "test": "pick_l0_to_l1_on_live_slice_is_not_ok"
       },
       "atom_reason": {
@@ -1510,11 +1510,11 @@
       "atom": "pick_pushdown_model",
       "token_src": "pick_pushdown_as_is_blind",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/src/leveling.rs",
+      "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
+      "twin": "crates/pedradb-core/src/leveling_kernel.rs",
       "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "pick_pushdown",
       "handlers": [
@@ -1522,13 +1522,13 @@
       ],
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "prepare_pushdown_compact"
         }
       ],
       "as_is": "pick_pushdown_as_is_blind",
       "dst_plant": {
-        "file": "crates/pedradb-core/src/leveling.rs",
+        "file": "crates/pedradb-core/src/leveling_kernel.rs",
         "test": "pick_pushdown_on_live_pushdown_gate_is_not_ok"
       },
       "atom_reason": {
@@ -1637,23 +1637,23 @@
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/src/leveling.rs",
+      "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
+      "twin": "crates/pedradb-core/src/leveling_kernel.rs",
       "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs",
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/concurrent_kernel.rs",
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "leveled_enabled",
       "as_is": "leveled_enabled_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "compact_leveled"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/leveling.rs",
+        "file": "crates/pedradb-core/src/leveling_kernel.rs",
         "test": "leveled_env_switch_is_not_ok"
       },
       "three_teeth": true
@@ -1667,23 +1667,23 @@
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/src/leveling.rs",
+      "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
+      "twin": "crates/pedradb-core/src/leveling_kernel.rs",
       "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs",
-        "crates/pedradb-core/src/leveling.rs"
+        "crates/pedradb-core/src/db_kernel.rs",
+        "crates/pedradb-core/src/leveling_kernel.rs"
       ],
       "entry": "is_disjoint",
       "as_is": "is_disjoint_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "repair_stacked_levels"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/leveling.rs",
+        "file": "crates/pedradb-core/src/leveling_kernel.rs",
         "test": "is_disjoint_on_live_stack_is_not_ok"
       },
       "three_teeth": true
@@ -1697,16 +1697,16 @@
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/src/leveling.rs",
+      "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
+      "twin": "crates/pedradb-core/src/leveling_kernel.rs",
       "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
-        "crates/pedradb-core/src/leveling.rs"
+        "crates/pedradb-core/src/leveling_kernel.rs"
       ],
       "entry": "overlaps",
       "as_is": "overlaps_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-core/src/leveling.rs",
+        "file": "crates/pedradb-core/src/leveling_kernel.rs",
         "test": "overlaps_on_live_slice_is_not_ok"
       },
       "three_teeth": true
@@ -1720,23 +1720,23 @@
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
       "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/leveling.rs",
-      "twin": "crates/pedradb-core/src/leveling.rs",
+      "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
+      "twin": "crates/pedradb-core/src/leveling_kernel.rs",
       "aeneas": "scripts/aeneas_leveling.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs",
-        "crates/pedradb-core/src/leveling.rs"
+        "crates/pedradb-core/src/db_kernel.rs",
+        "crates/pedradb-core/src/leveling_kernel.rs"
       ],
       "entry": "total_bytes",
       "as_is": "total_bytes_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "prepare_pushdown_compact"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-core/src/leveling.rs",
+        "file": "crates/pedradb-core/src/leveling_kernel.rs",
         "test": "total_bytes_on_live_level_is_not_ok"
       },
       "three_teeth": true
@@ -1819,13 +1819,13 @@
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "aeneas": "scripts/aeneas_scan.sh",
       "callers": [
-        "crates/pedradb-core/src/sst/table.rs"
+        "crates/pedradb-core/src/sst/table_kernel.rs"
       ],
       "entry": "sst_block_crc_ok",
       "as_is": "sst_block_crc_ok_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/sst/table.rs",
+          "file": "crates/pedradb-core/src/sst/table_kernel.rs",
           "handler": "split_block_crc"
         }
       ],
@@ -1847,14 +1847,14 @@
       "kernel": "crates/pedradb-core/src/sst/magic_kernel.rs",
       "twin": "crates/pedradb-core/src/sst/magic_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/sst/table.rs",
+        "crates/pedradb-core/src/sst/table_kernel.rs",
         "crates/pedradb-ops/src/dir_kind.rs"
       ],
       "entry": "sst_magic_is_pedra",
       "as_is": "sst_magic_is_pedra_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/sst/table.rs",
+          "file": "crates/pedradb-core/src/sst/table_kernel.rs",
           "handler": "decode"
         },
         {
@@ -1881,13 +1881,13 @@
       "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "aeneas": "scripts/aeneas_wal_recover.sh",
       "callers": [
-        "crates/pedradb-core/src/wal/reader.rs"
+        "crates/pedradb-core/src/wal/reader_kernel.rs"
       ],
       "entry": "is_length_resyncable",
       "as_is": "is_length_resyncable_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/wal/reader.rs",
+          "file": "crates/pedradb-core/src/wal/reader_kernel.rs",
           "handler": "collect_prefix_all"
         }
       ],
@@ -1910,13 +1910,13 @@
       "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "aeneas": "scripts/aeneas_wal_recover.sh",
       "callers": [
-        "crates/pedradb-core/src/wal/reader.rs"
+        "crates/pedradb-core/src/wal/reader_kernel.rs"
       ],
       "entry": "physical_payload_act",
       "as_is": "physical_payload_act_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/wal/reader.rs",
+          "file": "crates/pedradb-core/src/wal/reader_kernel.rs",
           "handler": "read_record"
         }
       ],
@@ -1939,13 +1939,13 @@
       "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "aeneas": "scripts/aeneas_wal_recover.sh",
       "callers": [
-        "crates/pedradb-core/src/wal/reader.rs"
+        "crates/pedradb-core/src/wal/reader_kernel.rs"
       ],
       "entry": "fragment_act",
       "as_is": "fragment_act_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/wal/reader.rs",
+          "file": "crates/pedradb-core/src/wal/reader_kernel.rs",
           "handler": "read_record"
         }
       ],
@@ -1968,13 +1968,13 @@
       "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "aeneas": "scripts/aeneas_wal_recover.sh",
       "callers": [
-        "crates/pedradb-core/src/wal/reader.rs"
+        "crates/pedradb-core/src/wal/reader_kernel.rs"
       ],
       "entry": "from_record_type",
       "as_is": "from_record_type_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/wal/reader.rs",
+          "file": "crates/pedradb-core/src/wal/reader_kernel.rs",
           "handler": "read_record"
         }
       ],
@@ -2048,13 +2048,13 @@
       "aeneas": "scripts/aeneas_compact.sh",
       "callers": [
         "crates/pedradb-core/src/compact_kernel.rs",
-        "crates/pedradb-core/src/merge.rs"
+        "crates/pedradb-core/src/merge_kernel.rs"
       ],
       "entry": "lone_tombstone_fate",
       "as_is": "lone_tombstone_fate_as_is_ignore_bottommost",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/merge.rs",
+          "file": "crates/pedradb-core/src/merge_kernel.rs",
           "handler": "gc_snapshot_safe"
         }
       ],
@@ -2072,13 +2072,13 @@
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "changelog_should_store",
       "as_is": "changelog_should_store_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "maybe_persist_changelog_after_durable_commit"
         }
       ],
@@ -2100,13 +2100,13 @@
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "changelog_rebuild_within_budget",
       "as_is": "changelog_rebuild_within_budget_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "maybe_rebuild_feed_from_live"
         }
       ],
@@ -2134,13 +2134,13 @@
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "aeneas": "scripts/aeneas_changelog.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "changelog_durable_commit_fate",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "commit_ops_with"
         }
       ],
@@ -2164,13 +2164,13 @@
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "aeneas": "scripts/aeneas_changelog.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "wal_archive_delete_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "delete_wal_archives"
         }
       ],
@@ -2194,13 +2194,13 @@
       "twin": "crates/pedradb-core/src/manifest_kernel.rs",
       "aeneas": "scripts/aeneas_manifest.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "bulk_manifest_persist_fate",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "persist_bulk_manifest"
         }
       ],
@@ -2224,21 +2224,21 @@
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
       "aeneas": "scripts/aeneas_lookup.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "point_cache_validity",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "get_after_point_miss"
         },
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "get_at"
         },
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "last_under_user_prefix"
         }
       ],
@@ -2262,13 +2262,13 @@
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
       "aeneas": "scripts/aeneas_lookup.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "point_tombstone_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "lookup"
         }
       ],
@@ -2292,13 +2292,13 @@
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "aeneas": "scripts/aeneas_write_admission.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "dir_sync_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "sync_dir_if_required"
         }
       ],
@@ -2322,13 +2322,13 @@
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "aeneas": "scripts/aeneas_write_admission.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "fence_admission_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "ensure_not_fenced"
         }
       ],
@@ -2352,13 +2352,13 @@
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "aeneas": "scripts/aeneas_write_admission.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "fence_record_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "fence_durability"
         }
       ],
@@ -2382,13 +2382,13 @@
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "aeneas": "scripts/aeneas_write_admission.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "group_batch_sync_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "group_prepare"
         }
       ],
@@ -2412,13 +2412,13 @@
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "aeneas": "scripts/aeneas_write_admission.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "pit_resync_rewrite_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "open_with_env_sourced"
         }
       ],
@@ -2442,13 +2442,13 @@
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "aeneas": "scripts/aeneas_flush.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "parked_pair_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "parked_oldest_pair_arcs"
         }
       ],
@@ -2472,13 +2472,13 @@
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "aeneas": "scripts/aeneas_flush.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "auto_flush_gate",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "maybe_auto_flush"
         }
       ],
@@ -2502,13 +2502,13 @@
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "aeneas": "scripts/aeneas_flush.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "mem_auto_flush_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "maybe_auto_flush"
         }
       ],
@@ -2532,13 +2532,13 @@
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "aeneas": "scripts/aeneas_flush.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "manifest_publish_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "persist_manifest"
         }
       ],
@@ -2562,13 +2562,13 @@
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "aeneas": "scripts/aeneas_changelog.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "changelog_store_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "changelog_store_point"
         }
       ],
@@ -2592,13 +2592,13 @@
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "aeneas": "scripts/aeneas_write_admission.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "parked_pop_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "take_oldest_parked"
         }
       ],
@@ -2622,13 +2622,13 @@
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "aeneas": "scripts/aeneas_group_commit.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "group_ack_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "lone_sync_commit"
         }
       ],
@@ -2646,13 +2646,13 @@
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "flush_plan",
       "as_is": "flush_plan_as_is_lose_tail",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "flush_pipeline"
         }
       ],
@@ -2675,13 +2675,13 @@
       "twin": "crates/pedradb-core/src/manifest_kernel.rs",
       "aeneas": "scripts/aeneas_manifest.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "first_install_action",
       "as_is": "first_install_action_as_is_proceed_always",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "recover_ssts"
         }
       ],
@@ -2707,13 +2707,13 @@
       "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
       "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "probe_order_covering",
       "as_is": "probe_order_covering_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "lookup_sst_packed"
         }
       ],
@@ -2731,13 +2731,13 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
+        "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "group_validate",
       "as_is": "occ_conflict_as_is_serialized",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/concurrent.rs",
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
           "handler": "validate_occ_batch"
         }
       ],
@@ -2759,7 +2759,7 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
+        "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "occ_member_fate",
       "handlers": [
@@ -2768,7 +2768,7 @@
       "as_is": "occ_member_fate_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/concurrent.rs",
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
           "handler": "validate_occ_batch"
         }
       ],
@@ -2790,7 +2790,7 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
+        "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "occ_batch_plan",
       "handlers": [
@@ -2800,11 +2800,11 @@
       "as_is": "occ_batch_plan_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/concurrent.rs",
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
           "handler": "validate_occ_batch"
         },
         {
-          "file": "crates/pedradb-core/src/concurrent.rs",
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
           "handler": "lone_commit"
         }
       ],
@@ -2826,13 +2826,13 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/concurrent.rs"
+        "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "pct_campaign_default_depth",
       "as_is": "pct_campaign_default_depth_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/concurrent.rs",
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
           "handler": "claim_default_pct_depth_not_raised"
         }
       ],
@@ -3246,7 +3246,7 @@
       "aeneas": "scripts/aeneas_write_ack.sh",
       "callers": [
         "crates/pedradb-core/src/write_ack_kernel.rs",
-        "crates/pedradb-core/src/concurrent.rs",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
       ],
       "entry": "on_append",
@@ -3271,7 +3271,7 @@
       "aeneas": "scripts/aeneas_write_ack.sh",
       "callers": [
         "crates/pedradb-core/src/write_ack_kernel.rs",
-        "crates/pedradb-core/src/concurrent.rs",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
       ],
       "entry": "on_barrier",
@@ -3296,7 +3296,7 @@
       "aeneas": "scripts/aeneas_write_ack.sh",
       "callers": [
         "crates/pedradb-core/src/write_ack_kernel.rs",
-        "crates/pedradb-core/src/concurrent.rs",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
       ],
       "entry": "on_ack",
@@ -3411,7 +3411,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "write_admission_idle",
       "handlers": [
@@ -3436,7 +3436,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "write_admit",
       "handlers": [
@@ -3461,7 +3461,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "wal_sync_required",
       "handlers": [
@@ -3486,7 +3486,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "seq_exhausted",
       "handlers": [
@@ -3512,7 +3512,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "batch_is_empty",
       "handlers": [
@@ -3538,7 +3538,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "fence_on_sync_fail",
       "handlers": [
@@ -3563,7 +3563,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "wal_commit_plan",
       "handlers": [
@@ -3588,7 +3588,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "torn_head_is_empty_log",
       "handlers": [
@@ -3613,7 +3613,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "torn_tail_needs_cut",
       "handlers": [
@@ -3638,7 +3638,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "seq_after_feed",
       "handlers": [
@@ -3714,7 +3714,7 @@
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "auto_flush_due",
       "handlers": [
@@ -3739,7 +3739,7 @@
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "snap_is_empty",
       "handlers": [
@@ -3764,7 +3764,7 @@
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "snap_below_watermark",
       "handlers": [
@@ -3789,7 +3789,7 @@
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "mem_point_decides",
       "handlers": [
@@ -3814,7 +3814,7 @@
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "prefer_newer_seq",
       "handlers": [
@@ -4004,13 +4004,13 @@
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
       "aeneas": "scripts/aeneas_flush.sh",
       "callers": [
-        "crates/pedradb-core/src/db.rs"
+        "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "cf_flush_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db.rs",
+          "file": "crates/pedradb-core/src/db_kernel.rs",
           "handler": "maybe_auto_flush"
         }
       ],
@@ -4026,7 +4026,7 @@
       "id": "iter_window_merge",
       "finding": "RFC-0151 P1",
       "a": "crates/rocksdb-compat/src/iter_kernel.rs",
-      "b": "crates/pedradb-core/src/merge.rs",
+      "b": "crates/pedradb-core/src/merge_kernel.rs",
       "agreement": "twin_agrees_with_core_merge_iter_window_on_full_domain",
       "fns": [
         "iter_window_keep",

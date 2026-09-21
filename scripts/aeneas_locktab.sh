@@ -23,7 +23,7 @@ if [[ -z "$CHARON" || -z "$AENEAS" ]]; then
 fi
 
 mkdir -p "$OUT"
-SRC="$ROOT/crates/rocksdb-compat/src/locktab.rs"
+SRC="$ROOT/crates/rocksdb-compat/src/locktab_kernel.rs"
 echo "      charon=$CHARON"
 (
   cd "$CRATE"
@@ -40,7 +40,7 @@ echo "      charon=$CHARON"
 )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/locktab_kernel.llbc"
 {
-  echo "path=crates/rocksdb-compat/src/locktab.rs"
+  echo "path=crates/rocksdb-compat/src/locktab_kernel.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"
   echo "aeneas=$("$AENEAS" -version 2>/dev/null | awk '{print $NF}')"
   echo "charon=$("$CHARON" version 2>/dev/null | head -1)"

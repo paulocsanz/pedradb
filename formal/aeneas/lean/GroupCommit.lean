@@ -164,6 +164,76 @@ theorem forall_schedules_pct2_not_admitted :
   unfold forall_schedules_admitted
   rfl
 
+/-- Always refuse: no PCT depth is ∀ OS schedules. Flag stays false. -/
+theorem forall_schedules_admitted_fate_iff :
+    ∀ (d : U64) (v : Bool),
+      (forall_schedules_admitted d = ok v) ↔ (v = false) := by
+  intro d v
+  unfold forall_schedules_admitted
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
+/-- Campaign default PCT depth is 2 (RFC-0070 does not raise it). -/
+theorem pct_campaign_default_depth_fate_iff :
+    ∀ (d : U64),
+      (pct_campaign_default_depth = ok d) ↔ (d = 2#u64) := by
+  intro d
+  unfold pct_campaign_default_depth
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
+/-- Claim that 0070 raised the default PCT depth: always false. -/
+theorem default_pct_depth_raised_fate_iff :
+    ∀ (v : Bool),
+      (default_pct_depth_raised = ok v) ↔ (v = false) := by
+  intro v
+  unfold default_pct_depth_raised
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
+/-- Lock-schedule ∀π is not a theorem. Flag stays false. -/
+theorem lock_interleavings_admitted_fate_iff :
+    ∀ (v : Bool),
+      (lock_interleavings_admitted = ok v) ↔ (v = false) := by
+  intro v
+  unfold lock_interleavings_admitted
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
+/-- fdatasync rc==0 is not media durability. Flag stays false. -/
+theorem media_durable_admitted_fate_iff :
+    ∀ (fsync_ok v : Bool),
+      (media_durable_admitted fsync_ok = ok v) ↔ (v = false) := by
+  intro fsync_ok v
+  unfold media_durable_admitted
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
+/-- Stacking two fsync-liar boxes is not a campaign. Flag stays false. -/
+theorem stacked_fsync_liars_admitted_fate_iff :
+    ∀ (lying det_io v : Bool),
+      (stacked_fsync_liars_admitted lying det_io = ok v) ↔ (v = false) := by
+  intro lying det_io v
+  unfold stacked_fsync_liars_admitted
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
+/-- Closing the lying-fsync model does not invent a TCG guest. -/
+theorem fsync_lie_closes_tcg_guest_fate_iff :
+    ∀ (v : Bool),
+      (fsync_lie_closes_tcg_guest = ok v) ↔ (v = false) := by
+  intro v
+  unfold fsync_lie_closes_tcg_guest
+  constructor
+  · intro h; injection h with hv; exact hv.symm
+  · intro h; subst h; rfl
+
 /-- AS-IS tooth: d≥2 is rounded to forall. -/
 theorem forall_schedules_as_is_tooth :
     forall_schedules_admitted_as_is (2#u64) = ok true := by
@@ -482,12 +552,12 @@ theorem occ_batch_plan_fate_iff :
       refine bind_intro n ?_ hloop
       rw [if_neg hle, hn]
 
-/-- RFC-0218 P0.1 1/4 (atom `catalog:group_commit`, entry
-    `occ_conflict`): the OCC first-committer-wins verdict is exactly the
-    window — the conflito is thek EXACTLY when the window `(snap,
-    last_seq]` is non-empty AND the answer is the touched flag, or the window is
-    empty and the answer is false; without a third destination. The AS-IS
-    serialized plants the opposite tooth in the same group writer. -/
+/-- RFC-0218 P0.1 1/4 (atom `catalog:group_commit`, entrada
+    `occ_conflict`): o veredito OCC first-committer-wins é exatamente a
+    janela — o conflito é ok EXATAMENTE quando a janela `(snap,
+    last_seq]` é não-vazia E a resposta é a flag tocada, ou a janela é
+    vazia e a resposta é false; sem terceiro destino. O AS-IS
+    serializado planta o tooth oposto no mesmo writer do grupo. -/
 theorem occ_conflict_fate_iff :
     ∀ (snap last_seq : Std.U64) (touched v : Bool),
       (occ_conflict snap last_seq touched = ok v) ↔
@@ -504,10 +574,10 @@ theorem occ_conflict_fate_iff :
     · rw [occ_conflict_closed_form, if_pos hgt, hv]
     · rw [occ_conflict_closed_form, if_neg hgt, hv]
 
-/-- RFC-0218 P0.1 2/4 (atom `catalog:fsync_promote`, entry
-    `fsync_promotes_pending`): pending becomes durable EXACTLY when the
-    OS/Env is honest — the body is the lift puro `ok os_honest`; without
-    third destination. The AS-IS promotes even with a lying fsync (tooth
+/-- RFC-0218 P0.1 2/4 (atom `catalog:fsync_promote`, entrada
+    `fsync_promotes_pending`): pending vira durável EXATAMENTE quando o
+    OS/Env é honesto — o corpo é o lift puro `ok os_honest`; sem
+    terceiro destino. O AS-IS promove mesmo com fsync mentiroso (tooth
     RFC-0078: planta `fsync_promotes_pending_on_live_sim_is_not_ok`). -/
 theorem fsync_promotes_pending_fate_iff :
     ∀ (os_honest v : Bool),
@@ -523,11 +593,11 @@ theorem fsync_promotes_pending_fate_iff :
 
 /-! ### RFC-0218 P0.1 3/4 — `fence_publish_seq` (atom `catalog:group_fence`)
 
-The fate of the fence the chain (Form/DecodeFate template): fuel =
-members remaining; each step `cont` consumes exactly the member (i'
-= i+1 ≤ len) and the end is the `done` exact in i = len with best = v. -/
+O fate do fence como cadeia (molde Form/DecodeFate): combustível =
+membros restantes; cada passo `cont` consome exatamente um membro (i'
+= i+1 ≤ len) e o fim é o `done` exato em i = len com best = v. -/
 
-/-- O `+1#usize` of the body holds exactly `↑i + 1` in Nat. -/
+/-- O `+1#usize` do corpo vale exatamente `↑i + 1` em Nat. -/
 private theorem gc_usize_succ_val (i i1 : Usize) (h : (i + 1#usize) = ok i1) :
     (↑i1 : Nat) = (↑i : Nat) + 1 := by
   have he := UScalar.add_equiv i 1#usize
@@ -535,7 +605,7 @@ private theorem gc_usize_succ_val (i i1 : Usize) (h : (i + 1#usize) = ok i1) :
   dsimp only at he
   exact he.2.1
 
-/-- No end (i = len) the body returns exactly `done best`. -/
+/-- No fim (i = len) o corpo devolve exatamente `done best`. -/
 private theorem fence_body_at_end (member_seqs : Aeneas.Std.Slice Std.U64)
     (best : Std.U64) (i : Usize)
     (hlen : (↑i : Nat) = (member_seqs.val).length) :
@@ -551,7 +621,7 @@ private theorem fence_body_at_end (member_seqs : Aeneas.Std.Slice Std.U64)
   dsimp +zeta only
   rw [if_neg hge]
 
-/-- No end the body never gives cont. -/
+/-- No fim o corpo nunca dá cont. -/
 private theorem fence_body_no_cont_at_end (member_seqs : Aeneas.Std.Slice Std.U64)
     (best : Std.U64) (i : Usize) (st : Std.U64 × Usize)
     (hlen : (↑i : Nat) = (member_seqs.val).length)
@@ -569,9 +639,9 @@ private theorem fence_body_no_cont_at_end (member_seqs : Aeneas.Std.Slice Std.U6
   injection hB with hB2
   contradiction
 
-/-- Under i < len the body is exactly `cont (best', i')` with the index
-strictly crescente and limited — the max internal is consumido by the
-bind_ok_inv without need of branch (both the leaves are ok). -/
+/-- Sob i < len o corpo é exatamente `cont (best', i')` com o índice
+estritamente crescente e limitado — o max interno é consumido pelo
+bind_ok_inv sem precisar de ramo (ambas as folhas são ok). -/
 private theorem fence_body_inv (member_seqs : Aeneas.Std.Slice Std.U64)
     (best : Std.U64) (i : Usize)
     (hlt : (↑i : Nat) < (member_seqs.val).length)
@@ -607,7 +677,7 @@ private theorem fence_body_cont_progress (member_seqs : Aeneas.Std.Slice Std.U64
   subst hii
   exact ⟨hlt2, hle2⟩
 
-/-- Done only in the end, with the best intacto. -/
+/-- Done só no fim, com o best intacto. -/
 private theorem fence_body_done_end (member_seqs : Aeneas.Std.Slice Std.U64)
     (best : Std.U64) (i : Usize) (r : Std.U64)
     (hle : (↑i : Nat) ≤ (member_seqs.val).length)
@@ -623,7 +693,7 @@ private theorem fence_body_done_end (member_seqs : Aeneas.Std.Slice Std.U64)
     have h := (fence_body_at_end member_seqs best i hlen).symm.trans hB
     exact ControlFlow.done.inj (Result.ok.inj h)
 
-/-- The fate of the fence the chain: fuel = members remaining. -/
+/-- O fate do fence como cadeia: combustível = membros restantes. -/
 private def FenceFate (member_seqs : Aeneas.Std.Slice Std.U64) :
     Nat → Std.U64 → Usize → Std.U64 → Prop
   | 0, best, i, v =>
@@ -635,7 +705,7 @@ private def FenceFate (member_seqs : Aeneas.Std.Slice Std.U64) :
             FenceFate member_seqs fuel best' i' v) ∨
         ((↑i : Nat) = (member_seqs.val).length ∧ best = v)
 
-/-- The fate of the loop by induction in the fuel. -/
+/-- O fate do loop por indução no combustível. -/
 private theorem fence_publish_seq_loop_fate (member_seqs : Aeneas.Std.Slice Std.U64) :
     ∀ (fuel : Nat) (best : Std.U64) (i : Usize),
       (↑i : Nat) ≤ (member_seqs.val).length →
@@ -735,13 +805,13 @@ private theorem fence_publish_seq_loop_fate (member_seqs : Aeneas.Std.Slice Std.
         · exact absurd (hbody.symm.trans hB) (by simp)
         · exact absurd ((fence_body_at_end member_seqs best i hlen2).symm.trans hB) (by simp)
 
-/-- RFC-0218 P0.1 3/4 (atom `catalog:group_fence`, entry
-    `fence_publish_seq`): the publish watermark of the group is exactly the
-    cited chain of the extracted loop — each step reads the member
-    (`Slice.index_usize`), updates the maximum and advances i strictly; the
-    end is `i = len` with the maximum accumulated `best = v`; without third
-    destination. The AS-IS publishes the first member and ignores the rest
-    (tooth planted). -/
+/-- RFC-0218 P0.1 3/4 (atom `catalog:group_fence`, entrada
+    `fence_publish_seq`): o watermark de publish do grupo é exatamente a
+    cadeia citada do loop extraído — cada passo lê um membro
+    (`Slice.index_usize`), atualiza o máximo e avança i estritamente; o
+    fim é `i = len` com o máximo acumulado `best = v`; sem terceiro
+    destino. O AS-IS publica o primeiro membro e ignora o resto
+    (tooth plantado). -/
 theorem fence_publish_seq_fate_iff :
     ∀ (member_seqs : Aeneas.Std.Slice Std.U64) (v : Std.U64),
       (fence_publish_seq member_seqs = ok v) ↔
@@ -755,11 +825,11 @@ theorem fence_publish_seq_fate_iff :
 
 /-! ### RFC-0218 P0.1 4/4 — `group_validate` (atom `catalog:group_validate`)
 
-Same template of the fence: each step `cont` reads the OccRead, decides by the
-`occ_conflict` extracted (candidate for atom 1/4), pushes in the out and advances
-i strictly; the end is `i = len` with out = v. -/
+Mesmo molde do fence: cada passo `cont` lê um OccRead, decide pelo
+`occ_conflict` extraído (candidato a atom 1/4), empurra no out e avança
+i estritamente; o fim é `i = len` com out = v. -/
 
-/-- No end (i = len) the body returns exactly `done out`. -/
+/-- No fim (i = len) o corpo devolve exatamente `done out`. -/
 private theorem gv_body_at_end (reads : Aeneas.Std.Slice OccRead)
     (last_seq : Std.U64) (out : alloc.vec.Vec Bool) (i : Usize)
     (hlen : (↑i : Nat) = (reads.val).length) :
@@ -775,7 +845,7 @@ private theorem gv_body_at_end (reads : Aeneas.Std.Slice OccRead)
   dsimp +zeta only
   rw [if_neg hge]
 
-/-- No end the body never gives cont. -/
+/-- No fim o corpo nunca dá cont. -/
 private theorem gv_body_no_cont_at_end (reads : Aeneas.Std.Slice OccRead)
     (last_seq : Std.U64) (out : alloc.vec.Vec Bool) (i : Usize)
     (st : alloc.vec.Vec Bool × Usize)
@@ -794,9 +864,9 @@ private theorem gv_body_no_cont_at_end (reads : Aeneas.Std.Slice OccRead)
   injection hB with hB2
   contradiction
 
-/-- Under i < len the body is exactly `cont (out', i')` with the index
-strictly crescente e limited — index/occ_conflict/push consumidos
-pelos bind_ok_inv (all os branches ok). -/
+/-- Sob i < len o corpo é exatamente `cont (out', i')` com o índice
+estritamente crescente e limitado — index/occ_conflict/push consumidos
+pelos bind_ok_inv (todos os ramos ok). -/
 private theorem gv_body_inv (reads : Aeneas.Std.Slice OccRead)
     (last_seq : Std.U64) (out : alloc.vec.Vec Bool) (i : Usize)
     (hlt : (↑i : Nat) < (reads.val).length)
@@ -834,7 +904,7 @@ private theorem gv_body_cont_progress (reads : Aeneas.Std.Slice OccRead)
   subst hii
   exact ⟨hlt2, hle2⟩
 
-/-- Done only in the end, with the out intacto. -/
+/-- Done só no fim, com o out intacto. -/
 private theorem gv_body_done_end (reads : Aeneas.Std.Slice OccRead)
     (last_seq : Std.U64) (out : alloc.vec.Vec Bool) (i : Usize)
     (r : alloc.vec.Vec Bool)
@@ -851,7 +921,7 @@ private theorem gv_body_done_end (reads : Aeneas.Std.Slice OccRead)
     have h := (gv_body_at_end reads last_seq out i hlen).symm.trans hB
     exact ControlFlow.done.inj (Result.ok.inj h)
 
-/-- The fate of the validation of the chain: fuel = remaining members. -/
+/-- O fate da validação como cadeia: combustível = membros restantes. -/
 private def ValidateFate (reads : Aeneas.Std.Slice OccRead)
     (last_seq : Std.U64) :
     Nat → alloc.vec.Vec Bool → Usize → alloc.vec.Vec Bool → Prop
@@ -864,7 +934,7 @@ private def ValidateFate (reads : Aeneas.Std.Slice OccRead)
             ValidateFate reads last_seq fuel out' i' v) ∨
         ((↑i : Nat) = (reads.val).length ∧ out = v)
 
-/-- The fate of the loop by induction in the fuel. -/
+/-- O fate do loop por indução no combustível. -/
 private theorem group_validate_loop_fate (reads : Aeneas.Std.Slice OccRead)
     (last_seq : Std.U64) :
     ∀ (fuel : Nat) (out : alloc.vec.Vec Bool) (i : Usize),
@@ -965,13 +1035,13 @@ private theorem group_validate_loop_fate (reads : Aeneas.Std.Slice OccRead)
         · exact absurd (hbody.symm.trans hB) (by simp)
         · exact absurd ((gv_body_at_end reads last_seq out i hlen2).symm.trans hB) (by simp)
 
-/-- RFC-0218 P0.1 4/4 (atom `catalog:group_validate`): the OCC validation
-    of the whole group is exactly the cited chain of the extracted loop —
-    each member is read (`Slice.index_usize`), decided by the
-    `occ_conflict` extracted (atom 1/4) and pushed onto the out, i grows
-    strictly; the end is `i = len` with the vector of verdicts `out = v`;
-    without a third destination. A simultaneity (empty window by member) is the
-    tooth that the serialized AS-IS loses. -/
+/-- RFC-0218 P0.1 4/4 (atom `catalog:group_validate`): a validação OCC
+    do grupo inteiro é exatamente a cadeia citada do loop extraído —
+    cada membro é lido (`Slice.index_usize`), decidido pelo
+    `occ_conflict` extraído (atom 1/4) e empurrado no out, i cresce
+    estritamente; o fim é `i = len` com o vetor de vereditos `out = v`;
+    sem terceiro destino. A simultaneidade (janela vazia por membro) é o
+    tooth que o AS-IS serializado perde. -/
 theorem group_validate_fate_iff :
     ∀ (reads : Aeneas.Std.Slice OccRead) (last_seq : Std.U64)
       (v : alloc.vec.Vec Bool),
@@ -990,10 +1060,10 @@ theorem group_validate_fate_iff :
   exact group_validate_loop_fate reads last_seq (reads.val).length _ 0#usize
     (Nat.zero_le _) (Nat.sub_le _ _) v
 
-/-- RFC-0219 P2.1 (atom `catalog:group_ack_plan`): the group (or lone
-    commit) acks and publishes EXACTLY when its WAL I/O succeeded;
-    failed I/O — no publish, no Ok. The AS-IS acks the failure (Ok
-    with lie — tooth planted). -/
+/-- RFC-0219 P2.1 (atom `catalog:group_ack_plan`): o grupo (ou commit
+    lone) acka e publica EXATAMENTE quando sua I/O de WAL teve sucesso;
+    I/O falhada cerca — sem publish, sem Ok. O AS-IS acka a falha (Ok
+    com mentira — tooth plantado). -/
 theorem group_ack_plan_fate_iff :
     ∀ (wal_io_ok : Bool) (plan : GroupAckPlan),
       (group_ack_plan wal_io_ok = ok plan) ↔
@@ -1002,3 +1072,134 @@ theorem group_ack_plan_fate_iff :
   intro wal_io_ok plan
   unfold group_ack_plan may_publish_group
   cases wal_io_ok <;> simp_all <;> exact eq_comm
+
+/-- Passo 2: `∀ σ, n≤2 → plan(σ) = linearization(σ)` — the rustc body
+    is two `lock_alphabet_step`s. Unfolds the extracted plan. -/
+theorem lock_alphabet_linearizes_n2_eq_steps :
+    ∀ (a0 a1 : U8),
+      lock_alphabet_linearizes_n2 a0 a1 =
+        (do
+          let b0 ← lock_alphabet_step false false a0
+          if b0 then
+            lock_alphabet_step (a0 = LOCK_ACT_ACQUIRE_WRITE)
+              (a0 = LOCK_ACT_SUBMIT) a1
+          else ok false) := by
+  intro a0 a1
+  unfold lock_alphabet_linearizes_n2
+  rfl
+
+/-- Concrete linearization: acquire-write then submit. -/
+theorem lock_alphabet_write_then_submit :
+    lock_alphabet_linearizes_n2 LOCK_ACT_ACQUIRE_WRITE LOCK_ACT_SUBMIT
+      = ok true := by
+  unfold lock_alphabet_linearizes_n2 lock_alphabet_step
+    LOCK_ACT_ACQUIRE_WRITE LOCK_ACT_SUBMIT LOCK_ACT_ACQUIRE_FLUSH
+    LOCK_ACT_PUBLISH
+  simp
+
+/-- Illegal order: publish then submit does not linearize. -/
+theorem lock_alphabet_publish_then_submit_not :
+    lock_alphabet_linearizes_n2 LOCK_ACT_PUBLISH LOCK_ACT_SUBMIT
+      = ok false := by
+  unfold lock_alphabet_linearizes_n2 lock_alphabet_step
+    LOCK_ACT_ACQUIRE_WRITE LOCK_ACT_SUBMIT LOCK_ACT_ACQUIRE_FLUSH
+    LOCK_ACT_PUBLISH
+  simp
+
+/-- AS-IS tooth: the mutant admits the illegal order. -/
+theorem lock_alphabet_as_is_admits_illegal :
+    lock_alphabet_linearizes_n2_as_is LOCK_ACT_PUBLISH LOCK_ACT_SUBMIT
+      = ok true := by
+  unfold lock_alphabet_linearizes_n2_as_is
+  rfl
+
+/-- Passo 3: the N=2 alphabet is not the OS/futex scheduler. PCT d and
+    lock_interleavings_admitted stay refused. -/
+theorem lock_alphabet_is_not_os_scheduler :
+    ∀ (d : U64),
+      forall_schedules_admitted d = ok false ∧
+        lock_interleavings_admitted = ok false := by
+  intro d
+  constructor
+  · unfold forall_schedules_admitted
+    rfl
+  · unfold lock_interleavings_admitted
+    rfl
+
+/-- Passo 4: admitted on the alphabet iff the pair linearizes. -/
+theorem lock_alphabet_interleavings_admitted_iff :
+    ∀ (a0 a1 : U8),
+      lock_alphabet_interleavings_admitted a0 a1 =
+        lock_alphabet_linearizes_n2 a0 a1 := by
+  intro a0 a1
+  unfold lock_alphabet_interleavings_admitted
+  rfl
+
+/-- RFC-0229 P1.1: harness owns the wake. -/
+theorem write_group_wait_grant_harness :
+    write_group_wait_grant true = ok WriteGroupWait.HarnessGrant := by
+  unfold write_group_wait_grant
+  rfl
+
+/-- RFC-0229 P1.1: no PCT worker ⇒ OS park. -/
+theorem write_group_wait_grant_os :
+    write_group_wait_grant false = ok WriteGroupWait.OsPark := by
+  unfold write_group_wait_grant
+  rfl
+
+/-- AS-IS: even a harness-owned wait is reported as OS park. -/
+theorem write_group_wait_grant_as_is_os :
+    write_group_wait_grant_as_is true = ok WriteGroupWait.OsPark := by
+  unfold write_group_wait_grant_as_is
+  rfl
+
+/-- RFC-0229 P1.1: the grant token dual-unfolds with the N=2 alphabet. -/
+theorem write_group_wait_grant_linearizes_unfolds_alphabet :
+    ∀ (h : Bool),
+      write_group_wait_grant_linearizes h =
+        (do
+          let w ← write_group_wait_grant h
+          match w with
+          | WriteGroupWait.HarnessGrant =>
+            lock_alphabet_linearizes_n2 LOCK_ACT_ACQUIRE_WRITE LOCK_ACT_SUBMIT
+          | WriteGroupWait.OsPark =>
+            lock_alphabet_linearizes_n2 LOCK_ACT_ACQUIRE_WRITE LOCK_ACT_SUBMIT) := by
+  intro h
+  unfold write_group_wait_grant_linearizes
+  rfl
+
+/-- RFC-0229 P1.2: acquire-write, submit, publish linearizes. -/
+theorem lock_alphabet_n3_write_submit_publish :
+    lock_alphabet_linearizes_n3
+        LOCK_ACT_ACQUIRE_WRITE LOCK_ACT_SUBMIT LOCK_ACT_PUBLISH
+      = ok true := by
+  unfold lock_alphabet_linearizes_n3 lock_alphabet_step
+    LOCK_ACT_ACQUIRE_WRITE LOCK_ACT_SUBMIT LOCK_ACT_ACQUIRE_FLUSH
+    LOCK_ACT_PUBLISH
+  simp
+
+/-- RFC-0229 P1.2: publish-before-submit is still illegal at N=3. -/
+theorem lock_alphabet_n3_publish_first_not :
+    lock_alphabet_linearizes_n3
+        LOCK_ACT_PUBLISH LOCK_ACT_SUBMIT LOCK_ACT_ACQUIRE_WRITE
+      = ok false := by
+  unfold lock_alphabet_linearizes_n3 lock_alphabet_step
+    LOCK_ACT_ACQUIRE_WRITE LOCK_ACT_SUBMIT LOCK_ACT_ACQUIRE_FLUSH
+    LOCK_ACT_PUBLISH
+  simp
+
+/-- AS-IS tooth: illegal N=3 still linearizes. -/
+theorem lock_alphabet_n3_as_is_admits_illegal :
+    lock_alphabet_linearizes_n3_as_is
+        LOCK_ACT_PUBLISH LOCK_ACT_SUBMIT LOCK_ACT_ACQUIRE_WRITE
+      = ok true := by
+  unfold lock_alphabet_linearizes_n3_as_is
+  rfl
+
+/-- N=3 is still not the OS scheduler. -/
+theorem lock_alphabet_n3_not_os_forall :
+    lock_interleavings_admitted = ok false ∧
+      forall_schedules_admitted (4#u64) = ok false := by
+  constructor
+  · unfold lock_interleavings_admitted; rfl
+  · unfold forall_schedules_admitted; rfl

@@ -170,7 +170,7 @@ def bytes.bytes.Bytes.Insts.CoreFmtDebug : core.fmt.Debug bytes.bytes.Bytes
 }
 
 /-- [pedra_aeneas_key_kernel::key::MAX_SEQUENCE_NUMBER]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 26:0-26:65
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 26:0-26:65
     Visibility: public -/
 @[global_simps, irreducible]
 def key.MAX_SEQUENCE_NUMBER : Result Std.U64 := do
@@ -178,7 +178,7 @@ def key.MAX_SEQUENCE_NUMBER : Result Std.U64 := do
   i - 1#u64
 
 /-- [pedra_aeneas_key_kernel::key::ValueType]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 31:0-40:1
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 31:0-40:1
     Visibility: public -/
 @[discriminant u8]
 inductive key.ValueType where
@@ -187,7 +187,7 @@ inductive key.ValueType where
 | RangeDeletion : key.ValueType
 
 /-- [pedra_aeneas_key_kernel::key::{impl core::fmt::Debug for pedra_aeneas_key_kernel::key::ValueType}::fmt]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:9-29:14
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:9-29:14
     Visibility: public -/
 def key.ValueType.Insts.CoreFmtDebug.fmt
   (self : key.ValueType) (f : core.fmt.Formatter) :
@@ -200,42 +200,42 @@ def key.ValueType.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "RangeDeletion")
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::fmt::Debug for pedra_aeneas_key_kernel::key::ValueType}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:9-29:14 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:9-29:14 -/
 @[reducible]
 def key.ValueType.Insts.CoreFmtDebug : core.fmt.Debug key.ValueType := {
   fmt := key.ValueType.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_key_kernel::key::{impl core::clone::Clone for pedra_aeneas_key_kernel::key::ValueType}::clone]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:16-29:21
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:16-29:21
     Visibility: public -/
 def key.ValueType.Insts.CoreCloneClone.clone
   (self : key.ValueType) : Result key.ValueType := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::clone::Clone for pedra_aeneas_key_kernel::key::ValueType}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:16-29:21 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:16-29:21 -/
 @[reducible]
 def key.ValueType.Insts.CoreCloneClone : core.clone.Clone key.ValueType := {
   clone := key.ValueType.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::marker::Copy for pedra_aeneas_key_kernel::key::ValueType}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:23-29:27 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:23-29:27 -/
 @[reducible]
 def key.ValueType.Insts.CoreMarkerCopy : core.marker.Copy key.ValueType := {
   cloneInst := key.ValueType.Insts.CoreCloneClone
 }
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::marker::StructuralPartialEq for pedra_aeneas_key_kernel::key::ValueType}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:29-29:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:29-29:38 -/
 @[reducible]
 def key.ValueType.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq key.ValueType := {
 }
 
 /-- [pedra_aeneas_key_kernel::key::{impl core::cmp::PartialEq<pedra_aeneas_key_kernel::key::ValueType> for pedra_aeneas_key_kernel::key::ValueType}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:29-29:38
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:29-29:38
     Visibility: public -/
 def key.ValueType.Insts.CoreCmpPartialEqValueType.eq
   (self : key.ValueType) (other : key.ValueType) : Result Bool := do
@@ -244,7 +244,7 @@ def key.ValueType.Insts.CoreCmpPartialEqValueType.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::cmp::PartialEq<pedra_aeneas_key_kernel::key::ValueType> for pedra_aeneas_key_kernel::key::ValueType}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:29-29:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:29-29:38 -/
 @[reducible]
 def key.ValueType.Insts.CoreCmpPartialEqValueType : core.cmp.PartialEq
   key.ValueType key.ValueType := {
@@ -252,14 +252,14 @@ def key.ValueType.Insts.CoreCmpPartialEqValueType : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_key_kernel::key::{impl core::cmp::Eq for pedra_aeneas_key_kernel::key::ValueType}::assert_fields_are_eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:40-29:42
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:40-29:42
     Visibility: public -/
 def key.ValueType.Insts.CoreCmpEq.assert_fields_are_eq
   (self : key.ValueType) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::cmp::Eq for pedra_aeneas_key_kernel::key::ValueType}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:40-29:42 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:40-29:42 -/
 @[reducible]
 def key.ValueType.Insts.CoreCmpEq : core.cmp.Eq key.ValueType := {
   partialEqInst := key.ValueType.Insts.CoreCmpPartialEqValueType
@@ -267,7 +267,7 @@ def key.ValueType.Insts.CoreCmpEq : core.cmp.Eq key.ValueType := {
 }
 
 /-- [pedra_aeneas_key_kernel::key::{impl core::cmp::Ord for pedra_aeneas_key_kernel::key::ValueType}::cmp]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:56-29:59
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:56-29:59
     Visibility: public -/
 def key.ValueType.Insts.CoreCmpOrd.cmp
   (self : key.ValueType) (other : key.ValueType) : Result Ordering := do
@@ -276,7 +276,7 @@ def key.ValueType.Insts.CoreCmpOrd.cmp
   ok (core.cmp.impls.OrdU8.cmp self1 other1)
 
 /-- [pedra_aeneas_key_kernel::key::{impl core::cmp::PartialOrd<pedra_aeneas_key_kernel::key::ValueType> for pedra_aeneas_key_kernel::key::ValueType}::partial_cmp]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:44-29:54
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:44-29:54
     Visibility: public -/
 def key.ValueType.Insts.CoreCmpPartialOrdValueType.partial_cmp
   (self : key.ValueType) (other : key.ValueType) :
@@ -286,7 +286,7 @@ def key.ValueType.Insts.CoreCmpPartialOrdValueType.partial_cmp
   ok (some o)
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::cmp::PartialOrd<pedra_aeneas_key_kernel::key::ValueType> for pedra_aeneas_key_kernel::key::ValueType}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:44-29:54 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:44-29:54 -/
 @[reducible]
 def key.ValueType.Insts.CoreCmpPartialOrdValueType : core.cmp.PartialOrd
   key.ValueType key.ValueType := {
@@ -295,7 +295,7 @@ def key.ValueType.Insts.CoreCmpPartialOrdValueType : core.cmp.PartialOrd
 }
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::cmp::Ord for pedra_aeneas_key_kernel::key::ValueType}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:56-29:59 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:56-29:59 -/
 @[reducible]
 def key.ValueType.Insts.CoreCmpOrd : core.cmp.Ord key.ValueType := {
   eqInst := key.ValueType.Insts.CoreCmpEq
@@ -304,7 +304,7 @@ def key.ValueType.Insts.CoreCmpOrd : core.cmp.Ord key.ValueType := {
 }
 
 /-- [pedra_aeneas_key_kernel::key::{impl core::hash::Hash for pedra_aeneas_key_kernel::key::ValueType}::hash]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:61-29:65
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:61-29:65
     Visibility: public -/
 def key.ValueType.Insts.CoreHashHash.hash
   {__H : Type} (corehashHasherInst : core.hash.Hasher __H)
@@ -315,7 +315,7 @@ def key.ValueType.Insts.CoreHashHash.hash
   U8.Insts.CoreHashHash.hash corehashHasherInst self1 state
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::hash::Hash for pedra_aeneas_key_kernel::key::ValueType}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 29:61-29:65 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 29:61-29:65 -/
 @[reducible]
 def key.ValueType.Insts.CoreHashHash : core.hash.Hash key.ValueType := {
   hash := fun {H : Type} (corehashHasherInst : core.hash.Hasher H) =>
@@ -323,7 +323,7 @@ def key.ValueType.Insts.CoreHashHash : core.hash.Hash key.ValueType := {
 }
 
 /-- [pedra_aeneas_key_kernel::key::{pedra_aeneas_key_kernel::key::ValueType}::from_u8]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 45:4-52:5
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 45:4-52:5
     Visibility: public -/
 def key.ValueType.from_u8 (byte : Std.U8) : Result (Option key.ValueType) := do
   match byte with
@@ -333,14 +333,14 @@ def key.ValueType.from_u8 (byte : Std.U8) : Result (Option key.ValueType) := do
   | _ => ok none
 
 /-- [pedra_aeneas_key_kernel::key::{pedra_aeneas_key_kernel::key::ValueType}::as_u8]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 56:4-58:5
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 56:4-58:5
     Visibility: public -/
 def key.ValueType.as_u8 (self : key.ValueType) : Result Std.U8 := do
   let self1 := read_discriminant self
   ok (UScalar.cast .U8 self1)
 
 /-- [pedra_aeneas_key_kernel::key::pack_sequence_and_type]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 63:0-66:1
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 63:0-66:1
     Visibility: public -/
 def key.pack_sequence_and_type
   (sequence : Std.U64) (kind : key.ValueType) : Result Std.U64 := do
@@ -352,7 +352,7 @@ def key.pack_sequence_and_type
   ok (i1 ||| i3)
 
 /-- [pedra_aeneas_key_kernel::key::pack_sequence_and_type_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 71:0-73:1
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 71:0-73:1
     Visibility: public -/
 def key.pack_sequence_and_type_as_is
   (sequence : Std.U64) (kind : key.ValueType) : Result Std.U64 := do
@@ -368,12 +368,12 @@ inductive error.CoreError where
 | Internal : String → error.CoreError
 
 /-- [pedra_aeneas_key_kernel::key::unpack_sequence_and_type::closure]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 81:56-83:5 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 81:56-83:5 -/
 @[reducible]
 def key.unpack_sequence_and_type.closure := Std.U8
 
 /-- [pedra_aeneas_key_kernel::key::unpack_sequence_and_type::{impl core::ops::function::FnOnce<(), pedra_aeneas_key_kernel::error::CoreError> for pedra_aeneas_key_kernel::key::unpack_sequence_and_type::closure<'_0>}::call_once]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 81:56-83:5 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 81:56-83:5 -/
 def
   key.unpack_sequence_and_type.closure.Insts.CoreOpsFunctionFnOnceTupleCoreError.call_once
   (c : key.unpack_sequence_and_type.closure) (_ : Unit) :
@@ -394,7 +394,7 @@ def
   ok (error.CoreError.Internal s1)
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::unpack_sequence_and_type::{impl core::ops::function::FnOnce<(), pedra_aeneas_key_kernel::error::CoreError> for pedra_aeneas_key_kernel::key::unpack_sequence_and_type::closure<'_0>}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 81:56-83:5 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 81:56-83:5 -/
 @[reducible]
 def
   key.unpack_sequence_and_type.closure.Insts.CoreOpsFunctionFnOnceTupleCoreError
@@ -405,7 +405,7 @@ def
 }
 
 /-- [pedra_aeneas_key_kernel::key::unpack_sequence_and_type]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 79:0-86:1
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 79:0-86:1
     Visibility: public -/
 def key.unpack_sequence_and_type
   (packed : Std.U64) :
@@ -429,7 +429,7 @@ def key.unpack_sequence_and_type
       residual
 
 /-- [pedra_aeneas_key_kernel::key::InternalKey]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 90:0-97:1
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 90:0-97:1
     Visibility: public -/
 structure key.InternalKey where
   user_key : bytes.bytes.Bytes
@@ -437,7 +437,7 @@ structure key.InternalKey where
   kind : key.ValueType
 
 /-- [pedra_aeneas_key_kernel::key::{impl core::fmt::Debug for pedra_aeneas_key_kernel::key::InternalKey}::fmt]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 89:9-89:14
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 89:9-89:14
     Visibility: public -/
 def key.InternalKey.Insts.CoreFmtDebug.fmt
   (self : key.InternalKey) (f : core.fmt.Formatter) :
@@ -451,14 +451,14 @@ def key.InternalKey.Insts.CoreFmtDebug.fmt
     "user_key") dyn (toStr "sequence") dyn1 (toStr "kind") dyn2
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::fmt::Debug for pedra_aeneas_key_kernel::key::InternalKey}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 89:9-89:14 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 89:9-89:14 -/
 @[reducible]
 def key.InternalKey.Insts.CoreFmtDebug : core.fmt.Debug key.InternalKey := {
   fmt := key.InternalKey.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_key_kernel::key::{impl core::clone::Clone for pedra_aeneas_key_kernel::key::InternalKey}::clone]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 89:16-89:21
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 89:16-89:21
     Visibility: public -/
 def key.InternalKey.Insts.CoreCloneClone.clone
   (self : key.InternalKey) : Result key.InternalKey := do
@@ -468,7 +468,7 @@ def key.InternalKey.Insts.CoreCloneClone.clone
   ok { user_key := b, sequence := i, kind := vt }
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::clone::Clone for pedra_aeneas_key_kernel::key::InternalKey}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 89:16-89:21 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 89:16-89:21 -/
 @[reducible]
 def key.InternalKey.Insts.CoreCloneClone : core.clone.Clone key.InternalKey
   := {
@@ -476,7 +476,7 @@ def key.InternalKey.Insts.CoreCloneClone : core.clone.Clone key.InternalKey
 }
 
 /-- [pedra_aeneas_key_kernel::key::{pedra_aeneas_key_kernel::key::InternalKey}::new]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 102:4-108:5
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 102:4-108:5
     Visibility: public -/
 def key.InternalKey.new
   {T0 : Type} (coreconvertIntoT0BytesInst : core.convert.Into T0
@@ -488,7 +488,7 @@ def key.InternalKey.new
   ok { user_key := b, sequence, kind }
 
 /-- [pedra_aeneas_key_kernel::key::{pedra_aeneas_key_kernel::key::InternalKey}::for_lookup]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 112:4-114:5
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 112:4-114:5
     Visibility: public -/
 def key.InternalKey.for_lookup
   {T0 : Type} (coreconvertIntoT0BytesInst : core.convert.Into T0
@@ -499,7 +499,7 @@ def key.InternalKey.for_lookup
     key.ValueType.Value
 
 /-- [pedra_aeneas_key_kernel::key::{pedra_aeneas_key_kernel::key::InternalKey}::encode_into]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 125:4-129:5
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 125:4-129:5
     Visibility: public -/
 def key.InternalKey.encode_into
   (self : key.InternalKey) (out : alloc.vec.Vec Std.U8) :
@@ -514,7 +514,7 @@ def key.InternalKey.encode_into
   alloc.vec.Vec.extend_from_slice core.clone.CloneU8 out1 s1
 
 /-- [pedra_aeneas_key_kernel::key::{pedra_aeneas_key_kernel::key::InternalKey}::encode]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 118:4-122:5
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 118:4-122:5
     Visibility: public -/
 def key.InternalKey.encode
   (self : key.InternalKey) : Result bytes.bytes.Bytes := do
@@ -525,7 +525,7 @@ def key.InternalKey.encode
   bytes.bytes.Bytes.Insts.CoreConvertFromVecU8.from buf1
 
 /-- [pedra_aeneas_key_kernel::key::{pedra_aeneas_key_kernel::key::InternalKey}::decode]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 136:4-154:5
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 136:4-154:5
     Visibility: public -/
 def key.InternalKey.decode
   (encoded : Slice Std.U8) :
@@ -575,13 +575,13 @@ def key.InternalKey.decode
         key.InternalKey (core.convert.FromSame error.CoreError) residual
 
 /-- [pedra_aeneas_key_kernel::key::ikey_seq_cmp]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 188:0-190:1
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 188:0-190:1
     Visibility: public -/
 def key.ikey_seq_cmp (a : Std.U64) (b : Std.U64) : Result Ordering := do
   ok (core.cmp.impls.OrdU64.cmp b a)
 
 /-- [pedra_aeneas_key_kernel::key::{impl core::cmp::Ord for pedra_aeneas_key_kernel::key::InternalKey}::cmp]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 172:4-183:5
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 172:4-183:5
     Visibility: public -/
 def key.InternalKey.Insts.CoreCmpOrd.cmp
   (self : key.InternalKey) (other : key.InternalKey) : Result Ordering := do
@@ -601,7 +601,7 @@ def key.InternalKey.Insts.CoreCmpOrd.cmp
   | Ordering.gt => ok Ordering.gt
 
 /-- [pedra_aeneas_key_kernel::key::{impl core::cmp::PartialEq<pedra_aeneas_key_kernel::key::InternalKey> for pedra_aeneas_key_kernel::key::InternalKey}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 158:4-160:5
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 158:4-160:5
     Visibility: public -/
 def key.InternalKey.Insts.CoreCmpPartialEqInternalKey.eq
   (self : key.InternalKey) (other : key.InternalKey) : Result Bool := do
@@ -609,7 +609,7 @@ def key.InternalKey.Insts.CoreCmpPartialEqInternalKey.eq
   core.cmp.Ordering.Insts.CoreCmpPartialEqOrdering.eq o Ordering.eq
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::cmp::PartialEq<pedra_aeneas_key_kernel::key::InternalKey> for pedra_aeneas_key_kernel::key::InternalKey}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 157:0-161:1 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 157:0-161:1 -/
 @[reducible]
 def key.InternalKey.Insts.CoreCmpPartialEqInternalKey : core.cmp.PartialEq
   key.InternalKey key.InternalKey := {
@@ -617,7 +617,7 @@ def key.InternalKey.Insts.CoreCmpPartialEqInternalKey : core.cmp.PartialEq
 }
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::cmp::Eq for pedra_aeneas_key_kernel::key::InternalKey}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 163:0-163:26 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 163:0-163:26 -/
 def key.InternalKey.Insts.CoreCmpEq.assert_fields_are_eq
   (self : key.InternalKey) : Result Unit := do
   ok ()
@@ -629,7 +629,7 @@ def key.InternalKey.Insts.CoreCmpEq : core.cmp.Eq key.InternalKey := {
 }
 
 /-- [pedra_aeneas_key_kernel::key::{impl core::cmp::PartialOrd<pedra_aeneas_key_kernel::key::InternalKey> for pedra_aeneas_key_kernel::key::InternalKey}::partial_cmp]:
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 166:4-168:5
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 166:4-168:5
     Visibility: public -/
 def key.InternalKey.Insts.CoreCmpPartialOrdInternalKey.partial_cmp
   (self : key.InternalKey) (other : key.InternalKey) :
@@ -639,7 +639,7 @@ def key.InternalKey.Insts.CoreCmpPartialOrdInternalKey.partial_cmp
   ok (some o)
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::cmp::PartialOrd<pedra_aeneas_key_kernel::key::InternalKey> for pedra_aeneas_key_kernel::key::InternalKey}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 165:0-169:1 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 165:0-169:1 -/
 @[reducible]
 def key.InternalKey.Insts.CoreCmpPartialOrdInternalKey : core.cmp.PartialOrd
   key.InternalKey key.InternalKey := {
@@ -648,7 +648,7 @@ def key.InternalKey.Insts.CoreCmpPartialOrdInternalKey : core.cmp.PartialOrd
 }
 
 /-- Trait implementation: [pedra_aeneas_key_kernel::key::{impl core::cmp::Ord for pedra_aeneas_key_kernel::key::InternalKey}]
-    Source: 'src/../../../../crates/pedradb-core/src/key.rs', lines 171:0-184:1 -/
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 171:0-184:1 -/
 @[reducible]
 def key.InternalKey.Insts.CoreCmpOrd : core.cmp.Ord key.InternalKey := {
   eqInst := key.InternalKey.Insts.CoreCmpEq
