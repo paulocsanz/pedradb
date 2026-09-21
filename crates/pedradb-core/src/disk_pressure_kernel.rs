@@ -284,16 +284,16 @@ mod tests {
                 need: DISK_HARD_FREE_BYTES,
             }
         );
-        let glue = include_str!("env.rs")
-            .split("pub fn probe_available_bytes")
+        let glue = include_str!("env_kernel.rs")
+            .split(concat!("pub fn ", "probe_available_bytes"))
             .nth(1)
-            .and_then(|s| s.split("pub fn admit_disk_write").next())
+            .and_then(|s| s.split(concat!("pub fn ", "admit_disk_write")).next())
             .expect("probe_available_bytes");
         assert!(
             glue.contains("disk_probe_or_unknown("),
             "probe_available_bytes must match disk_probe_or_unknown"
         );
-        let admit = include_str!("db.rs")
+        let admit = include_str!("db_kernel.rs")
             .split("fn ensure_disk_pressure_admitted")
             .nth(1)
             .and_then(|s| s.split("fn reclaim_disk_for_uptime").next())
@@ -313,8 +313,8 @@ mod tests {
             external_write_admitted_as_is(Some(0)),
             "AS-IS tooth: dest copy proceeds at zero free"
         );
-        let glue = include_str!("env.rs")
-            .split("pub fn admit_disk_write")
+        let glue = include_str!("env_kernel.rs")
+            .split(concat!("pub fn ", "admit_disk_write"))
             .nth(1)
             .and_then(|s| s.split("fn note_external_disk_pressure").next())
             .expect("admit_disk_write");
@@ -326,8 +326,8 @@ mod tests {
             glue.contains("probe_available_bytes("),
             "admit_disk_write must probe via disk_probe_or_unknown"
         );
-        let copy = include_str!("db.rs")
-            .split("pub fn copy_db_directory")
+        let copy = include_str!("db_kernel.rs")
+            .split(concat!("pub fn ", "copy_db_directory"))
             .nth(1)
             .and_then(|s| s.split("\npub fn ").next())
             .expect("copy_db_directory");
@@ -335,8 +335,8 @@ mod tests {
             copy.contains("admit_disk_write("),
             "copy_db_directory must admit before copy"
         );
-        let ckpt = include_str!("db.rs")
-            .split("pub fn create_checkpoint")
+        let ckpt = include_str!("db_kernel.rs")
+            .split(concat!("pub fn ", "create_checkpoint"))
             .nth(1)
             .and_then(|s| s.split("\n    pub fn ").next())
             .expect("create_checkpoint");
@@ -345,7 +345,7 @@ mod tests {
             "create_checkpoint must admit before copy"
         );
         let hist = include_str!("../../pedradb-ops/src/lib.rs")
-            .split("pub fn restore_history_from_remote")
+            .split(concat!("pub fn ", "restore_history_from_remote"))
             .nth(1)
             .and_then(|s| s.split("\nfn write_warch").next())
             .expect("restore_history_from_remote");
@@ -353,7 +353,7 @@ mod tests {
             hist.contains("admit_disk_write("),
             "restore_history_from_remote must admit before writing dest"
         );
-        let group = include_str!("db.rs")
+        let group = include_str!("db_kernel.rs")
             .split("fn group_admit")
             .nth(1)
             .and_then(|s| s.split("fn group_prepare").next())
@@ -362,7 +362,7 @@ mod tests {
             group.contains("CoreError::DiskPressure"),
             "group_admit must keep DiskPressure, not map it to Internal"
         );
-        let submit = include_str!("concurrent.rs")
+        let submit = include_str!("concurrent_kernel.rs")
             .split("fn submit_inner")
             .nth(1)
             .and_then(|s| s.split("fn submit_after_begin").next())
@@ -375,10 +375,10 @@ mod tests {
             submit.contains("WriteStallMem"),
             "only WriteStall/WriteStallMem retry"
         );
-        let del = include_str!("db.rs")
-            .split("pub fn delete_with(")
+        let del = include_str!("db_kernel.rs")
+            .split(concat!("pub fn ", "delete_with("))
             .nth(1)
-            .and_then(|s| s.split("pub fn delete_range(").next())
+            .and_then(|s| s.split(concat!("pub fn ", "delete_range(")).next())
             .expect("delete_with");
         assert!(
             del.contains("apply_batch_with("),
@@ -393,26 +393,29 @@ mod tests {
             arc.contains("probe_err"),
             "FailingEnvArc must inject probe Err (unknown, not 0-free)"
         );
-        let compact = include_str!("db.rs")
-            .split("pub fn compact_with(")
+        let compact = include_str!("db_kernel.rs")
+            .split(concat!("pub fn ", "compact_with("))
             .nth(1)
-            .and_then(|s| s.split("pub fn compact_reclaim").next())
+            .and_then(|s| s.split(concat!("pub fn ", "compact_reclaim")).next())
             .expect("compact_with");
         assert!(
             compact.contains("compact_refuse("),
             "compact_with must match compact_refuse"
         );
-        let flush = include_str!("db.rs")
-            .split("pub fn flush(")
+        let flush = include_str!("db_kernel.rs")
+            .split(concat!("pub fn ", "flush("))
             .nth(1)
-            .and_then(|s| s.split("pub(crate) fn bulk_family_of_table").next())
+            .and_then(|s| {
+                s.split(concat!("pub(crate) fn ", "bulk_family_of_table"))
+                    .next()
+            })
             .expect("flush");
         assert!(
             flush.contains("compact_refuse("),
             "flush must match compact_refuse"
         );
-        let ssts_only = include_str!("db.rs")
-            .split("pub fn compact_with_ssts_only(")
+        let ssts_only = include_str!("db_kernel.rs")
+            .split(concat!("pub fn ", "compact_with_ssts_only("))
             .nth(1)
             .and_then(|s| s.split("fn compact_l0_into_l1").next())
             .expect("compact_with_ssts_only");
@@ -420,8 +423,8 @@ mod tests {
             ssts_only.contains("compact_refuse("),
             "compact_with_ssts_only must match compact_refuse"
         );
-        let leveled = include_str!("db.rs")
-            .split("pub fn compact_leveled(")
+        let leveled = include_str!("db_kernel.rs")
+            .split(concat!("pub fn ", "compact_leveled("))
             .nth(1)
             .and_then(|s| s.split("fn dump_level_diag").next())
             .expect("compact_leveled");
@@ -429,8 +432,8 @@ mod tests {
             leveled.contains("compact_refuse("),
             "compact_leveled must match compact_refuse"
         );
-        let flush_cf = include_str!("db.rs")
-            .split("pub fn flush_cf(")
+        let flush_cf = include_str!("db_kernel.rs")
+            .split(concat!("pub fn ", "flush_cf("))
             .nth(1)
             .and_then(|s| s.split("\n    pub fn ").next())
             .expect("flush_cf");
@@ -438,10 +441,10 @@ mod tests {
             flush_cf.contains("compact_refuse("),
             "flush_cf must match compact_refuse"
         );
-        let cf = include_str!("db.rs")
-            .split("pub fn compact_ssts_only_cf(")
+        let cf = include_str!("db_kernel.rs")
+            .split(concat!("pub fn ", "compact_ssts_only_cf("))
             .nth(1)
-            .and_then(|s| s.split("pub fn live_sst_meta").next())
+            .and_then(|s| s.split(concat!("pub fn ", "live_sst_meta")).next())
             .expect("compact_ssts_only_cf");
         assert!(
             cf.contains("compact_refuse("),
@@ -460,7 +463,10 @@ mod tests {
             "AS-IS tooth: SST write proceeds at zero free"
         );
         assert!(
-            include_str!("db.rs").matches("compact_refuse(").count() >= 4,
+            include_str!("db_kernel.rs")
+                .matches("compact_refuse(")
+                .count()
+                >= 4,
             "flush + compact_with + ssts_only + leveled must match compact_refuse"
         );
     }
@@ -475,7 +481,7 @@ mod tests {
         assert!(!as_is.compact_vlog, "AS-IS tooth: no vlog GC");
         let denied = disk_pressure_reclaim_plan(false);
         assert!(!denied.compact_sst && !denied.rotate_wal && !denied.compact_vlog);
-        let body = include_str!("db.rs")
+        let body = include_str!("db_kernel.rs")
             .split("fn reclaim_disk_for_uptime")
             .nth(1)
             .and_then(|s| s.split("fn drop_page_cache_best_effort").next())

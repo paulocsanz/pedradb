@@ -5,7 +5,7 @@
 //! truth — never edit copies.
 
 pub mod table {
-    /// Pinned to `crates/pedradb-core/src/sst/table.rs` by aeneas_magic.sh.
+    /// Pinned to `crates/pedradb-core/src/sst/table_kernel.rs` by aeneas_magic.sh.
     pub const SST_MAGIC: &[u8; 8] = b"PEDRSST\0";
 }
 

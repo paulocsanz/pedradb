@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-filter-partition-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate whose [lib] path is production filter_partition_kernel.rs (RFC-0236 P0.1)"
+
+[lib]
+path = "../../../crates/pedradb-core/src/filter_partition_kernel.rs"

@@ -711,7 +711,7 @@ fn wal_inv_on_live_recording_is_not_ok() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// RFC-0166 P1.3: the named D1-model corollary — put Ok ⇒ survives every
+/// RFC-0166 P1.3: the named D1-modelo corollary — put Ok ⇒ survives every
 /// torn prefix — holds on the model for every cut, the as-is write path
 /// breaks it, and two acked puts survive the real crash+reopen.
 #[test]

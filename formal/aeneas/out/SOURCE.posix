@@ -1,4 +1,4 @@
-path=crates/pedradb-posix/src/lib.rs
-sha256=a11f119991ddabf3be192557c7bca8ff05ad972c9a559bf36d9c2909cf73908d
+path=crates/pedradb-posix/src/lib_kernel.rs
+sha256=2c93f4ad2352449ccd2dab3b20a563a9c8e3667b71e7d226571fbc24b218dedf
 aeneas=daa85d7
 charon=0.1.232

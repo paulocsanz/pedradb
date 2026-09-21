@@ -23,6 +23,10 @@
 //! (1.0859 / 1.577) and the new boundary must not move them. No
 //! wait-to-grow anywhere (0180/0190 veto): the leader drains what has
 //! ALREADY queued, capped by the 0201 misuse floor.
+//!
+//! 2026-09-14: the wiring default is ON (`PEDRA_RMW_SCHED=0` restores the
+//! bypass). Railway overwrite_mc4 0.35× was 4 writers on 48 CPUs taking
+//! the 0201 bypass; the 4-vCPU board is the same `writers == ncpu` hole.
 
 #![forbid(unsafe_code)]
 

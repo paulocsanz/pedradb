@@ -5,4 +5,7 @@ edition.workspace = true
 license.workspace = true
 description = "Machine-checkable property specs D1/R1/T1/C1 (RFC-0166) with anti-vacuity teeth"
 
+
+[lib]
+path = "src/lib_kernel.rs"
 [dependencies]

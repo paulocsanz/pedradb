@@ -36,6 +36,15 @@ pub fn should_flush(staged: u64, max: u64) -> bool {
     max == 0 || staged >= max
 }
 
+/// Workload switch: a **lone** writer (1c / `commit_async_one`) flushes
+/// every frame — Rocks `FlushWAL` per `Write()`. A concurrent/group
+/// frame only flushes at the 64 KiB cap. That is how staging stays
+/// default-on without the p209b 1c regression (ycsb_f 1.88→1.09).
+#[must_use]
+pub fn should_flush_for_workload(staged: u64, max: u64, lone_writer: bool) -> bool {
+    lone_writer || should_flush(staged, max)
+}
+
 /// AS-IS twin of [`should_flush`] — the pre-RFC-0209 engine had no
 /// staging: every frame flushed (went straight to the sink) immediately.
 #[must_use]
@@ -73,6 +82,21 @@ mod tests {
                 assert!(should_flush_as_is(staged, max));
             }
         }
+    }
+
+    #[test]
+    #[test]
+    fn wal_buffer_lone_always_flushes_group_respects_cap() {
+        let cap = WAL_BUF_MAX_DEFAULT_BYTES;
+        assert!(
+            should_flush_for_workload(1, cap, true),
+            "1c FlushWAL per Write"
+        );
+        assert!(
+            !should_flush_for_workload(cap - 1, cap, false),
+            "group stages below cap"
+        );
+        assert!(should_flush_for_workload(cap, cap, false));
     }
 
     #[test]

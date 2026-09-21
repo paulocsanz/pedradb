@@ -1,5 +1,5 @@
 //! Inductive WAL state invariant (RFC-0166 P1.2): `acked ⊆ synced ⊆
-//! prefix-recoverable`.
+//! recoverable-prefix`.
 //!
 //! The live seam is [`crate::wal::writer`] + [`crate::group_commit_kernel`]
 //! (fdatasync before Ok) over the [`crate::env`] barrier. This kernel is the

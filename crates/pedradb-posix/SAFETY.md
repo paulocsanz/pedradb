@@ -9,7 +9,7 @@ This crate is the **only** `unsafe` on Pedra's default I/O path
 ### `fdatasync` (`fdatasync_file`, Unix)
 
 - `extern "C" { fn fdatasync(fd: i32) -> i32; }` — POSIX / libSystem
-  `int fdatasync(int)`. Edition 2021 + workspace MSRV 1.88: the block is
+  `int fdatasync(int)`. Edition 2021 + workspace MSRV 1.75: the block is
   **not** `unsafe extern` (stabilized 1.82). The SAFETY comment on the
   block is the signature assertion.
 - Call: `file` is a live `std::fs::File`; `as_raw_fd()` is not stored.
@@ -32,6 +32,22 @@ host (RFC-0036). Power-loss can lose a “synced” WAL if the drive cache
 holds it. Proof: test `darwin_fdatasync_and_dirfd_are_not_fullfsync_class`
 (file `fdatasync` p50 ~25 µs vs `F_FULLFSYNC` ~4 ms; dirfd `fdatasync`
 stays fast). `File::sync_all` on a Darwin **dirfd** is noisy — not used.
+
+### `mmap` (`mapped_pwrite`, Unix)
+
+- `libc::mmap` / `munmap` on a live `File` fd. **No `msync` on the hot
+  path** — `MAP_SHARED` memcpy dirties the page cache (FlushWAL class).
+  `MS_ASYNC` is not a durability barrier and was a syscall per frame.
+- Mapping is `MAP_SHARED` + `PROT_READ|PROT_WRITE`; cache keyed by
+  `(st_dev, st_ino)` so fd reuse cannot alias a stale map.
+- Grow is [`WAL_MAP_GROW`] (1 MiB) aligned, not exact-`need` (remap per
+  append was 0.10× vs Fjall). Trailing zeros are `WalZeroHeader`;
+  recover stops. `Wal` Drop / close calls `mapped_release` then
+  `set_len(position)` so a closed segment is not left padded.
+  Rotation keys off `Wal::position()`, not `stat` size.
+- Grow remaps under a mutex; memcpy runs with the lock released.
+  `mapped_release` unmaps before truncate. Process `Drop` unmaps
+  remaining slots. Core stays `forbid(unsafe_code)`.
 
 `EINTR` / failed `fdatasync` after the kernel may have completed the
 barrier is the RFC-0015 H1 uncertain outcome — not unique to unsafe.

@@ -47,7 +47,7 @@ pub fn put_ok(s0: WalState, rec_len: u64) -> WalState {
     wal_ack(s2, s2.synced - s2.acked)
 }
 
-/// Named corollary D1-model: the record inside the acked prefix of an
+/// Named corollary D1-modelo: a record inside the acked prefix of an
 /// Inv-WAL state survives every legal torn prefix (the cut keeps the
 /// record whole).
 #[must_use]

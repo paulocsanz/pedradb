@@ -86,11 +86,11 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P1.2 4/11 (atom `catalog:prefix`, entry
-    `prefix_exclusive_end`): the exclusive end is EXACTLY the
-    cited dispatch — the prefix becomes Vec and the cited loop decides
-    (incrementa the last byte or some). The AS-IS pushes 255 (end
-    wrong engole keys — tooth planted). -/
+/-- RFC-0218 P1.2 4/11 (atom `catalog:prefix`, entrada
+    `prefix_exclusive_end`): o fim exclusivo é EXATAMENTE o
+    encaminhamento citado — o prefixo vira Vec e o loop citado decide
+    (incrementa o último byte ou some). O AS-IS empurra 255 (fim
+    errado engole chaves — tooth plantado). -/
 theorem prefix_exclusive_end_fate_iff :
     ∀ (prefix1 : Slice U8) (r : Option (alloc.vec.Vec U8)),
       (prefix_exclusive_end prefix1 = ok r) ↔

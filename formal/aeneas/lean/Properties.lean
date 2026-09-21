@@ -17,11 +17,11 @@ private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : 
   | fail e => exact absurd h (by simp)
   | div => exact absurd h (by simp)
 
-/-! ## RFC-0215 P0.1 — product crown in the atom rung (spec ×4) -/
+/-! ## RFC-0215 P0.1 — crown de produto no degrau atom (spec ×4) -/
 
-/-- C1 semantics (shape-branch: cites `majority` only where the body calls):
-the served value passes when ¬served, or the old majority was reached and
-(single) holds, or (joint) the new one was also reached. -/
+/-- C1 semântica (forma-ramo: cita `majority` só onde o corpo chama):
+valor servido passa quando ¬servido, ou a maioria antiga atingiu e
+(single) vale, ou (joint) a nova também atingiu. -/
 def c1_pass (old_n old_yes : U64) (joint : Bool) (new_n new_yes : U64)
     (served : Bool) : Prop :=
   served = false ∨
@@ -29,7 +29,7 @@ def c1_pass (old_n old_yes : U64) (joint : Bool) (new_n new_yes : U64)
       (joint = false ∨
         (∃ m2, majority new_n = ok m2 ∧ ¬ (new_yes < m2))))
 
-/-- C1 failure: servido without majority old, or joint without majority new. -/
+/-- C1 falha: servido sem maioria antiga, ou joint sem maioria nova. -/
 def c1_fail (old_n old_yes : U64) (joint : Bool) (new_n new_yes : U64)
     (served : Bool) : Prop :=
   (served = true ∧ ∃ m, majority old_n = ok m ∧ (old_yes < m)) ∨
@@ -38,12 +38,12 @@ def c1_fail (old_n old_yes : U64) (joint : Bool) (new_n new_yes : U64)
         majority new_n = ok m2 ∧ (new_yes < m2))
 
 /-- RFC-0215 P0.1 1/4 (atom `catalog:c1_quorum`, entry `c1_holds`):
-the value servido passes C1 exactly when the majority of TODA config
-ativa replica — joint requires old E new. The mutant AS-IS
-(`c1_holds_as_is`) aceita a majority antiga sozinha (o hole
-joint-election, RFC-0064); plants `c1_as_is_does_not_imply_c1` refuses.
-Fate forall over the body extracted (without loop; `majority` cited,
-body not reopened). -/
+um valor servido passa C1 exatamente quando a maioria de TODA config
+ativa replica — joint exige antiga E nova. O mutante AS-IS
+(`c1_holds_as_is`) aceita a maioria antiga sozinha (o buraco
+joint-election, RFC-0064); planta `c1_as_is_does_not_imply_c1` recusa.
+Fate forall sobre o corpo extraído (sem loop; `majority` citado,
+corpo não reaberto). -/
 theorem c1_holds_fate_iff :
     ∀ (old_n old_yes : U64) (joint : Bool) (new_n new_yes : U64)
       (served : Bool) (v : Bool),
@@ -91,7 +91,7 @@ theorem c1_holds_fate_iff :
           split
           · next hs'' => exact absurd hs'' (by rw [hs]; simp)
           · rfl
-        · -- pass-∃: served can be true (prosseguir) or false (body ok true)
+        · -- pass-∃: served pode ser true (prosseguir) ou false (corpo ok true)
           split
           · next _ =>
               simp only [hm, Aeneas.Std.bind_tc_ok]
@@ -122,8 +122,8 @@ theorem c1_holds_fate_iff :
           simp only [hm2, Aeneas.Std.bind_tc_ok]
           rw [if_pos hlt2]
 
-/-- D1 semantics: no acked entry loses the cut — every acked index is
-inside the prefix that survives. -/
+/-- D1 semântica: nenhum acked perde o corte — todo índice ackado está
+dentro do prefixo que sobrevive. -/
 def d1_ok (acked : Slice Bool) (survives : Usize) : Prop :=
   ∀ i : Nat, (hi : i < acked.val.length) →
     acked.val[i] = true → i < survives.val
@@ -161,7 +161,7 @@ private theorem d1_loop_spec (acked : Slice Bool) (survives : Usize)
     · -- acked[j] = true
       rename_i hbt
       split
-      · -- j >= survives : done false, j is testemunha
+      · -- j >= survives : done false, j é testemunha
         rename_i hgeU
         have hge : ¬ (j.val < survives.val) := by
           have hN : (↑survives : Nat) ≤ (↑j : Nat) := by
@@ -220,12 +220,12 @@ private theorem d1_loop_spec (acked : Slice Bool) (survives : Usize)
       exact trivial
 
 /-- RFC-0215 P0.1 2/4 (atom `catalog:d1_durability`, entry `d1_holds`):
-D1 accepts (acked, survives) exactly when none index ackado
-falls in or beyond the prefix surviving — put→Ok is durable, the promise
-G1. The mutant AS-IS (`d1_holds_as_is`) only promete barrier for the
+D1 aceita (acked, survives) exatamente quando nenhum índice ackado
+cai em ou além do prefixo sobrevivente — put→Ok é durável, a promessa
+G1. O mutante AS-IS (`d1_holds_as_is`) só promete barreira para os
 synced (a classe sync=false do peer); planta `d1_as_is_does_not_imply_d1`
-refuses. Fate forall over the body extracted (loop real via
-`loop.spec_decr_nat`, semantics first-order over `Slice.val`). -/
+recusa. Fate forall sobre o corpo extraído (loop real via
+`loop.spec_decr_nat`, semântica first-order sobre `Slice.val`). -/
 theorem d1_holds_fate_iff :
     ∀ (acked : Slice Bool) (survives : Usize) (v : Bool),
       (d1_holds acked survives = ok v) ↔
@@ -267,8 +267,8 @@ theorem d1_holds_fate_iff :
           | false => rfl
         rw [hbf]
 
-/-- T1 semantics: all-or-nothing — never both flags, visible indices
-name staged writes, committed ⇒ all visible, otherwise nothing. -/
+/-- T1 semântica: all-or-nothing — nunca ambos flags, índices visíveis
+nomeiam writes staged, committed ⇒ todos visíveis, senão nada. -/
 def t1_ok (committed aborted : Bool) (staged_n : Usize)
     (visible : Slice Usize) : Prop :=
   (committed = true → aborted = false) ∧
@@ -434,11 +434,11 @@ private theorem t1_loop1_spec (staged_n : Usize) (visible : Slice Usize)
       exact hlen
 
 /-- RFC-0215 P0.1 3/4 (atom `catalog:t1_atomicity`, entry `t1_holds`):
-T1 accepts exactly when the tx is all-or-nothing — never both the
-flags, visible name staged, committed ⇒ all, otherwise none. The
-mutant AS-IS (`t1_holds_as_is`) only checks byte integrity (a tx
-aborted with partial effect passes); plants `t1_as_is_does_not_imply_t1`
-refuses. Fate forall over the body extracted (two real loops via
+T1 aceita exatamente quando a tx é all-or-nothing — nunca ambos os
+flags, visíveis nomeiam staged, committed ⇒ todos, senão nenhum. O
+mutante AS-IS (`t1_holds_as_is`) só confere integridade de bytes (tx
+abortada com efeito parcial passa); planta `t1_as_is_does_not_imply_t1`
+recusa. Fate forall sobre o corpo extraído (dois loops reais via
 `loop.spec_decr_nat`). -/
 theorem t1_holds_fate_iff :
     ∀ (committed aborted : Bool) (staged_n : Usize)
@@ -551,10 +551,10 @@ theorem t1_holds_fate_iff :
               | false => rfl
             rw [hbf]
 
-/-- R1 semantics of the first hit from `i0`: testemunha `k`
-with `l[k] = some s`, every previous (≥ i0, < k) `none`; or everything `none`
-and answer `none`. Bounds travel in the ∃-proofs (indexing plain
-elabora with eles in the context). -/
+/-- R1 semântica do primeiro hit a partir de `i0`: testemunha `k`
+com `l[k] = some s`, todo anterior (≥ i0, < k) `none`; ou tudo `none`
+e resposta `none`. Bounds viajam como ∃-provas (indexação plain
+elabora com eles no contexto). -/
 def IsFirstHitFrom (i0 : Nat) (l : List (Option Slot)) (o : Option Slot) :
     Prop :=
   (∃ (k : Nat) (s : Slot) (hk0 : i0 ≤ k) (hk : k < l.length),
@@ -563,7 +563,7 @@ def IsFirstHitFrom (i0 : Nat) (l : List (Option Slot)) (o : Option Slot) :
   (o = none ∧ ∀ k' (hk0' : i0 ≤ k') (hkl' : k' < l.length),
       l[k'] = none)
 
-/-- R1 in the whole vector (i0 = 0, index 0 = newest source). -/
+/-- R1 no vetor inteiro (i0 = 0, índice 0 = fonte mais nova). -/
 def IsFirstHit (l : List (Option Slot)) (o : Option Slot) : Prop :=
   IsFirstHitFrom 0 l o
 
@@ -644,9 +644,9 @@ private theorem r1_loop_spec (probes : Slice (Option Slot)) (i0 : Usize)
     intro k' hk0' hkl'
     exact hnone k' hk0' (by omega) hkl'
 
-/-- RFC-0215 P0.1 4/4, leg semantics: the first hit is exactly the
-first `some` in probe order starting from the start (index 0 =
-newest source), with all the earlier ones `none`. -/
+/-- RFC-0215 P0.1 4/4, perna semântica: o primeiro hit é exatamente o
+primeiro `some` na ordem de probe a partir do início (índice 0 =
+fonte mais nova), com todos os anteriores `none`. -/
 private theorem r1_first_hit_fate :
     ∀ (probes : Slice (Option Slot)) (o : Option Slot),
       (r1_first_hit probes = ok o) ↔ IsFirstHit probes.val o := by
@@ -664,13 +664,13 @@ private theorem r1_first_hit_fate :
     rw [hob]
 
 /-- RFC-0215 P0.1 4/4 (atom `catalog:r1_no_resumption`, entry
-`r1_answer_ok`): the answer of read passes R1 exactly when
-bate with the first hit (`r1_first_hit_fate` characterizes the hit the
-`IsFirstHit`; the equality of `Option` is an axiom of extract, cited not
-reaberto). The mutant AS-IS (`r1_answer_ok_as_is`) accepts any hit
-covering (the resurrection of the delete of
+`r1_answer_ok`): a resposta de leitura passa R1 exatamente quando
+bate com o primeiro hit (`r1_first_hit_fate` caracteriza o hit como
+`IsFirstHit`; a igualdade de `Option` é axioma de extrato, citado não
+reaberto). O mutante AS-IS (`r1_answer_ok_as_is`) aceita qualquer hit
+cobridor (a ressurreição do delete de
 findings/2026-09-04-reopen-delete-resurrected); planta
-`r1_as_is_does_not_imply_r1` refuses. -/
+`r1_as_is_does_not_imply_r1` recusa. -/
 theorem r1_answer_ok_fate_iff :
     ∀ (probes : Slice (Option Slot)) (answer : Option Slot) (v : Bool),
       (r1_answer_ok probes answer = ok v) ↔

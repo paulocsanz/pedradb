@@ -25,14 +25,24 @@
 
 use crate::d1_modelo_kernel::{d1_modelo, d1_modelo_as_is};
 use crate::env_crash_kernel::{crash_legal, CrashModel};
+#[cfg(pedra_aeneas)]
+use crate::properties_kernel::d1_holds;
 use crate::wal::wal_state_kernel::WalState;
+#[cfg(not(pedra_aeneas))]
 use pedradb_spec::properties_kernel::d1_holds;
 
 /// The positional view of the ledger's acked prefix: byte `i` is an
 /// acked entry iff `i < acked` (length = the appended log).
 #[must_use]
 pub fn acked_flags(s: &WalState) -> Vec<bool> {
-    (0..s.written).map(|i| i < s.acked).collect()
+    // Index `while` (not `map`/`collect`) so Charon/Aeneas emit a `def`.
+    let mut flags = Vec::new();
+    let mut i = 0u64;
+    while i < s.written {
+        flags.push(i < s.acked);
+        i = i.saturating_add(1);
+    }
+    flags
 }
 
 /// The product crown over a ledger state: for every cut the model
@@ -44,9 +54,18 @@ pub fn acked_flags(s: &WalState) -> Vec<bool> {
 pub fn product_crown(s: &WalState) -> bool {
     let flags = acked_flags(s);
     let m = CrashModel::of(s.written, s.synced);
-    (0..=(s.written.saturating_add(2))).all(|cut| {
-        d1_modelo(s, s.acked, cut) && (!crash_legal(m, cut) || d1_holds(&flags, cut as usize))
-    })
+    // Index `while` (not `Iterator::all`) so Charon/Aeneas emit a `def`.
+    let last = s.written.saturating_add(2);
+    let mut cut = 0u64;
+    loop {
+        if !d1_modelo(s, s.acked, cut) || (crash_legal(m, cut) && !d1_holds(&flags, cut as usize)) {
+            return false;
+        }
+        if cut == last {
+            return true;
+        }
+        cut = cut.saturating_add(1);
+    }
 }
 
 /// AS-IS twin: the same crown over the barrier-less ack geometry —
@@ -58,9 +77,19 @@ pub fn product_crown(s: &WalState) -> bool {
 pub fn product_crown_as_is(s: &WalState) -> bool {
     let flags = acked_flags(s);
     let m = CrashModel::of(s.written, s.synced);
-    (0..=(s.written.saturating_add(2))).all(|cut| {
-        d1_modelo_as_is(s, s.acked, cut) && (!crash_legal(m, cut) || d1_holds(&flags, cut as usize))
-    })
+    let last = s.written.saturating_add(2);
+    let mut cut = 0u64;
+    loop {
+        if !d1_modelo_as_is(s, s.acked, cut)
+            || (crash_legal(m, cut) && !d1_holds(&flags, cut as usize))
+        {
+            return false;
+        }
+        if cut == last {
+            return true;
+        }
+        cut = cut.saturating_add(1);
+    }
 }
 
 #[cfg(test)]

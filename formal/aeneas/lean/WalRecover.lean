@@ -338,11 +338,11 @@ theorem recover_collect_act_fate_iff :
         subst hv
         rfl
 
-/-- RFC-0218 P0.2 1/4 (atom `catalog:from_record_type`): the type of
-    fragmento is EXACTLY the bijection total of the RecordType of the wire —
-    each the of the 5 types mapeia for the its FragKind, without third
-    destination. The AS-IS reclassifica First the Middle (tooth: fragmento
-    of start becomes middle — the plants on-wire refuses). -/
+/-- RFC-0218 P0.2 1/4 (atom `catalog:from_record_type`): o tipo de
+    fragmento é EXATAMENTE a bijeção total do RecordType do wire —
+    cada um dos 5 tipos mapeia para o seu FragKind, sem terceiro
+    destino. O AS-IS reclassifica First como Middle (tooth: fragmento
+    de início vira meio — a planta on-wire recusa). -/
 theorem from_record_type_fate_iff :
     ∀ (t : format.RecordType) (f : recover_kernel.FragKind),
       (recover_kernel.FragKind.from_record_type t = ok f) ↔
@@ -414,12 +414,12 @@ theorem from_record_type_fate_iff :
       · subst hv
         rfl
 
-/-- RFC-0218 P0.2 2/4 (atom `catalog:is_length_resyncable`): the
-    classe of resync is EXACTLY the trio of damage of length
-    (Truncated/LengthCorrupt/UnknownType) — the six demais types never
-    are resyncable by length. The AS-IS promotes Crc the
-    length-resyncable (misclassification that the fixo refuses — tooth
-    planted). -/
+/-- RFC-0218 P0.2 2/4 (atom `catalog:is_length_resyncable`): a
+    classe de resync é EXATAMENTE o trio de dano de comprimento
+    (Truncated/LengthCorrupt/UnknownType) — os seis demais tipos nunca
+    são resyncable por comprimento. O AS-IS promove Crc a
+    length-resyncable (misclassificação que o fixo recusa — tooth
+    plantado). -/
 theorem is_length_resyncable_fate_iff :
     ∀ (kind : recover_kernel.RecoverKind) (v : Bool),
       (recover_kernel.is_length_resyncable kind = ok v) ↔
@@ -579,12 +579,12 @@ theorem is_length_resyncable_fate_iff :
       · exact absurd h8.1 (fun h => recover_kernel.RecoverKind.noConfusion h)
       · subst hv
         rfl
-/-- RFC-0218 P0.2 3/4 (atom `catalog:physical_payload_act`): the
-    guard physical of the payload is EXACTLY the tree of three ifs —
-    length beyond the maximum → FailStop; end beyond the block →
-    FailStop at the physical end of the block, Truncated in the middle; inside the
-    block → Continue. The AS-IS returns CleanEof in place of the FailStop
-    (silent EOF of physical damage — tooth planted). -/
+/-- RFC-0218 P0.2 3/4 (atom `catalog:physical_payload_act`): o
+    guarda físico do payload é EXATAMENTE a árvore de três ifs —
+    comprimento além do máximo → FailStop; fim além do bloco →
+    FailStop no fim físico do bloco, Truncated no meio; dentro do
+    bloco → Continue. O AS-IS devolve CleanEof no lugar do FailStop
+    (EOF silencioso de dano físico — tooth plantado). -/
 theorem physical_payload_act_fate_iff :
     ∀ (length max_payload payload_end block_end block_size : Std.U64)
       (act : recover_kernel.PhysicalAct),
@@ -635,12 +635,12 @@ theorem physical_payload_act_fate_iff :
       subst hv
       rfl
 
-/-- RFC-0218 P0.2 4/4 (atom `catalog:fragment_act`): the destination of the
-    fragmento is EXACTLY the table complete FragKind ×
-    scratch_empty — Full produces, First starts, Middle/Last orphan
-    (scratch empty) fail-stopa em time de acumular/produzir, Middle
-    cheio acumula, Last cheio produces, Zero skips. The AS-IS returns
-    CleanEof for the orphan (EOF silencioso — tooth planted). -/
+/-- RFC-0218 P0.2 4/4 (atom `catalog:fragment_act`): o destino do
+    fragmento é EXATAMENTE a tabela completa FragKind ×
+    scratch_empty — Full produz, First começa, Middle/Last órfão
+    (scratch vazio) fail-stopa em vez de acumular/produzir, Middle
+    cheio acumula, Last cheio produz, Zero pula. O AS-IS devolve
+    CleanEof para o órfão (EOF silencioso — tooth plantado). -/
 theorem fragment_act_fate_iff :
     ∀ (kind : recover_kernel.FragKind) (scratch_empty : Bool)
       (act : recover_kernel.FragAct),

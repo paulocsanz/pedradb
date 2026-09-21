@@ -227,7 +227,11 @@ pub fn column_a_three_round_min_slice(
             gated: COLUMN_A_SHAPES.len(),
         };
     }
-    let mut arr: [BTreeMap<String, f64>; 3] = [BTreeMap::new(), BTreeMap::new(), BTreeMap::new()];
+    let mut arr: [BTreeMap<String, f64>; 3] = [
+        BTreeMap::new(),
+        BTreeMap::new(),
+        BTreeMap::new(),
+    ];
     for (i, r) in rounds.iter().enumerate() {
         arr[i] = r.clone();
     }
@@ -460,9 +464,7 @@ mod tests {
         let v = column_a_one_round(&r, Some(270_000.0));
         assert!(!v.pass);
         assert!(
-            v.fails
-                .iter()
-                .any(|(s, r)| s == "deps_raftlog" && *r == 0.0),
+            v.fails.iter().any(|(s, r)| s == "deps_raftlog" && *r == 0.0),
             "{:?}",
             v.fails
         );

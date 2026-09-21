@@ -1,0 +1,4 @@
+path=crates/pedradb-core/src/wal_ticket_kernel.rs
+sha256=abf5824e7d8cc31fd33345655873c5c67ddb2dc03e77f5a07adbf1c1ecc3db0c
+aeneas=f5a4c58-dirty
+charon=0.1.232

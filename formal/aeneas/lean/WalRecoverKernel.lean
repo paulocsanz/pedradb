@@ -26,17 +26,17 @@ axiom Isize.Insts.CoreHashHash.hash
   {H : Type} (HasherInst : core.hash.Hasher H) : Std.Isize → H → Result H
 
 /-- [pedra_aeneas_wal_recover_kernel::format::BLOCK_SIZE]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 12:0-12:37
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 12:0-12:37
     Visibility: public -/
 @[global_simps, irreducible] def format.BLOCK_SIZE : Std.Usize := 32768#usize
 
 /-- [pedra_aeneas_wal_recover_kernel::format::HEADER_SIZE]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 15:0-15:33
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 15:0-15:33
     Visibility: public -/
 @[global_simps, irreducible] def format.HEADER_SIZE : Std.Usize := 7#usize
 
 /-- [pedra_aeneas_wal_recover_kernel::format::RecordType]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 21:0-32:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 21:0-32:1
     Visibility: public -/
 @[discriminant u8]
 inductive format.RecordType where
@@ -47,7 +47,7 @@ inductive format.RecordType where
 | Last : format.RecordType
 
 /-- [pedra_aeneas_wal_recover_kernel::format::{impl core::fmt::Debug for pedra_aeneas_wal_recover_kernel::format::RecordType}::fmt]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 19:9-19:14
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 19:9-19:14
     Visibility: public -/
 def format.RecordType.Insts.CoreFmtDebug.fmt
   (self : format.RecordType) (f : core.fmt.Formatter) :
@@ -61,7 +61,7 @@ def format.RecordType.Insts.CoreFmtDebug.fmt
   | format.RecordType.Last => core.fmt.Formatter.write_str f (toStr "Last")
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::format::{impl core::fmt::Debug for pedra_aeneas_wal_recover_kernel::format::RecordType}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 19:9-19:14 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 19:9-19:14 -/
 @[reducible]
 def format.RecordType.Insts.CoreFmtDebug : core.fmt.Debug format.RecordType
   := {
@@ -69,14 +69,14 @@ def format.RecordType.Insts.CoreFmtDebug : core.fmt.Debug format.RecordType
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::format::{impl core::clone::Clone for pedra_aeneas_wal_recover_kernel::format::RecordType}::clone]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 19:16-19:21
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 19:16-19:21
     Visibility: public -/
 def format.RecordType.Insts.CoreCloneClone.clone
   (self : format.RecordType) : Result format.RecordType := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::format::{impl core::clone::Clone for pedra_aeneas_wal_recover_kernel::format::RecordType}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 19:16-19:21 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 19:16-19:21 -/
 @[reducible]
 def format.RecordType.Insts.CoreCloneClone : core.clone.Clone format.RecordType
   := {
@@ -84,7 +84,7 @@ def format.RecordType.Insts.CoreCloneClone : core.clone.Clone format.RecordType
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::format::{impl core::marker::Copy for pedra_aeneas_wal_recover_kernel::format::RecordType}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 19:23-19:27 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 19:23-19:27 -/
 @[reducible]
 def format.RecordType.Insts.CoreMarkerCopy : core.marker.Copy format.RecordType
   := {
@@ -92,14 +92,14 @@ def format.RecordType.Insts.CoreMarkerCopy : core.marker.Copy format.RecordType
 }
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::format::{impl core::marker::StructuralPartialEq for pedra_aeneas_wal_recover_kernel::format::RecordType}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 19:29-19:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 19:29-19:38 -/
 @[reducible]
 def format.RecordType.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq format.RecordType := {
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::format::{impl core::cmp::PartialEq<pedra_aeneas_wal_recover_kernel::format::RecordType> for pedra_aeneas_wal_recover_kernel::format::RecordType}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 19:29-19:38
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 19:29-19:38
     Visibility: public -/
 def format.RecordType.Insts.CoreCmpPartialEqRecordType.eq
   (self : format.RecordType) (other : format.RecordType) : Result Bool := do
@@ -108,7 +108,7 @@ def format.RecordType.Insts.CoreCmpPartialEqRecordType.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::format::{impl core::cmp::PartialEq<pedra_aeneas_wal_recover_kernel::format::RecordType> for pedra_aeneas_wal_recover_kernel::format::RecordType}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 19:29-19:38 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 19:29-19:38 -/
 @[reducible]
 def format.RecordType.Insts.CoreCmpPartialEqRecordType : core.cmp.PartialEq
   format.RecordType format.RecordType := {
@@ -116,14 +116,14 @@ def format.RecordType.Insts.CoreCmpPartialEqRecordType : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::format::{impl core::cmp::Eq for pedra_aeneas_wal_recover_kernel::format::RecordType}::assert_fields_are_eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 19:40-19:42
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 19:40-19:42
     Visibility: public -/
 def format.RecordType.Insts.CoreCmpEq.assert_fields_are_eq
   (self : format.RecordType) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_wal_recover_kernel::format::{impl core::cmp::Eq for pedra_aeneas_wal_recover_kernel::format::RecordType}]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 19:40-19:42 -/
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 19:40-19:42 -/
 @[reducible]
 def format.RecordType.Insts.CoreCmpEq : core.cmp.Eq format.RecordType := {
   partialEqInst := format.RecordType.Insts.CoreCmpPartialEqRecordType
@@ -132,7 +132,7 @@ def format.RecordType.Insts.CoreCmpEq : core.cmp.Eq format.RecordType := {
 }
 
 /-- [pedra_aeneas_wal_recover_kernel::format::{pedra_aeneas_wal_recover_kernel::format::RecordType}::from_byte]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 37:4-46:5
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 37:4-46:5
     Visibility: public -/
 def format.RecordType.from_byte
   (byte : Std.U8) : Result (Option format.RecordType) := do
@@ -145,7 +145,7 @@ def format.RecordType.from_byte
   | _ => ok none
 
 /-- [pedra_aeneas_wal_recover_kernel::format::decode_length]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 51:0-53:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 51:0-53:1
     Visibility: public -/
 def format.decode_length
   (bytes : Array Std.U8 2#usize) : Result Std.Usize := do
@@ -153,7 +153,7 @@ def format.decode_length
   ok (UScalar.cast .Usize i)
 
 /-- [pedra_aeneas_wal_recover_kernel::format::decode_crc]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 57:0-59:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/format_kernel.rs', lines 57:0-59:1
     Visibility: public -/
 def format.decode_crc (bytes : Array Std.U8 4#usize) : Result Std.U32 := do
   ok (core.num.U32.from_le_bytes bytes)

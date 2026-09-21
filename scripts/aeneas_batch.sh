@@ -17,7 +17,7 @@ if [[ -z "$CHARON" || -z "$AENEAS" ]]; then
   echo "skip  $msg"; exit 0
 fi
 mkdir -p "$OUT"
-SRC="$ROOT/crates/pedradb-core/src/batch.rs"
+SRC="$ROOT/crates/pedradb-core/src/batch_kernel.rs"
 echo "      charon=$CHARON"
 ( cd "$CRATE" && "$CHARON" cargo --preset=aeneas \
     --start-from 'crate::batch::write_record_count_ok' \
@@ -25,7 +25,7 @@ echo "      charon=$CHARON"
     --dest-file "$OUT/batch_kernel.llbc" )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/batch_kernel.llbc"
 {
-  echo "path=crates/pedradb-core/src/batch.rs"
+  echo "path=crates/pedradb-core/src/batch_kernel.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"
   echo "aeneas=$("$AENEAS" -version 2>/dev/null | awk '{print $NF}')"
   echo "charon=$("$CHARON" version 2>/dev/null | head -1)"

@@ -9,4 +9,4 @@ publish = false
 description = "Standalone crate whose [lib] path is production leveling.rs"
 
 [lib]
-path = "../../../crates/pedradb-core/src/leveling.rs"
+path = "../../../crates/pedradb-core/src/leveling_kernel.rs"
