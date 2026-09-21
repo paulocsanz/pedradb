@@ -1,7 +1,7 @@
 //! Pure changelog SST-rebuild gate (RFC-0002 P22 / F53).
 //!
 //! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). No twin copy.
+//! proves (`cfg(verus_keep_ghost)`). No twin-copy.
 //!
 //!   ./scripts/verus_changelog_rebuild.sh
 //!
@@ -437,13 +437,28 @@ pub fn changelog_rebuild_within_budget_as_is(live_entries: u64, budget_entries: 
     changelog_rebuild_within_budget_as_is_body!(live_entries, budget_entries)
 }
 
+pub open spec fn changelog_flush_store_now_spec(
+    disk_behind: bool, flushes_since_store: u64, debounce_flushes: u64,
+    archives: u64, archive_cap: u64,
+) -> bool {
+    disk_behind
+        && (flushes_since_store >= debounce_flushes || archives >= archive_cap)
+}
+
+pub open spec fn wal_rotate_archives_spec(
+    disk_behind: bool, archives: u64, archive_cap: u64,
+) -> bool {
+    disk_behind && archives < archive_cap
+}
+
 pub fn changelog_flush_store_now(
     disk_behind: bool, flushes_since_store: u64, debounce_flushes: u64,
     archives: u64, archive_cap: u64,
 ) -> (d: bool)
     ensures
-        d == (disk_behind
-            && (flushes_since_store >= debounce_flushes || archives >= archive_cap)),
+        d == changelog_flush_store_now_spec(
+            disk_behind, flushes_since_store, debounce_flushes, archives, archive_cap
+        ),
         d ==> disk_behind,
 {
     changelog_flush_store_now_body!(
@@ -453,7 +468,7 @@ pub fn changelog_flush_store_now(
 
 pub fn wal_rotate_archives(disk_behind: bool, archives: u64, archive_cap: u64) -> (d: bool)
     ensures
-        d == (disk_behind && archives < archive_cap),
+        d == wal_rotate_archives_spec(disk_behind, archives, archive_cap),
         d ==> disk_behind,
         d ==> archives < archive_cap,
 {
@@ -462,18 +477,18 @@ pub fn wal_rotate_archives(disk_behind: bool, archives: u64, archive_cap: u64) -
 
 proof fn lemma_archive_chain_forces_store()
     ensures
-        changelog_flush_store_now(true, 0, 64, 64, 64),
-        changelog_flush_store_now(true, 64, 64, 0, 64),
-        !changelog_flush_store_now(true, 63, 64, 63, 64),
-        !changelog_flush_store_now(false, u64::MAX, 64, u64::MAX, 64),
+        changelog_flush_store_now_spec(true, 0, 64, 64, 64),
+        changelog_flush_store_now_spec(true, 64, 64, 0, 64),
+        !changelog_flush_store_now_spec(true, 63, 64, 63, 64),
+        !changelog_flush_store_now_spec(false, u64::MAX, 64, u64::MAX, 64),
 {
 }
 
 proof fn lemma_full_chain_never_archives()
     ensures
-        !wal_rotate_archives(true, 64, 64),
-        wal_rotate_archives(true, 63, 64),
-        !wal_rotate_archives(false, 0, 64),
+        !wal_rotate_archives_spec(true, 64, 64),
+        wal_rotate_archives_spec(true, 63, 64),
+        !wal_rotate_archives_spec(false, 0, 64),
 {
 }
 
@@ -704,7 +719,8 @@ mod tests {
         // debounce gate is no longer an inline sync-resolution if (the
         // do_sync resolution feeding wal_commit_plan stays — that is the
         // write-admission family's own call).
-        let coc = named_fn_src(include_str!("db.rs"), "commit_ops_with").expect("commit_ops_with");
+        let coc =
+            named_fn_src(include_str!("db_kernel.rs"), "commit_ops_with").expect("commit_ops_with");
         assert!(
             coc.contains("match crate::changelog_kernel::changelog_durable_commit_fate("),
             "commit_ops_with must match changelog_durable_commit_fate"
@@ -736,7 +752,7 @@ mod tests {
             ChangelogStorePlan::StoreFeed,
             "AS-IS tooth: stores with the publish failed"
         );
-        let csp = named_fn_src(include_str!("db.rs"), "changelog_store_point")
+        let csp = named_fn_src(include_str!("db_kernel.rs"), "changelog_store_point")
             .expect("changelog_store_point");
         assert!(
             csp.contains("match crate::changelog_kernel::changelog_store_plan("),
@@ -745,6 +761,18 @@ mod tests {
         assert!(
             !csp.contains("persist_manifest_durable().is_ok() {"),
             "the raw publish gate left the trampoline"
+        );
+        // RFC-0219 P2.1 drain: the group_apply debounce matches the
+        // same kernel fate as commit_ops_with (P0.1), no raw
+        // wal_sync_required gate left in the trampoline.
+        let ga = named_fn_src(include_str!("db_kernel.rs"), "group_apply").expect("group_apply");
+        assert!(
+            ga.contains("match crate::changelog_kernel::changelog_durable_commit_fate("),
+            "group_apply matches changelog_durable_commit_fate"
+        );
+        assert!(
+            !ga.contains("wal_sync_required(true, any_sync, false)"),
+            "the raw debounce gate left the group_apply trampoline"
         );
     }
 
@@ -771,7 +799,7 @@ mod tests {
         );
         // Live: delete_wal_archives matches the kernel plan; the raw
         // seq comparison left the trampoline.
-        let dwa = named_fn_src(include_str!("db.rs"), "delete_wal_archives")
+        let dwa = named_fn_src(include_str!("db_kernel.rs"), "delete_wal_archives")
             .expect("delete_wal_archives");
         assert!(
             dwa.contains("match crate::changelog_kernel::wal_archive_delete_plan("),

@@ -11,7 +11,7 @@ pub mod error {
     pub type Result<T> = std::result::Result<T, CoreError>;
 }
 
-#[path = "../../../../crates/pedradb-core/src/key.rs"]
+#[path = "../../../../crates/pedradb-core/src/key_kernel.rs"]
 pub mod key;
 
 pub use key::*;

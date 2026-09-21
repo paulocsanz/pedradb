@@ -1,0 +1,797 @@
+-- Theorems over Aeneas extract of raft membership_kernel.rs (Raft §6).
+-- elect_claim_banner &'static str bottoms patched to toStr in aeneas_membership.sh.
+import Aeneas
+import MembershipKernel
+open Aeneas.Std Result
+open pedra_aeneas_membership_kernel
+open pedra_aeneas_membership_kernel.membership_kernel
+
+/-- Catalog entry: C-old majority is not enough during joint add. -/
+theorem joint_election_ok_needs_both :
+    joint_election_ok (2#u64) (3#u64) (some (2#u64, 4#u64)) = ok false := by
+  unfold joint_election_ok
+  unfold majority_of
+  rfl
+
+/-- AS-IS tooth: C-old majority elects during joint add. -/
+theorem joint_election_ok_as_is_tooth :
+    joint_election_ok_as_is (2#u64) (3#u64) (some (2#u64, 4#u64)) = ok true := by
+  unfold joint_election_ok_as_is
+  unfold majority_of
+  rfl
+
+/-- RFC-0069: liveness is admitted EXACTLY when all three ES flags hold. -/
+theorem liveness_admitted_fate_iff :
+    ∀ (es1 es2 es3 v : Bool),
+      (liveness_admitted es1 es2 es3 = ok v) ↔
+        (v = (es1 && es2 && es3)) := by
+  intro es1 es2 es3 v
+  unfold liveness_admitted
+  cases es1 <;> cases es2 <;> cases es3 <;> cases v <;> simp
+
+/-- RFC-0229 P1.3: ES-1∧ES-2∧ES-3 of `tcp_node_model` (Stateright keeps
+    the refutation tooth). Dual-unfold of the rustc kernel. -/
+def tcp_node_es (es1 es2 es3 : Bool) : Prop :=
+  es1 = true ∧ es2 = true ∧ es3 = true
+
+theorem liveness_admitted_under_es123 :
+    liveness_admitted true true true = ok true := by
+  unfold liveness_admitted
+  rfl
+
+theorem liveness_refused_without_any_es :
+    liveness_admitted false true true = ok false ∧
+      liveness_admitted true false true = ok false ∧
+      liveness_admitted true true false = ok false := by
+  unfold liveness_admitted
+  simp
+
+/-- Eventual-election claim of the TCP-node model holds only under ES. -/
+theorem tcp_node_eventual_election_under_es :
+    ∀ (es1 es2 es3 : Bool),
+      tcp_node_es es1 es2 es3 →
+        liveness_admitted es1 es2 es3 = ok true := by
+  intro es1 es2 es3 h
+  rcases h with ⟨h1, h2, h3⟩
+  subst h1; subst h2; subst h3
+  unfold liveness_admitted
+  rfl
+
+theorem tcp_node_eventual_election_refused_without_es :
+    ∀ (es1 es2 es3 : Bool),
+      ¬ tcp_node_es es1 es2 es3 →
+        liveness_admitted es1 es2 es3 = ok false := by
+  intro es1 es2 es3 h
+  unfold tcp_node_es at h
+  unfold liveness_admitted
+  cases es1 <;> cases es2 <;> cases es3 <;> simp_all
+
+/-- RFC-0069 P2.2: bounded elect does not print live. -/
+theorem elect_claim_banner_bounded :
+    elect_claim_banner false false false =
+      ok (toStr "bounded-elect not-eventual") := by
+  unfold elect_claim_banner
+  unfold liveness_admitted
+  simp
+
+/-- AS-IS tooth: banner is live without naming ES. -/
+theorem elect_claim_banner_as_is_tooth :
+    elect_claim_banner_as_is false false false = ok (toStr "live") := by
+  unfold elect_claim_banner_as_is
+  simp
+
+/-! ## RFC-0191 P1.4 — C1 close: ∀ contagens + Option joint -/
+
+/-- Maioria como função pura (a mesma conta do kernel `majority_of`:
+1 quando a configuração está vazia, `n/2+1` senão), fora do monoide
+`Result`, para servir de enunciado fechado. -/
+def maj (n : U64) : U64 :=
+  if n = 0#u64 then 1#u64 else UScalar.mk (n.bv / 2#64 + 1#64)
+
+private theorem ge_true_of_not_lt {x y : U64} (h : ¬ x < y) :
+    ((x >= y) : Bool) = true := by
+  have hn : ¬ (x.val < y.val) := by simpa using h
+  simp only [decide_eq_true_eq, ge_iff_le, UScalar.le_equiv]
+  omega
+
+private theorem ge_false_of_lt {x y : U64} (h : x < y) :
+    ((x >= y) : Bool) = false := by
+  have hn : x.val < y.val := by simpa using h
+  simp only [decide_eq_false_iff_not, ge_iff_le, UScalar.le_equiv]
+  omega
+
+private theorem add_one_ne (i : U64) (h : i.val + (1#u64).val ≤ U64.max) :
+    i + 1#u64 = ok (UScalar.mk (i.bv + 1#64) : U64) := by
+  obtain ⟨z, hz, -, hbv⟩ :=
+    Aeneas.Std.WP.spec_imp_exists (U64.add_bv_spec h)
+  rw [hz]
+  have hbv' : z.bv = i.bv + 1#64 := hbv
+  cases z; simp_all
+
+/-- O kernel `majority_of` é total e coincide com a forma pura `maj`. -/
+theorem majority_of_closed (n : U64) :
+    majority_of n = ok (maj n) := by
+  unfold majority_of
+  split
+  · rename_i h0
+    show ok 1#u64 = ok (maj n)
+    unfold maj
+    rw [if_pos h0]
+  · rename_i h0
+    obtain ⟨z, hz, hzval, hbv⟩ :=
+      UScalar.div_bv_spec n (y := 2#u64) (by decide)
+    rw [hz]
+    simp only [bind_tc_ok]
+    have hbound : z.val + (1#u64).val ≤ U64.max := by
+      rw [U64.max_eq]
+      have h1 : (1#u64).val = 1 := by rfl
+      have h2 := U64.lt_succ_max n
+      have h3 : z.val = n.val / 2 := by rw [hzval]; rfl
+      rw [h3, h1]
+      omega
+    rw [add_one_ne z hbound]
+    unfold maj
+    rw [if_neg h0]
+    have hbv' : U64.bv z = n.bv / 2#64 := hbv
+    rw [hbv']
+
+/-- C1 (RFC-0191 P1.4, close): para todas as contagens de votos e todo o
+`Option` do joint, a eleição conjunta devolve `ok true` exatamente quando
+C-old tem maioria E (não há joint pentooth OU C-new também tem maioria).
+Não é o corpo do kernel re-afirmado: o lado direito é a especificação
+fechada sobre a maioria pura `maj`. -/
+theorem c1_joint_election :
+    ∀ (old_yes old_n : U64) (new_yes : Option (U64 × U64)),
+      joint_election_ok old_yes old_n new_yes =
+        ok ((old_yes >= maj old_n) &&
+            (match new_yes with
+             | none => true
+             | some p => p.1 >= maj p.2)) := by
+  intro old_yes old_n new_yes
+  unfold joint_election_ok
+  rw [majority_of_closed]
+  simp only [bind_tc_ok]
+  split
+  · rename_i hlt
+    rw [ge_false_of_lt hlt, Bool.false_and]
+  · rename_i hge
+    rw [ge_true_of_not_lt hge, Bool.true_and]
+    cases new_yes with
+    | none => rfl
+    | some p =>
+      obtain ⟨yes, hn⟩ := p
+      simp only [majority_of_closed, bind_tc_ok]
+      rfl
+
+/-- RFC-0191 P1.4, corolário: maioria de C-old sozinha NÃO elege
+enquanto o joint está pentooth — falta a maioria de C-new, ∀ contagens. -/
+theorem c1_old_majority_alone_refuses :
+    ∀ (old_yes old_n yes n : U64),
+      ¬ (old_yes < maj old_n) → (yes < maj n) →
+        joint_election_ok old_yes old_n (some (yes, n)) = ok false := by
+  intro old_yes old_n yes n hold hnew
+  rw [c1_joint_election]
+  show ok ((old_yes >= maj old_n) && (yes >= maj n)) = ok false
+  rw [ge_true_of_not_lt hold, ge_false_of_lt hnew, Bool.true_and]
+
+/-- RFC-0191 P1.4, corolário: ambas as maiorias elegem, ∀ contagens. -/
+theorem c1_both_majorities_elect :
+    ∀ (old_yes old_n yes n : U64),
+      ¬ (old_yes < maj old_n) → ¬ (yes < maj n) →
+        joint_election_ok old_yes old_n (some (yes, n)) = ok true := by
+  intro old_yes old_n yes n hold hnew
+  rw [c1_joint_election]
+  show ok ((old_yes >= maj old_n) && (yes >= maj n)) = ok true
+  rw [ge_true_of_not_lt hold, ge_true_of_not_lt hnew, Bool.true_and]
+
+/-- AS-IS ∀ (RFC-0191 P1.4): durante o joint, o mutante elege com a
+maioria de C-old sozinha — C-new nunca é consultado, qualquer que seja
+o `Option` do joint. -/
+theorem c1_as_is_elects_on_old_alone :
+    ∀ (old_yes old_n : U64) (new_yes : Option (U64 × U64)),
+      joint_election_ok_as_is old_yes old_n new_yes =
+        ok ((old_yes >= maj old_n) : Bool) := by
+  intro old_yes old_n new_yes
+  unfold joint_election_ok_as_is
+  rw [majority_of_closed]
+  simp only [bind_tc_ok]
+
+/-- Catalog entry: an uncommitted leave finishes exactly when the leave
+    entry is not in the log, or it is already committed
+    (RFC-0122/0123 — a leave still in the log and uncommitted does not
+    finish). -/
+theorem queued_leave_finish_ok_iff_not_in_log_or_committed :
+    ∀ (leave_in_log : Bool) (leave_committed : Bool),
+      (queued_leave_finish_ok leave_in_log leave_committed = ok true)
+        ↔ (leave_in_log = false ∨ leave_committed = true) := by
+  intro leave_in_log leave_committed
+  unfold queued_leave_finish_ok
+  constructor
+  · intro h
+    split at h
+    · next c1 =>
+      simp at h
+      exact Or.inr h
+    · next c1 => exact Or.inl (by simp at c1; exact c1)
+  · rintro (h1 | hc)
+    · rw [if_neg (by simp [h1])]
+    · split
+      · next _ => rw [hc]
+      · rfl
+
+/-- Catalog entry: an election grant from a node counts exactly when
+    the node is in the id set, or it is in the pending old-or-new joint
+    set (RFC-0114/0116 — a node in neither set never grants). -/
+theorem election_grant_from_counts_ok_iff_ids_or_pending :
+    ∀ (in_ids : Bool) (in_pending_old_or_new : Bool),
+      (election_grant_from_counts in_ids in_pending_old_or_new = ok true)
+        ↔ (in_ids = true ∨ in_pending_old_or_new = true) := by
+  intro in_ids in_pending
+  unfold election_grant_from_counts
+  constructor
+  · intro h
+    split at h
+    · next c1 =>
+      exact Or.inl c1
+    · next c1 =>
+      simp at h
+      exact Or.inr h
+  · rintro (hc | hc)
+    · rw [if_pos hc]
+    · split
+      · next _ => rfl
+      · next _ => rw [hc]
+
+/-- Catalog entry: the joint election elects exactly when C-old has
+    majority AND (no joint is pending, or C-new also has majority)
+    (F-L28/RFC-0064 — one side alone never elects). -/
+theorem joint_election_ok_elects_iff_old_and_new_majority :
+    ∀ (old_yes old_n : U64) (new_yes : Option (U64 × U64)),
+      (joint_election_ok old_yes old_n new_yes = ok true)
+        ↔ (((old_yes >= maj old_n) &&
+            (match new_yes with
+             | none => true
+             | some p => p.1 >= maj p.2)) : Bool) = true := by
+  intro old_yes old_n new_yes
+  rw [c1_joint_election]
+  simp
+
+/-- RFC-0205 P1.2 (first data-fate cadence promotion, atom
+    `catalog:recover_apply`): recovery re-applies EXACTLY when the
+    commit index is beyond applied (a committed entry not yet applied
+    is never skipped, and an already-applied one is never replayed) —
+    the fate forall over the extracted pure-lift body; the AS-IS
+    `ok false` mutant skips everything. -/
+theorem recover_must_apply_fate_iff :
+    ∀ (applied : U64) (commit : U64) (v : Bool),
+      (recover_must_apply applied commit = ok v) ↔
+        ((v = true ∧ commit > applied)
+          ∨ (v = false ∧ ¬(commit > applied))) := by
+  intro applied commit v
+  unfold recover_must_apply
+  cases hd : decide (commit > applied) with
+  | true =>
+    have hP := of_decide_eq_true hd
+    cases v <;> simp [hP]
+  | false =>
+    have hnP := of_decide_eq_false hd
+    cases v <;> simp [hnP]
+
+/-- RFC-0205 P1.2 (second data-fate cadence promotion, atom
+    `catalog:recover_drop_orphan`): recovery drops an orphan segment
+    EXACTLY when its index is beyond the new inventory high-water (a
+    segment outside the committed inventory is never kept; one inside
+    is never dropped) — fate forall over the extracted pure-lift body;
+    the AS-IS `ok false` mutant keeps every orphan. -/
+theorem recover_drop_orphan_seg_fate_iff :
+    ∀ (seg_index : U64) (new_hi : U64) (v : Bool),
+      (recover_drop_orphan_seg seg_index new_hi = ok v) ↔
+        ((v = true ∧ seg_index > new_hi)
+          ∨ (v = false ∧ ¬(seg_index > new_hi))) := by
+  intro seg_index new_hi v
+  unfold recover_drop_orphan_seg
+  cases hd : decide (seg_index > new_hi) with
+  | true =>
+    have hP := of_decide_eq_true hd
+    cases v <;> simp [hP]
+  | false =>
+    have hnP := of_decide_eq_false hd
+    cases v <;> simp [hnP]
+
+/-- RFC-0208 P1.2 (membership cadence promotion 1/4, atom
+    `catalog:removed_step_down`): a node removed from the committed
+    membership steps down EXACTLY when its id left the id set — the
+    node that stayed never steps down, the removed one always does —
+    fate forall over the extracted pure-lift body; the AS-IS
+    `ok false` mutant never steps down (a removed leader keeps
+    leading). -/
+theorem removed_steps_down_fate_iff :
+    ∀ (in_ids : Bool) (v : Bool),
+      (removed_steps_down in_ids = ok v) ↔
+        ((v = true ∧ ¬ (in_ids = true))
+          ∨ (v = false ∧ in_ids = true)) := by
+  intro in_ids v
+  unfold removed_steps_down
+  cases in_ids <;> cases v <;> simp
+
+/-- RFC-0208 P1.2 (membership cadence promotion 2/4, atom
+    `catalog:disk_membership`): the cluster identity bound at reopen
+    is the DISK one EXACTLY when a disk membership exists — the CLI
+    flag never overrides a persisted membership — fate forall over
+    the extracted pure-lift body; the AS-IS `ok false` mutant always
+    lets the CLI win (split-brain on reopen). -/
+theorem disk_membership_overrides_cli_fate_iff :
+    ∀ (has_disk : Bool) (v : Bool),
+      (disk_membership_overrides_cli has_disk = ok v) ↔
+        ((v = true ∧ has_disk = true)
+          ∨ (v = false ∧ has_disk = false)) := by
+  intro has_disk v
+  unfold disk_membership_overrides_cli
+  cases has_disk <;> cases v <;> simp
+
+/-- RFC-0208 P1.2 (membership cadence promotion 3/4, atom
+    `catalog:high_water`): the inventory high-water after reopen is
+    the MAX of disk and ram EXACTLY — the trait-default `Ord::max`
+    over the U64 order — fate forall over the extracted body; the
+    AS-IS mutant keeps the ram value and can LOSE committed
+    inventory (a durable high-water below the in-memory one). -/
+theorem high_water_at_least_fate_iff :
+    ∀ (disk_hw ram_hw : U64) (v : U64),
+      (high_water_at_least disk_hw ram_hw = ok v) ↔
+        ((v = ram_hw ∧ disk_hw < ram_hw)
+          ∨ (v = disk_hw ∧ ¬ (disk_hw < ram_hw))) := by
+  intro disk_hw ram_hw v
+  have hsem : ∀ (x y : U64),
+      core.cmp.OrdU64.partialOrdInst.lt x y = ok (decide (x < y)) := fun x y => rfl
+  unfold high_water_at_least core.cmp.Ord.max.default core.cmp.Ord.max_body
+  rw [hsem]
+  cases hd : decide (disk_hw < ram_hw) with
+  | true =>
+    have hP : disk_hw < ram_hw := of_decide_eq_true hd
+    simp [hd, hP]
+    exact eq_comm
+  | false =>
+    have hnP : ¬ (disk_hw < ram_hw) := of_decide_eq_false hd
+    simp [hd, hnP]
+    exact eq_comm
+
+/-- RFC-0208 P1.2 (membership cadence promotion 4/4, atom
+    `catalog:joint_leave`): the joint configuration is still active
+    EXACTLY when the old and new id slices DIFFER (elementwise
+    U64 equality) — a joint that already converged to the new set is
+    gone — fate forall over the extracted body, bridged through the
+    Aeneas spec theorems (`PartialEqSlice.eq_homo_spec` +
+    `spec_imp_exists`; the scalar `ne` is a pure lift); the AS-IS
+    `ok false` mutant declares every joint dead on sight. -/
+theorem joint_still_active_fate_iff :
+    ∀ (old new : Slice U64) (v : Bool),
+      (joint_still_active old new = ok v) ↔
+        ((v = true ∧ old ≠ new)
+          ∨ (v = false ∧ old = new)) := by
+  intro old new v
+  have hNe : ∀ (x y : U64), WP.spec (core.cmp.PartialEqU64.ne x y)
+      (fun b => b ↔ ¬ (x = y)) := by
+    intro x y
+    simp only [core.cmp.PartialEqU64, liftFun2]
+    exact (WP.spec_ok _).2 (by simp)
+  have heq := core.slice.cmp.PartialEqSlice.eq_homo_spec
+    core.cmp.PartialEqU64 old new hNe
+  obtain ⟨beq, rheq, hbeq⟩ := WP.spec_imp_exists heq
+  unfold joint_still_active
+  simp only [core.cmp.impls.PartialEqShared.ne,
+             Slice.Insts.CoreCmpPartialEqSlice,
+             core.cmp.PartialEq.ne.trait_default,
+             core.cmp.PartialEq.ne.default]
+  rw [rheq]
+  cases beq with
+  | true =>
+    have he : old = new := hbeq.mp rfl
+    cases v <;> simp [he]
+  | false =>
+    have hne : ¬ (old = new) := fun h => absurd (hbeq.mpr h) (by simp)
+    cases v <;> simp [hne]
+
+/-- RFC-0212 P0.1 (membership cadence 1/6, atom
+    `catalog:discard_uncommitted`): the live uncommitted-log
+    discard runs on EVERY local replica EXACTLY when the node is
+    local — membership in `ids` is not the gate (a replica dropped
+    from `ids` still discards its uncommitted suffix) — fate
+    forall over the extracted pure-lift body; the AS-IS mutant
+    gates on `is_local && in_ids` (the 0142 leftover: the removed
+    replica keeps the suffix — the lie the DST plant
+    `discard_node_counts_on_live_queued_is_not_ok` refutes). -/
+theorem discard_node_counts_fate_iff :
+    ∀ (is_local in_ids : Bool) (v : Bool),
+      (discard_node_counts is_local in_ids = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local in_ids v
+  unfold discard_node_counts
+  cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P0.1 (membership cadence 1/6, atom
+    `catalog:discard_leader`): the no-leader discard
+    persist-leader is a LOCAL node EXACTLY when the chosen node is
+    local — `next_index` repair runs where the persist lands —
+    fate forall over the extracted pure-lift body; the AS-IS
+    `ok true` mutant accepts `ids.first()` even when remote (the
+    0143 leftover — the lie the DST plant
+    `discard_leader_local_on_live_queued_is_not_ok` refutes). -/
+theorem discard_leader_local_fate_iff :
+    ∀ (is_local : Bool) (v : Bool),
+      (discard_leader_local is_local = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local v
+  unfold discard_leader_local
+  cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P0.1 (membership cadence 1/6, atom
+    `catalog:drop_preimages`): prepare-time preimages are dropped
+    on EVERY local replica EXACTLY when the node is local —
+    membership in `ids` is not the gate (a replica dropped from
+    `ids` still drops its preimages) — fate forall over the
+    extracted pure-lift body; the AS-IS mutant gates on
+    `is_local && in_ids` (the 0138 leftover: the removed replica
+    keeps preimages — the lie the DST plant
+    `drop_preimages_node_counts_on_live_queued_is_not_ok`
+    refutes). -/
+theorem drop_preimages_node_counts_fate_iff :
+    ∀ (is_local in_ids : Bool) (v : Bool),
+      (drop_preimages_node_counts is_local in_ids = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local in_ids v
+  unfold drop_preimages_node_counts
+  cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P0.1 (membership cadence 1/6, atom
+    `catalog:force_clear`): the force-local TX clear runs on EVERY
+    local replica EXACTLY when the node is local — membership in
+    `ids` is not the gate (a replica dropped from `ids` still
+    clears its stuck intents) — fate forall over the extracted
+    pure-lift body; the AS-IS mutant gates on
+    `is_local && in_ids` (the 0137 leftover: the removed replica
+    keeps intents — the lie the DST plant
+    `force_clear_node_counts_on_live_queued_is_not_ok` refutes). -/
+theorem force_clear_node_counts_fate_iff :
+    ∀ (is_local in_ids : Bool) (v : Bool),
+      (force_clear_node_counts is_local in_ids = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local in_ids v
+  unfold force_clear_node_counts
+  cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P0.2 (membership cadence 2/6, atom
+    `catalog:persist_meta`): SI meta is persisted on EVERY local
+    replica EXACTLY when the node is local — membership in `ids`
+    is not the gate (a replica dropped from `ids` still persists
+    its clock) — fate forall over the extracted pure-lift body;
+    the AS-IS mutant gates on `is_local && in_ids` (the 0134
+    leftover: the removed replica's clock is not durable — the
+    lie the DST plant
+    `persist_meta_node_counts_on_live_queued_is_not_ok` refutes). -/
+theorem persist_meta_node_counts_fate_iff :
+    ∀ (is_local in_ids : Bool) (v : Bool),
+      (persist_meta_node_counts is_local in_ids = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local in_ids v
+  unfold persist_meta_node_counts
+  cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P0.2 (membership cadence 2/6, atom
+    `catalog:persist_hist`): SI hist is persisted on EVERY local
+    replica EXACTLY when the node is local — membership in `ids`
+    is not the gate (a replica dropped from `ids` still persists
+    its hist) — fate forall over the extracted pure-lift body;
+    the AS-IS mutant gates on `is_local && in_ids` (the 0135
+    leftover: the removed replica's hist is not durable — the
+    lie the DST plant
+    `persist_hist_node_counts_on_live_queued_is_not_ok` refutes). -/
+theorem persist_hist_node_counts_fate_iff :
+    ∀ (is_local in_ids : Bool) (v : Bool),
+      (persist_hist_node_counts is_local in_ids = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local in_ids v
+  unfold persist_hist_node_counts
+  cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P0.2 (membership cadence 2/6, atom
+    `catalog:persist_fence`): the abort fence is persisted on EVERY
+    local replica EXACTLY when the node is local — membership in `ids`
+    is not the gate (a replica dropped from `ids` still persists
+    its fence) — fate forall over the extracted pure-lift body;
+    the AS-IS mutant gates on `is_local && in_ids` (the 0136
+    leftover: the removed replica has no fence — the lie the
+    DST plant
+    `persist_fence_node_counts_on_live_queued_is_not_ok` refutes). -/
+theorem persist_fence_node_counts_fate_iff :
+    ∀ (is_local in_ids : Bool) (v : Bool),
+      (persist_fence_node_counts is_local in_ids = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local in_ids v
+  unfold persist_fence_node_counts
+  cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P0.2 (membership cadence 2/6, atom
+    `catalog:hint_member`): the leader routing hint counts EXACTLY
+    when the hinted node is in `ids` — a `leader_id` outside the
+    membership is no hint at all — fate forall over the extracted
+    pure-lift body; the AS-IS mutant returns any `leader_id` (the
+    0145 leftover: leader_hint returns a removed node — the lie
+    the DST plant `hint_if_member_on_live_queued_is_not_ok`
+    refutes). -/
+theorem hint_if_member_fate_iff :
+    ∀ (in_ids : Bool) (v : Bool),
+      (hint_if_member in_ids = ok v) ↔
+        ((v = true ∧ in_ids = true)
+          ∨ (v = false ∧ in_ids = false)) := by
+  intro in_ids v
+  unfold hint_if_member
+  cases in_ids <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 3/6, atom
+    `catalog:recover_apply_node`): recovery applies on EVERY local
+    replica EXACTLY when the node is local — membership in `ids`
+    is not the gate (a replica dropped from `ids` still applies
+    its recovery) — fate forall over the extracted pure-lift
+    body; the AS-IS mutant gates on `is_local && in_ids` (the
+    0130 leftover: the removed replica is skipped — the lie the
+    DST plant `recover_apply_node_counts_on_live_queued_is_not_ok`
+    refutes). -/
+theorem recover_apply_node_counts_fate_iff :
+    ∀ (is_local in_ids : Bool) (v : Bool),
+      (recover_apply_node_counts is_local in_ids = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local in_ids v
+  unfold recover_apply_node_counts
+  cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 3/6, atom
+    `catalog:recover_truncate`): truncated logs persist on EVERY
+    local replica EXACTLY when the node is local — membership in
+    `ids` is not the gate — fate forall over the extracted
+    pure-lift body; the AS-IS mutant gates on
+    `is_local && in_ids` (the 0131 leftover: the removed replica
+    keeps its suffix — the lie the DST plant
+    `recover_truncate_node_counts_on_live_queued_is_not_ok`
+    refutes). -/
+theorem recover_truncate_node_counts_fate_iff :
+    ∀ (is_local in_ids : Bool) (v : Bool),
+      (recover_truncate_node_counts is_local in_ids = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local in_ids v
+  unfold recover_truncate_node_counts
+  cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 3/6, atom
+    `catalog:recover_abort`): leftover 2PC intents are aborted on
+    EVERY local replica EXACTLY when the node is local —
+    membership in `ids` is not the gate — fate forall over the
+    extracted pure-lift body; the AS-IS mutant gates on
+    `is_local && in_ids` (the 0133 leftover: the removed replica
+    keeps intents — the lie the DST plant
+    `recover_abort_node_counts_on_live_queued_is_not_ok`
+    refutes). -/
+theorem recover_abort_node_counts_fate_iff :
+    ∀ (is_local in_ids : Bool) (v : Bool),
+      (recover_abort_node_counts is_local in_ids = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local in_ids v
+  unfold recover_abort_node_counts
+  cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 3/6, atom
+    `catalog:identity_before_applied`): the C-new identity is
+    persisted EXACTLY when identity persist comes first — before
+    advancing applied past the joint — fate forall over the
+    extracted pure-lift body; the AS-IS mutant persists applied
+    first (the crash window: applied high while voters are
+    stale — the lie the DST plant
+    `membership_identity_before_applied_on_live_queued_is_not_ok`
+    refutes). -/
+theorem membership_identity_before_applied_fate_iff :
+    ∀ (identity_first : Bool) (v : Bool),
+      (membership_identity_before_applied identity_first = ok v) ↔
+        ((v = true ∧ identity_first = true)
+          ∨ (v = false ∧ identity_first = false)) := by
+  intro identity_first v
+  unfold membership_identity_before_applied
+  cases identity_first <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 4/6, atom
+    `catalog:open_peer_disk`): in-process open loads raft peers
+    from EXACTLY the on-disk membership — never from the CLI
+    `n_nodes` — fate forall over the extracted pure-lift body;
+    the AS-IS mutant trusts CLI `1..=n_nodes` (the 0125
+    leftover: only TCP peeked at disk — the lie the DST plant
+    `open_peer_uses_disk_on_live_queued_is_not_ok` refutes). -/
+theorem open_peer_uses_disk_fate_iff :
+    ∀ (has_disk : Bool) (v : Bool),
+      (open_peer_uses_disk has_disk = ok v) ↔
+        ((v = true ∧ has_disk = true)
+          ∨ (v = false ∧ has_disk = false)) := by
+  intro has_disk v
+  unfold open_peer_uses_disk
+  cases has_disk <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 4/6, atom
+    `catalog:local_id_member`): the sole local node is this
+    process's identity EXACTLY when it is in `ids` — fate
+    forall over the extracted pure-lift body; the AS-IS mutant
+    takes the HashMap first-key even when the node was removed
+    (the 0140 leftover — the lie the DST plant
+    `local_id_if_member_on_live_queued_is_not_ok` refutes). -/
+theorem local_id_if_member_fate_iff :
+    ∀ (in_ids : Bool) (v : Bool),
+      (local_id_if_member in_ids = ok v) ↔
+        ((v = true ∧ in_ids = true)
+          ∨ (v = false ∧ in_ids = false)) := by
+  intro in_ids v
+  unfold local_id_if_member
+  cases in_ids <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 4/6, atom
+    `catalog:reader_local`): a LocalApplied `ids.first()` fallback
+    is a local node EXACTLY when the fallback node is local —
+    fate forall over the extracted pure-lift body; the AS-IS
+    mutant takes `ids.first()` even when it is not local (the
+    0141 leftover — the lie the DST plant
+    `reader_id_local_on_live_queued_is_not_ok` refutes). -/
+theorem reader_id_local_fate_iff :
+    ∀ (is_local : Bool) (v : Bool),
+      (reader_id_local is_local = ok v) ↔
+        ((v = true ∧ is_local = true)
+          ∨ (v = false ∧ is_local = false)) := by
+  intro is_local v
+  unfold reader_id_local
+  cases is_local <;> cases v <;> simp
+
+/-- RFC-0212 P1.1 (membership cadence 4/6, atom
+    `catalog:participating_member`): a node participates EXACTLY
+    when it is in the current voter set — fate forall over the
+    extracted pure-lift body; the AS-IS mutant keeps the captured
+    participating flag (the 0126 leftover: the removed node still
+    counts — the lie the DST plant
+    `participating_if_member_on_live_queued_is_not_ok` refutes). -/
+theorem participating_if_member_fate_iff :
+    ∀ (in_ids : Bool) (v : Bool),
+      (participating_if_member in_ids = ok v) ↔
+        ((v = true ∧ in_ids = true)
+          ∨ (v = false ∧ in_ids = false)) := by
+  intro in_ids v
+  unfold participating_if_member
+  cases in_ids <;> cases v <;> simp
+
+/-- RFC-0212 P1.2 (membership cadence 5/6, atom
+    `catalog:pending_joint_node`): the pending joint is defined
+    EXACTLY by the logs of current members — fate forall over
+    the extracted pure-lift body; the AS-IS mutant scans every
+    opened node including removed ones (the 0104 leftover — the
+    lie the DST plant
+    `pending_joint_node_counts_on_live_queued_is_not_ok`
+    refutes). -/
+theorem pending_joint_node_counts_fate_iff :
+    ∀ (is_member : Bool) (v : Bool),
+      (pending_joint_node_counts is_member = ok v) ↔
+        ((v = true ∧ is_member = true)
+          ∨ (v = false ∧ is_member = false)) := by
+  intro is_member v
+  unfold pending_joint_node_counts
+  cases is_member <;> cases v <;> simp
+
+/-- RFC-0212 P1.2 (membership cadence 5/6, atom
+    `catalog:joint_target`): a joint-remove target is the
+    membership set `ids` — EXACTLY when the target is in `ids`,
+    never gated on the local `nodes` map (a TCP replica only has
+    itself) — fate forall over the extracted pure-lift body; the
+    AS-IS mutant requires the target in local `nodes` (the 0118
+    leftover: a TCP replica cannot joint-remove a peer — the lie
+    the DST plant
+    `joint_target_counts_on_live_queued_is_not_ok` refutes). -/
+theorem joint_target_counts_fate_iff :
+    ∀ (in_ids in_nodes : Bool) (v : Bool),
+      (joint_target_counts in_ids in_nodes = ok v) ↔
+        ((v = true ∧ in_ids = true)
+          ∨ (v = false ∧ in_ids = false)) := by
+  intro in_ids in_nodes v
+  unfold joint_target_counts
+  cases in_ids <;> cases v <;> simp
+
+/-- RFC-0212 P1.2 (membership cadence 5/6, atom
+    `catalog:joint_add_target`): a joint-add target is ALWAYS
+    accepted — the joiner is another OS pid that need not live
+    in the local `nodes` map — fate forall over the extracted
+    pure-lift body (the returned decision is constantly true);
+    the AS-IS mutant requires the joiner in local `nodes` (the
+    0119 P0 leftover — the lie the DST plant
+    `joint_add_target_counts_on_live_queued_is_not_ok` refutes). -/
+theorem joint_add_target_counts_fate_iff :
+    ∀ (in_nodes : Bool) (v : Bool),
+      (joint_add_target_counts in_nodes = ok v) ↔ v = true := by
+  intro in_nodes v
+  unfold joint_add_target_counts
+  cases v <;> simp
+
+/-- RFC-0212 P1.2 (membership cadence 5/6, atom
+    `catalog:joint_leave_ok`): a committed joint is not a single
+    config until a leave (`old == new`) is in the log — the
+    joint finish counts EXACTLY when the leave entry is in the
+    log — fate forall over the extracted pure-lift body; the
+    AS-IS mutant skips the leave-joint (the 0066 leftover on
+    the live add path — the lie the DST plant
+    `joint_leave_ok_on_live_queued_is_not_ok` refutes). -/
+theorem joint_leave_ok_fate_iff :
+    ∀ (leave_in_log : Bool) (v : Bool),
+      (joint_leave_ok leave_in_log = ok v) ↔
+        ((v = true ∧ leave_in_log = true)
+          ∨ (v = false ∧ leave_in_log = false)) := by
+  intro leave_in_log v
+  unfold joint_leave_ok
+  cases leave_in_log <;> cases v <;> simp
+
+/-- RFC-0212 P1.2 (membership cadence 6/6, atom
+    `catalog:drop_repl_slot`): the replication slot
+    (next/match) of a node dropped from `ids` is forgotten
+    EXACTLY when the node is out of `ids` — fate forall over
+    the extracted pure-lift body; the AS-IS mutant keeps
+    replication slots after joint leave (the 0146 leftover —
+    the lie the DST plant
+    `drop_repl_slot_on_live_queued_is_not_ok` refutes). -/
+theorem drop_repl_slot_fate_iff :
+    ∀ (in_ids : Bool) (v : Bool),
+      (drop_repl_slot in_ids = ok v) ↔
+        ((v = true ∧ in_ids = false)
+          ∨ (v = false ∧ in_ids = true)) := by
+  intro in_ids v
+  unfold drop_repl_slot
+  cases in_ids <;> cases v <;> simp
+
+/-- RFC-0212 P1.2 (membership cadence 6/6, atom
+    `catalog:drop_sent_through`): the sent_through bookkeeping of
+    a node dropped from `ids` by an out-of-band remove is
+    forgotten EXACTLY when the node is out of `ids` — fate
+    forall over the extracted pure-lift body; the AS-IS mutant
+    keeps sent_through after oob remove_member (the 0147
+    leftover — the lie the DST plant
+    `drop_sent_through_on_live_queued_is_not_ok` refutes). -/
+theorem drop_sent_through_fate_iff :
+    ∀ (in_ids : Bool) (v : Bool),
+      (drop_sent_through in_ids = ok v) ↔
+        ((v = true ∧ in_ids = false)
+          ∨ (v = false ∧ in_ids = true)) := by
+  intro in_ids v
+  unfold drop_sent_through
+  cases in_ids <;> cases v <;> simp
+
+/-- RFC-0227 P1.5 C1: a live served value is in the majority-durable
+    prefix iff the replica participates, joint election holds, and
+    `seq ≤ commit`. A miss is not a C1 violation. -/
+theorem c1_replica_served :
+    ∀ (in_ids : Bool) (old_yes old_n : U64)
+      (new_yes : Option (U64 × U64)) (seq commit : U64) (served_live : Bool),
+      replica_served_ok in_ids old_yes old_n new_yes seq commit served_live
+        = (do
+            if served_live then
+              let part ← participating_if_member in_ids
+              if part then
+                let elects ← joint_election_ok old_yes old_n new_yes
+                if elects then commit_kernel.propose_ack_ok seq commit
+                else ok false
+              else ok false
+            else ok true) := by
+  intro in_ids old_yes old_n new_yes seq commit served_live
+  unfold replica_served_ok
+  rfl
+
+theorem replica_served_ok_as_is_tooth :
+    replica_served_ok_as_is false 0#u64 0#u64 none 9#u64 0#u64 true = ok true := by
+  unfold replica_served_ok_as_is
+  rfl

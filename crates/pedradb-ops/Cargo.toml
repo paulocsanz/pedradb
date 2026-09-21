@@ -3,7 +3,7 @@ name = "pedradb-ops"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "PedraDB ops suite: backup, PITR restore, format migration, RocksDB→Pedra copy"
+description = "PedraDB ops suite: backup, PITR restore, format migration"
 rust-version.workspace = true
 
 [dependencies]

@@ -25,7 +25,7 @@ if [[ -z "$CHARON" || -z "$AENEAS" ]]; then
 fi
 
 mkdir -p "$OUT"
-SRC="$ROOT/crates/pedradb-posix/src/lib.rs"
+SRC="$ROOT/crates/pedradb-posix/src/lib_kernel.rs"
 echo "      charon=$CHARON"
 (
   cd "$CRATE"
@@ -38,8 +38,8 @@ echo "      charon=$CHARON"
 )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/posix_kernel.llbc"
 {
-  echo "path=crates/pedradb-posix/src/lib.rs"
-  echo "sha256=$(git -C "$ROOT" show HEAD:crates/pedradb-posix/src/lib.rs | shasum -a 256 | awk '{print $1}')"
+  echo "path=crates/pedradb-posix/src/lib_kernel.rs"
+  echo "sha256=$(git -C "$ROOT" show HEAD:crates/pedradb-posix/src/lib_kernel.rs | shasum -a 256 | awk '{print $1}')"
   echo "aeneas=$("$AENEAS" -version 2>/dev/null | awk '{print $NF}')"
   echo "charon=$("$CHARON" version 2>/dev/null | head -1)"
 } > "$OUT/SOURCE.posix"

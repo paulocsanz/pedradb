@@ -564,14 +564,19 @@ mod tests {
             "RFC-0077 P2.1: scan_guard F167 single artifact — the kernel is the proof body"
         );
         assert!(
-            crate_dir.join("src/db.rs").is_file(),
-            "RFC-0077 P2.2: do not extract db.rs"
+            crate_dir.join("src/db_kernel.rs").is_file(),
+            "RFC-0077 P2.2: db trampoline file exists"
+        );
+        assert!(
+            crate_dir.join("src/db_put_kernel.rs").is_file()
+                && crate_dir.join("src/db_open_kernel.rs").is_file(),
+            "RFC-0157 stage 2: open/put live in split files"
         );
         let residuals = crate_dir.join("../../scripts/formal/residuals.json");
         let text = std::fs::read_to_string(&residuals).expect("residuals.json");
         assert!(
-            text.contains("\"db_rs_extracted\": false"),
-            "glue.db_rs_extracted must stay false"
+            text.contains("\"db_rs_extracted\": true"),
+            "glue.db_rs_extracted true after split+extracted plans"
         );
         assert!(
             text.contains("\"id\": \"R-glue\""),
@@ -638,11 +643,11 @@ mod tests {
 
     #[test]
     fn overlaps_user_range_on_live_table_matches_kernel() {
-        let src = include_str!("table.rs");
+        let src = include_str!("table_kernel.rs");
         let body = src
-            .split("pub fn overlaps_user_range")
+            .split(concat!("pub fn ", "overlaps_user_range"))
             .nth(1)
-            .and_then(|s| s.split("pub fn iter_user_range").next())
+            .and_then(|s| s.split(concat!("pub fn ", "iter_user_range")).next())
             .expect("overlaps_user_range");
         assert!(
             body.contains("point_bounds_overlap("),

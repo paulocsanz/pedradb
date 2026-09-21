@@ -29,6 +29,8 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod ops_kernel;
+
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -41,9 +43,6 @@ use pedradb_core::{
     CoreError, Db, Env, EnvFile, OpenOptions, SequenceNumber, WriteOp, WriteRecord, WAL_FILE_NAME,
 };
 use pedradb_io_uring::IoUringEnv;
-
-/// PITR replay-window kernel.
-pub mod ops_kernel;
 
 mod dir_kind;
 mod from_rocks;

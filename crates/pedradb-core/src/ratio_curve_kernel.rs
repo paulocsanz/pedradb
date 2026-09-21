@@ -17,7 +17,7 @@
 
 #![forbid(unsafe_code)]
 
-use crate::scale_kernel::{warm_cap_bytes, SCALE_BYTES_PER_ENTRY};
+use crate::scale_kernel::{scale_forecast, warm_cap_bytes, SCALE_BYTES_PER_ENTRY};
 use crate::write_cycle_kernel::{qps_hat_error_permille, WritePhaseNs};
 
 /// One dated same-class measurement at one scale (RFC-0197 Background).
@@ -305,6 +305,113 @@ pub struct RatioPoint {
     pub measured: Option<MeasuredPoint>,
 }
 
+/// Static Linux-quiet forecast for `overwrite_mc4` (RFC-0197 curve +
+/// RFC-0192 `qps_from_cycle_ns`). Integer, no I/O. Hat, never board.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinuxWriteQpsHat {
+    /// Dataset records.
+    pub keys: u64,
+    /// RAM ceiling used for `warm_cap`.
+    pub ram: u64,
+    /// Closed-loop clients (the mc4 shape is 4).
+    pub clients: u64,
+    /// Store bytes = keys × 245.
+    pub store_bytes: u64,
+    /// Cold fraction (0 = hot).
+    pub cold_permille: u64,
+    /// Predicted Pedra cycle ns (1e9/qps_hat).
+    pub cycle_hat_ns: u64,
+    /// Predicted Pedra ops/s.
+    pub qps_hat: u64,
+    /// Rocks cycle (flat mean of dated anchors).
+    pub rocks_cycle_ns: u64,
+    /// Predicted Rocks ops/s.
+    pub rocks_qps_hat: u64,
+    /// `rocks_cycle / cycle_hat` permille (>1000 ⇒ Pedra faster).
+    pub ratio_hat_permille: u64,
+    /// Ranked write cut on the Linux-quiet pin (0189 P0.1).
+    pub cut: crate::write_cycle_kernel::WriteCut,
+    /// Join hat: `min(clients, 4)`.
+    pub g_hat: u64,
+}
+
+/// Static Linux overwrite_mc4 QPS/ratio from the dated write-family
+/// curve. `ram=0` ⇒ 3 GiB WARM floor (4 GiB caixa).
+#[must_use]
+pub fn linux_overwrite_mc4_hat(keys: u64, ram: u64, clients: u64) -> LinuxWriteQpsHat {
+    let warm = warm_cap_bytes(ram);
+    let store = keys.saturating_mul(SCALE_BYTES_PER_ENTRY);
+    let cold = cold_permille(store, warm);
+    let anchors = &WRITE_FAMILY_ANCHORS_2026_09_10;
+    let fit = fit_write_family_curve(anchors, SCALE_BYTES_PER_ENTRY, warm);
+    let cycle = fit.cycle_hat_ns(cold);
+    let qps = crate::write_cycle_kernel::qps_from_cycle_ns(cycle);
+    let rc = rocks_cycle_ns(anchors);
+    let rq = crate::write_cycle_kernel::qps_from_cycle_ns(rc);
+    LinuxWriteQpsHat {
+        keys,
+        ram,
+        clients: clients.max(1),
+        store_bytes: store,
+        cold_permille: cold,
+        cycle_hat_ns: cycle,
+        qps_hat: qps,
+        rocks_cycle_ns: rc,
+        rocks_qps_hat: rq,
+        ratio_hat_permille: ratio_hat_permille(cycle, rc),
+        cut: crate::write_cycle_kernel::name_cut(crate::write_cycle_kernel::LINUX_QUIET_0189_P01),
+        g_hat: clients.max(1).min(4),
+    }
+}
+
+impl LinuxWriteQpsHat {
+    /// CLI dump. Never labeled board.
+    #[must_use]
+    pub fn render(self) -> String {
+        format!(
+            "host=linux-quiet shape=overwrite_mc4 hat=1 (not board)\n\
+             keys={} ram={} clients={} store={} cold_permille={}\n\
+             cycle_hat_ns={} qps_hat={} rocks_qps_hat={}\n\
+             ratio_hat_permille={} cut={} g_hat={}",
+            self.keys,
+            self.ram,
+            self.clients,
+            self.store_bytes,
+            self.cold_permille,
+            self.cycle_hat_ns,
+            self.qps_hat,
+            self.rocks_qps_hat,
+            self.ratio_hat_permille,
+            self.cut,
+            self.g_hat,
+        )
+    }
+}
+
+/// Static Linux point-get QPS from [`scale_forecast`] happy path.
+#[must_use]
+pub fn linux_get_hit_qps_hat(keys: u64, ram: u64) -> u64 {
+    let f = scale_forecast(keys, ram);
+    crate::write_cycle_kernel::qps_from_cycle_ns(f.happy_ns)
+}
+
+/// Static Linux prefix_scan ratio permille at 100M: 700 if bounded
+/// (4 GiB board), 1050 if the store fits (big-guest contrast). Other
+/// scales are unmodeled (0).
+#[must_use]
+pub fn linux_prefix_scan_ratio_hat_permille(keys: u64, ram: u64) -> u64 {
+    if keys != 100_000_000 {
+        return 0;
+    }
+    let store = keys.saturating_mul(SCALE_BYTES_PER_ENTRY);
+    let warm = warm_cap_bytes(ram);
+    if store > warm {
+        700
+    } else {
+        1050
+    }
+}
+
 /// Predicted ratio in permille of a cycle against the Rocks constant.
 #[must_use]
 pub fn ratio_hat_permille(cycle_hat: u64, rocks_cycle: u64) -> u64 {
@@ -555,7 +662,7 @@ impl RatioCurveTable {
             }
         }
         out.push_str(&format!(
-            "as_is_ratio_permille={} (flat; a cegueira do smoke 15/15)\n",
+            "as_is_ratio_permille={} (flat; the blindness of the smoke 15/15)\n",
             self.as_is_ratio_permille
         ));
         out
@@ -567,7 +674,7 @@ impl RatioCurveTable {
 /// hiding the missing scales behind silence.
 #[must_use]
 pub fn render_get_side_anchors(anchors: &[GetSideAnchor]) -> String {
-    let mut out = String::from("get-side anchors (RFC-0197 P2.1; ladder 100M across 2 hosts — 10k/2M/15M/25M without dated measurement)\n");
+    let mut out = String::from("get-side anchors (RFC-0197 P2.1; ladder 100M on 2 hosts — 10k/2M/15M/25M with no dated measurement)\n");
     for a in anchors {
         out.push_str(&format!(
             "get_anchor leg={} records={} ratio_permille={} label={}\n",
@@ -734,7 +841,7 @@ mod tests {
         // deferral is structural, not an omission.
         assert_eq!(covered, vec![100_000_000]);
         let render = render_get_side_anchors(&GET_SIDE_ANCHORS_2026_09_10);
-        assert!(render.contains("10k/2M/15M/25M without dated measurement"));
+        assert!(render.contains("10k/2M/15M/25M with no dated measurement"));
         assert!(render.contains("get_anchor leg=prefix_scan records=100000000 ratio_permille=700"));
         assert!(render.contains("ratio_permille=1050"));
         assert!(render.contains("ratio_permille=1576"));
@@ -758,5 +865,63 @@ mod tests {
         let big_guest = GET_SIDE_ANCHORS_2026_09_10[1].ratio_permille;
         assert_eq!((board, big_guest), (700, 1050));
         assert!(board < big_guest && big_guest >= 1000);
+    }
+
+    #[test]
+    fn linux_overwrite_mc4_hat_25m_4g_near_board() {
+        // Board 25M @ 4 GiB: 142_959 / 256_780 ≈ 557‰. The static hat
+        // is the 0197 curve, not a new formula — residual < 100‰.
+        let h = linux_overwrite_mc4_hat(25_000_000, 4 * (1 << 30), 4);
+        assert_eq!(h.cut.as_str(), "mem_guard");
+        assert_eq!(h.g_hat, 4);
+        assert!(h.cold_permille > 0, "25M does not fit 4 GiB WARM");
+        assert!(
+            (h.ratio_hat_permille as i64 - 557).abs() < 100,
+            "ratio_hat={} want ~557",
+            h.ratio_hat_permille
+        );
+        let err = crate::write_cycle_kernel::qps_hat_error_permille(h.qps_hat, 142_959);
+        let err = err.expect("anchor qps");
+        assert!(
+            err.abs() < 100,
+            "qps_hat={} vs board 142959 err={err}‰",
+            h.qps_hat
+        );
+        let r = h.render();
+        assert!(r.contains("host=linux-quiet"));
+        assert!(r.contains("hat=1 (not board)"));
+        assert!(r.contains("shape=overwrite_mc4"));
+    }
+
+    #[test]
+    fn linux_prefix_scan_hat_is_bounded_700_or_fit_1050() {
+        assert_eq!(
+            linux_prefix_scan_ratio_hat_permille(100_000_000, 4 * (1 << 30)),
+            700
+        );
+        assert_eq!(
+            linux_prefix_scan_ratio_hat_permille(100_000_000, 64 * (1 << 30)),
+            1050
+        );
+        assert_eq!(
+            linux_prefix_scan_ratio_hat_permille(25_000_000, 4 * (1 << 30)),
+            0
+        );
+    }
+
+    #[test]
+    fn linux_get_hit_qps_hat_is_static() {
+        let a = linux_get_hit_qps_hat(10_000_000, 4 * (1 << 30));
+        let b = linux_get_hit_qps_hat(10_000_000, 4 * (1 << 30));
+        assert_eq!(a, b);
+        assert!(a > 0);
+    }
+
+    #[test]
+    fn linux_overwrite_mc4_hat_is_deterministic() {
+        let a = linux_overwrite_mc4_hat(25_000_000, 4 * (1 << 30), 4);
+        let b = linux_overwrite_mc4_hat(25_000_000, 4 * (1 << 30), 4);
+        assert_eq!(a, b);
+        assert_eq!(a.render(), b.render());
     }
 }

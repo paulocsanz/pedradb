@@ -19,7 +19,7 @@ if [[ -z "$CHARON" || -z "$AENEAS" ]]; then
   echo "skip  $msg"; exit 0
 fi
 mkdir -p "$OUT"
-SRC="$ROOT/crates/pedradb-core/src/leveling.rs"
+SRC="$ROOT/crates/pedradb-core/src/leveling_kernel.rs"
 echo "      charon=$CHARON"
 (
   cd "$CRATE"
@@ -481,7 +481,7 @@ if grep -q 'sorry' "$OUT/lean/LevelingKernel.lean"; then
   exit 1
 fi
 {
-  echo "path=crates/pedradb-core/src/leveling.rs"
+  echo "path=crates/pedradb-core/src/leveling_kernel.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"
   echo "aeneas=$("$AENEAS" -version 2>/dev/null | awk '{print $NF}')"
   echo "charon=$("$CHARON" version 2>/dev/null | head -1)"

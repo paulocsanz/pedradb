@@ -11,8 +11,8 @@
 //!   is validated against the **same** `last_seq`, before any of the
 //!   group's own sequences exist — members of the same group are
 //!   simultaneous, with no serialization order between them (intra-group
-//!   writes never conflict). Called by `WriteGroup::validate_occ_batch`
-//!   after collecting each member's read state.
+//!   writes never conflict). Inner loop of [`occ_batch_plan`]; production
+//!   `WriteGroup::validate_occ_batch` calls `occ_batch_plan` (RFC-0222 P0.6).
 //! - **fence** ([`fence_publish_seq`]): the group becomes visible at one
 //!   publish watermark — the max appended member sequence — after WAL
 //!   durability. Called by `GroupInFlight::max_appended_seq` (`db.rs`).
@@ -198,6 +198,21 @@ macro_rules! default_pct_depth_raised_body {
 macro_rules! default_pct_depth_raised_as_is_body {
     () => {
         true
+    };
+}
+
+/// RFC-0229 P0.3 / RFC-0220 P2.3: the chain-3 PCT signature (d=2 miss,
+/// d=3 hit) is a campaign **plant**, never a ∀π theorem.
+macro_rules! pct_chain3_row_is_plant_body {
+    () => {
+        true
+    };
+}
+
+/// AS-IS: round the plant to a ∀-schedules theorem (the 0220/0229 hole).
+macro_rules! pct_chain3_row_is_plant_as_is_body {
+    () => {
+        false
     };
 }
 
@@ -406,6 +421,21 @@ pub fn default_pct_depth_raised_as_is() -> bool {
     default_pct_depth_raised_as_is_body!()
 }
 
+/// RFC-0229 P0.3: scheduler row for the chain-3 PCT plant. Production
+/// names it a plant. AS-IS would call it a theorem (`false` here).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn pct_chain3_row_is_plant() -> bool {
+    pct_chain3_row_is_plant_body!()
+}
+
+/// AS-IS: the d=3 campaign is rounded to ∀ OS schedules.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn pct_chain3_row_is_plant_as_is() -> bool {
+    pct_chain3_row_is_plant_as_is_body!()
+}
+
 /// Visibility publish after group (or lone) WAL I/O (RFC-0071 / R-group-glue).
 /// The group becomes visible only when off-lock / lone WAL I/O succeeded.
 #[cfg(not(verus_keep_ghost))]
@@ -497,6 +527,137 @@ pub fn lock_interleavings_admitted() -> bool {
 #[must_use]
 pub fn lock_interleavings_admitted_as_is() -> bool {
     lock_interleavings_admitted_as_is_body!()
+}
+
+/// Finite ConcurrentDb lock-client alphabet (not Linux `futex`).
+/// Acquire the write-group client.
+pub const LOCK_ACT_ACQUIRE_WRITE: u8 = 0;
+/// Acquire the flush/rotate client (separate mutex).
+pub const LOCK_ACT_ACQUIRE_FLUSH: u8 = 1;
+/// Submit a batch under the write client.
+pub const LOCK_ACT_SUBMIT: u8 = 2;
+/// Publish after a successful submit (WAL Ok).
+pub const LOCK_ACT_PUBLISH: u8 = 3;
+
+/// One step of the N=2 alphabet: acquire-write / acquire-flush / submit /
+/// publish. Submit requires the write client; publish requires a prior
+/// submit. Flush is a separate mutex (legal next to write).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn lock_alphabet_step(holding_write: bool, submitted: bool, action: u8) -> bool {
+    if action == LOCK_ACT_ACQUIRE_WRITE {
+        !holding_write
+    } else if action == LOCK_ACT_ACQUIRE_FLUSH {
+        true
+    } else if action == LOCK_ACT_SUBMIT {
+        holding_write
+    } else if action == LOCK_ACT_PUBLISH {
+        submitted
+    } else {
+        false
+    }
+}
+
+/// `∀ σ, n≤2 → plan(σ) = linearization(σ)` over the four-action alphabet.
+/// Idle start; two actions `a0` then `a1`.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn lock_alphabet_linearizes_n2(a0: u8, a1: u8) -> bool {
+    if !lock_alphabet_step(false, false, a0) {
+        return false;
+    }
+    let holding_write = a0 == LOCK_ACT_ACQUIRE_WRITE;
+    let submitted = a0 == LOCK_ACT_SUBMIT;
+    lock_alphabet_step(holding_write, submitted, a1)
+}
+
+/// AS-IS: every pair linearizes (admits publish-before-submit).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn lock_alphabet_linearizes_n2_as_is(_a0: u8, _a1: u8) -> bool {
+    true
+}
+
+/// RFC-0229 P1.2: three steps of the same lock-client alphabet (not Linux
+/// futex). Extra handler step = publish after acquire-write then submit.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn lock_alphabet_linearizes_n3(a0: u8, a1: u8, a2: u8) -> bool {
+    if !lock_alphabet_step(false, false, a0) {
+        return false;
+    }
+    let holding_write = a0 == LOCK_ACT_ACQUIRE_WRITE;
+    let submitted = a0 == LOCK_ACT_SUBMIT;
+    if !lock_alphabet_step(holding_write, submitted, a1) {
+        return false;
+    }
+    let holding_write = holding_write || a1 == LOCK_ACT_ACQUIRE_WRITE;
+    let submitted = submitted || a1 == LOCK_ACT_SUBMIT;
+    lock_alphabet_step(holding_write, submitted, a2)
+}
+
+/// AS-IS: every triple linearizes (admits publish-before-submit).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn lock_alphabet_linearizes_n3_as_is(_a0: u8, _a1: u8, _a2: u8) -> bool {
+    true
+}
+
+/// RFC-0229 P1.1: who owns the write-group wait wake.
+#[cfg(not(verus_keep_ghost))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WriteGroupWait {
+    /// PCT/World turnstile grants the next run.
+    HarnessGrant,
+    /// `parking_lot` / mpsc / `thread::sleep` (OS park).
+    OsPark,
+}
+
+/// Production: harness owns the wake iff a PCT worker is bound.
+/// AS-IS always reports OsPark (the 0229 hole — std park even under PCT).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn write_group_wait_grant(harness_owns: bool) -> WriteGroupWait {
+    if harness_owns {
+        WriteGroupWait::HarnessGrant
+    } else {
+        WriteGroupWait::OsPark
+    }
+}
+
+/// AS-IS: every wait is an OS park (harness never owns the wake).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn write_group_wait_grant_as_is(_harness_owns: bool) -> WriteGroupWait {
+    WriteGroupWait::OsPark
+}
+
+/// The wait is a legal lock-client step only after acquire-write then
+/// submit (the follower/leader collect sits on that path). Unfolds both
+/// the grant token and the N=2 alphabet.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn write_group_wait_grant_linearizes(harness_owns: bool) -> bool {
+    match write_group_wait_grant(harness_owns) {
+        WriteGroupWait::HarnessGrant | WriteGroupWait::OsPark => {
+            lock_alphabet_linearizes_n2(LOCK_ACT_ACQUIRE_WRITE, LOCK_ACT_SUBMIT)
+        }
+    }
+}
+
+/// AS-IS: wait linearizes even without acquire-write then submit.
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn write_group_wait_grant_linearizes_as_is(_harness_owns: bool) -> bool {
+    true
+}
+
+/// Step 4: admitted **on this alphabet** iff the pair linearizes.
+/// Not `lock_interleavings_admitted()` (OS/futex — always false).
+#[cfg(not(verus_keep_ghost))]
+#[must_use]
+pub fn lock_alphabet_interleavings_admitted(a0: u8, a1: u8) -> bool {
+    lock_alphabet_linearizes_n2(a0, a1)
 }
 
 /// RFC-0078 / R-fsync-lie: promote pending bytes only when the OS (or Env)
@@ -733,6 +894,20 @@ pub fn default_pct_depth_raised_as_is() -> (ok: bool)
         ok == true,
 {
     default_pct_depth_raised_as_is_body!()
+}
+
+pub fn pct_chain3_row_is_plant() -> (ok: bool)
+    ensures
+        ok == true,
+{
+    pct_chain3_row_is_plant_body!()
+}
+
+pub fn pct_chain3_row_is_plant_as_is() -> (ok: bool)
+    ensures
+        ok == false,
+{
+    pct_chain3_row_is_plant_as_is_body!()
 }
 
 #[derive(PartialEq, Eq, Copy, Clone)]
@@ -1087,8 +1262,8 @@ mod tests {
             GroupAckPlan::AckPublishGroup,
             "AS-IS tooth: acks a failed WAL I/O"
         );
-        let lsc =
-            named_fn_src(include_str!("db.rs"), "lone_sync_commit").expect("lone_sync_commit");
+        let lsc = named_fn_src(include_str!("db_kernel.rs"), "lone_sync_commit")
+            .expect("lone_sync_commit");
         assert!(
             lsc.contains("match crate::group_commit_kernel::group_ack_plan("),
             "lone_sync_commit must match group_ack_plan"
@@ -1243,7 +1418,7 @@ mod tests {
             OccMemberFate::Ok,
             "AS-IS tooth: lagging member still Ok"
         );
-        let src = include_str!("concurrent.rs");
+        let src = include_str!("concurrent_kernel.rs");
         assert!(
             src.contains("occ_batch_plan("),
             "validate_occ_batch must match occ_batch_plan"
@@ -1290,7 +1465,7 @@ mod tests {
             vec![OccMemberFate::Ok, OccMemberFate::Ok, OccMemberFate::Ok],
             "AS-IS tooth: lagging member still Ok"
         );
-        let validate = include_str!("concurrent.rs")
+        let validate = include_str!("concurrent_kernel.rs")
             .split("fn validate_occ_batch")
             .nth(1)
             .expect("validate_occ_batch");
@@ -1331,7 +1506,7 @@ mod tests {
             vec![OccMemberFate::Ok],
             "AS-IS tooth: lagging member still Ok"
         );
-        let src = include_str!("concurrent.rs");
+        let src = include_str!("concurrent_kernel.rs");
         let validate = src
             .split("fn validate_occ_batch")
             .nth(1)
@@ -1359,7 +1534,7 @@ mod tests {
             rwlock_client_may_mutate_as_is(false),
             "AS-IS tooth: mutate after dropping the write lock"
         );
-        let src = include_str!("concurrent.rs");
+        let src = include_str!("concurrent_kernel.rs");
         let off = src
             .split("fn finish_group_off_lock")
             .nth(1)
@@ -1397,7 +1572,7 @@ mod tests {
             rwlock_client_may_read_as_is(false, false),
             "AS-IS tooth: read Db with no guard"
         );
-        let snap = include_str!("concurrent.rs")
+        let snap = include_str!("concurrent_kernel.rs")
             .split("fn occ_snapshot(")
             .nth(1)
             .expect("occ_snapshot");
@@ -1531,6 +1706,54 @@ mod tests {
     }
 
     #[test]
+    fn rfc0229_write_group_wait_grant_vs_as_is() {
+        assert_eq!(write_group_wait_grant(true), WriteGroupWait::HarnessGrant);
+        assert_eq!(write_group_wait_grant(false), WriteGroupWait::OsPark);
+        assert_eq!(
+            write_group_wait_grant_as_is(true),
+            WriteGroupWait::OsPark,
+            "AS-IS tooth: harness wait still OS-parks"
+        );
+        assert!(write_group_wait_grant_linearizes(true));
+        assert!(write_group_wait_grant_linearizes(false));
+        assert!(write_group_wait_grant_linearizes_as_is(false));
+        assert!(!lock_interleavings_admitted());
+        let prod = include_str!("concurrent_kernel.rs")
+            .split("\nmod tests {")
+            .next()
+            .expect("production");
+        assert!(
+            prod.contains("write_group_wait_grant("),
+            "production write-group wait must match the grant token"
+        );
+        assert!(
+            prod.contains("WriteGroupWait::OsPark"),
+            "OS park arm must stay on the rustc path"
+        );
+        assert!(
+            prod.contains("WriteGroupWait::HarnessGrant"),
+            "harness grant arm must stay on the rustc path"
+        );
+    }
+
+    #[test]
+    fn rfc0229_pct_chain3_row_is_plant_not_theorem() {
+        assert!(
+            pct_chain3_row_is_plant(),
+            "RFC-0220 P2.3 / RFC-0229 P0.3: chain-3 is a plant"
+        );
+        assert!(
+            !pct_chain3_row_is_plant_as_is(),
+            "AS-IS tooth: round the plant to a ∀ theorem"
+        );
+        assert!(
+            !forall_schedules_admitted(3),
+            "finding the plant at d=3 is not ∀ OS schedules"
+        );
+        assert_eq!(pct_campaign_default_depth(), 2);
+    }
+
+    #[test]
     fn pct_depth_is_not_forall_schedules() {
         assert!(!forall_schedules_admitted(0));
         assert!(!forall_schedules_admitted(2));
@@ -1595,5 +1818,114 @@ mod tests {
             lock_interleavings_admitted_as_is(),
             "AS-IS tooth: admit ∀ lock schedules"
         );
+    }
+
+    #[test]
+    fn lock_alphabet_n2_linearizes_write_then_submit() {
+        assert!(lock_alphabet_linearizes_n2(
+            LOCK_ACT_ACQUIRE_WRITE,
+            LOCK_ACT_SUBMIT
+        ));
+        assert!(lock_alphabet_linearizes_n2(
+            LOCK_ACT_ACQUIRE_WRITE,
+            LOCK_ACT_ACQUIRE_FLUSH
+        ));
+        assert!(lock_alphabet_linearizes_n2(
+            LOCK_ACT_ACQUIRE_FLUSH,
+            LOCK_ACT_ACQUIRE_WRITE
+        ));
+        assert!(
+            !lock_alphabet_linearizes_n2(LOCK_ACT_PUBLISH, LOCK_ACT_SUBMIT),
+            "publish-before-submit is not a linearization"
+        );
+        assert!(
+            !lock_alphabet_linearizes_n2(LOCK_ACT_SUBMIT, LOCK_ACT_PUBLISH),
+            "submit without acquire-write is not a linearization"
+        );
+        assert!(
+            lock_alphabet_linearizes_n2_as_is(LOCK_ACT_PUBLISH, LOCK_ACT_SUBMIT),
+            "AS-IS tooth: illegal order still linearizes"
+        );
+        assert!(lock_alphabet_interleavings_admitted(
+            LOCK_ACT_ACQUIRE_WRITE,
+            LOCK_ACT_SUBMIT
+        ));
+        assert!(!lock_alphabet_interleavings_admitted(
+            LOCK_ACT_PUBLISH,
+            LOCK_ACT_SUBMIT
+        ));
+        assert!(
+            !lock_interleavings_admitted(),
+            "OS/futex claim stays refused after alphabet admission"
+        );
+        assert!(!forall_schedules_admitted(2));
+        assert!(!forall_schedules_admitted(3));
+        assert!(
+            lock_alphabet_linearizes_n3(LOCK_ACT_ACQUIRE_WRITE, LOCK_ACT_SUBMIT, LOCK_ACT_PUBLISH),
+            "RFC-0229 P1.2: write then submit then publish is the extra handler step"
+        );
+        assert!(
+            !lock_alphabet_linearizes_n3(LOCK_ACT_PUBLISH, LOCK_ACT_SUBMIT, LOCK_ACT_ACQUIRE_WRITE),
+            "publish-before-submit still refused at N=3"
+        );
+        assert!(
+            lock_alphabet_linearizes_n3_as_is(
+                LOCK_ACT_PUBLISH,
+                LOCK_ACT_SUBMIT,
+                LOCK_ACT_ACQUIRE_WRITE
+            ),
+            "AS-IS tooth: illegal triple still linearizes"
+        );
+        let rot = include_str!("db_kernel.rs")
+            .split("fn try_rotate_wal(&mut self)")
+            .nth(1)
+            .and_then(|s| s.split("fn wal_pin_state").next())
+            .expect("try_rotate_wal");
+        assert!(
+            rot.contains("wal_rotate_decision("),
+            "try_rotate_wal matches wal_rotate_decision (passo 1 caller)"
+        );
+        let pin = include_str!("db_kernel.rs")
+            .split("fn wal_pin_state(")
+            .nth(1)
+            .and_then(|s| s.split("fn ensure_wal_rotated_for_gc").next())
+            .expect("wal_pin_state");
+        assert!(
+            pin.contains("commit_inflight:"),
+            "rotate reads commit_inflight"
+        );
+        let put = include_str!("concurrent_put_kernel.rs");
+        assert!(
+            put.contains("match crate::group_commit_kernel::lock_alphabet_linearizes_n2("),
+            "put_with_seq must match lock_alphabet_linearizes_n2"
+        );
+        assert!(
+            put.contains("match crate::group_commit_kernel::lock_alphabet_linearizes_n3("),
+            "put_with_seq must match lock_alphabet_linearizes_n3 (RFC-0229 P1.2)"
+        );
+        assert!(
+            put.contains("submit_one("),
+            "ConcurrentDb put submits (acquire-write/submit client)"
+        );
+        let lock = include_str!("../../rocksdb-compat/src/locktab_kernel.rs");
+        assert!(
+            lock.contains("wait_for_deadlock("),
+            "2PL locktab calls wait_for_deadlock"
+        );
+    }
+
+    #[test]
+    fn pct_tsan_n3_is_not_os_forall_pi() {
+        assert!(
+            !forall_schedules_admitted(2),
+            "PCT d=2 is a campaign, not ∀π OS"
+        );
+        assert!(!forall_schedules_admitted(3));
+        assert!(
+            forall_schedules_admitted_as_is(2),
+            "AS-IS tooth: PCT CLEAN as a theorem"
+        );
+        assert!(!lock_interleavings_admitted());
+        assert!(lock_interleavings_admitted_as_is());
     }
 }

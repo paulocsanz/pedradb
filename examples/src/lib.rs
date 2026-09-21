@@ -1,6 +1,6 @@
 //! PedraDB example gallery.
 //!
-//! This crate exists so the programs under [`examples/`](https://github.with/paulocsanz/pedradb/tree/main/examples)
+//! This crate exists so the programs under [`examples/`](https://github.com/paulocsanz/pedradb/tree/main/examples)
 //! can share workspace dependencies. Each example is a standalone binary:
 //!
 //! ```sh

@@ -89,7 +89,7 @@ def DEFAULT_WAL_ARCHIVE_SEGMENT_CAP : Std.U64 := 64#u64
 @[global_simps, irreducible] def WAL_ARCHIVE_UNLINK_BUDGET : Std.U64 := 4#u64
 
 /-- [pedra_aeneas_changelog_kernel::changelog_flush_store_now]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 183:0-197:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 179:0-193:1
     Visibility: public -/
 def changelog_flush_store_now
   (disk_behind : Bool) (flushes_since_store : Std.U64)
@@ -104,7 +104,7 @@ def changelog_flush_store_now
   else ok false
 
 /-- [pedra_aeneas_changelog_kernel::changelog_flush_store_now_as_is]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 202:0-216:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 198:0-212:1
     Visibility: public -/
 def changelog_flush_store_now_as_is
   (disk_behind : Bool) (flushes_since_store : Std.U64)
@@ -114,7 +114,7 @@ def changelog_flush_store_now_as_is
   ok disk_behind
 
 /-- [pedra_aeneas_changelog_kernel::wal_rotate_archives]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 224:0-226:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 220:0-222:1
     Visibility: public -/
 def wal_rotate_archives
   (disk_behind : Bool) (archives : Std.U64) (archive_cap : Std.U64) :
@@ -125,7 +125,7 @@ def wal_rotate_archives
   else ok false
 
 /-- [pedra_aeneas_changelog_kernel::wal_rotate_archives_as_is]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 232:0-234:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 228:0-230:1
     Visibility: public -/
 def wal_rotate_archives_as_is
   (disk_behind : Bool) (archives : Std.U64) (archive_cap : Std.U64) :
@@ -134,7 +134,7 @@ def wal_rotate_archives_as_is
   ok false
 
 /-- [pedra_aeneas_changelog_kernel::ChangelogCommitFate]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 252:0-258:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 248:0-254:1
     Visibility: public -/
 @[discriminant isize]
 inductive ChangelogCommitFate where
@@ -142,14 +142,14 @@ inductive ChangelogCommitFate where
 | Skip : ChangelogCommitFate
 
 /-- [pedra_aeneas_changelog_kernel::{impl core::clone::Clone for pedra_aeneas_changelog_kernel::ChangelogCommitFate}::clone]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 251:9-251:14
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:9-247:14
     Visibility: public -/
 def ChangelogCommitFate.Insts.CoreCloneClone.clone
   (self : ChangelogCommitFate) : Result ChangelogCommitFate := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::clone::Clone for pedra_aeneas_changelog_kernel::ChangelogCommitFate}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 251:9-251:14 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:9-247:14 -/
 @[reducible]
 def ChangelogCommitFate.Insts.CoreCloneClone : core.clone.Clone
   ChangelogCommitFate := {
@@ -157,7 +157,7 @@ def ChangelogCommitFate.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::marker::Copy for pedra_aeneas_changelog_kernel::ChangelogCommitFate}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 251:16-251:20 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:16-247:20 -/
 @[reducible]
 def ChangelogCommitFate.Insts.CoreMarkerCopy : core.marker.Copy
   ChangelogCommitFate := {
@@ -165,7 +165,7 @@ def ChangelogCommitFate.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- [pedra_aeneas_changelog_kernel::{impl core::fmt::Debug for pedra_aeneas_changelog_kernel::ChangelogCommitFate}::fmt]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 251:22-251:27
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:22-247:27
     Visibility: public -/
 def ChangelogCommitFate.Insts.CoreFmtDebug.fmt
   (self : ChangelogCommitFate) (f : core.fmt.Formatter) :
@@ -176,7 +176,7 @@ def ChangelogCommitFate.Insts.CoreFmtDebug.fmt
   | ChangelogCommitFate.Skip => core.fmt.Formatter.write_str f (toStr "Skip")
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::fmt::Debug for pedra_aeneas_changelog_kernel::ChangelogCommitFate}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 251:22-251:27 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:22-247:27 -/
 @[reducible]
 def ChangelogCommitFate.Insts.CoreFmtDebug : core.fmt.Debug ChangelogCommitFate
   := {
@@ -184,14 +184,14 @@ def ChangelogCommitFate.Insts.CoreFmtDebug : core.fmt.Debug ChangelogCommitFate
 }
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_changelog_kernel::ChangelogCommitFate}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 251:29-251:38 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:29-247:38 -/
 @[reducible]
 def ChangelogCommitFate.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq ChangelogCommitFate := {
 }
 
 /-- [pedra_aeneas_changelog_kernel::{impl core::cmp::PartialEq<pedra_aeneas_changelog_kernel::ChangelogCommitFate> for pedra_aeneas_changelog_kernel::ChangelogCommitFate}::eq]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 251:29-251:38
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:29-247:38
     Visibility: public -/
 def ChangelogCommitFate.Insts.CoreCmpPartialEqChangelogCommitFate.eq
   (self : ChangelogCommitFate) (other : ChangelogCommitFate) :
@@ -202,7 +202,7 @@ def ChangelogCommitFate.Insts.CoreCmpPartialEqChangelogCommitFate.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::cmp::PartialEq<pedra_aeneas_changelog_kernel::ChangelogCommitFate> for pedra_aeneas_changelog_kernel::ChangelogCommitFate}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 251:29-251:38 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:29-247:38 -/
 @[reducible]
 def ChangelogCommitFate.Insts.CoreCmpPartialEqChangelogCommitFate :
   core.cmp.PartialEq ChangelogCommitFate ChangelogCommitFate := {
@@ -210,14 +210,14 @@ def ChangelogCommitFate.Insts.CoreCmpPartialEqChangelogCommitFate :
 }
 
 /-- [pedra_aeneas_changelog_kernel::{impl core::cmp::Eq for pedra_aeneas_changelog_kernel::ChangelogCommitFate}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 251:40-251:42
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:40-247:42
     Visibility: public -/
 def ChangelogCommitFate.Insts.CoreCmpEq.assert_fields_are_eq
   (self : ChangelogCommitFate) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::cmp::Eq for pedra_aeneas_changelog_kernel::ChangelogCommitFate}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 251:40-251:42 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 247:40-247:42 -/
 @[reducible]
 def ChangelogCommitFate.Insts.CoreCmpEq : core.cmp.Eq ChangelogCommitFate := {
   partialEqInst :=
@@ -227,7 +227,7 @@ def ChangelogCommitFate.Insts.CoreCmpEq : core.cmp.Eq ChangelogCommitFate := {
 }
 
 /-- [pedra_aeneas_changelog_kernel::changelog_durable_commit_fate]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 262:0-278:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 258:0-274:1
     Visibility: public -/
 def changelog_durable_commit_fate
   (client_set : Bool) (client_sync : Bool) (db_sync : Bool) :
@@ -244,7 +244,7 @@ def changelog_durable_commit_fate
     else ok ChangelogCommitFate.Skip
 
 /-- [pedra_aeneas_changelog_kernel::changelog_durable_commit_fate_as_is]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 284:0-290:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 280:0-286:1
     Visibility: public -/
 def changelog_durable_commit_fate_as_is
   (_client_set : Bool) (_client_sync : Bool) (_db_sync : Bool) :
@@ -253,7 +253,7 @@ def changelog_durable_commit_fate_as_is
   ok ChangelogCommitFate.Skip
 
 /-- [pedra_aeneas_changelog_kernel::ChangelogStorePlan]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 297:0-303:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 293:0-299:1
     Visibility: public -/
 @[discriminant isize]
 inductive ChangelogStorePlan where
@@ -261,14 +261,14 @@ inductive ChangelogStorePlan where
 | SkipStorePublishHolds : ChangelogStorePlan
 
 /-- [pedra_aeneas_changelog_kernel::{impl core::clone::Clone for pedra_aeneas_changelog_kernel::ChangelogStorePlan}::clone]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 296:9-296:14
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 292:9-292:14
     Visibility: public -/
 def ChangelogStorePlan.Insts.CoreCloneClone.clone
   (self : ChangelogStorePlan) : Result ChangelogStorePlan := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::clone::Clone for pedra_aeneas_changelog_kernel::ChangelogStorePlan}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 296:9-296:14 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 292:9-292:14 -/
 @[reducible]
 def ChangelogStorePlan.Insts.CoreCloneClone : core.clone.Clone
   ChangelogStorePlan := {
@@ -276,7 +276,7 @@ def ChangelogStorePlan.Insts.CoreCloneClone : core.clone.Clone
 }
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::marker::Copy for pedra_aeneas_changelog_kernel::ChangelogStorePlan}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 296:16-296:20 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 292:16-292:20 -/
 @[reducible]
 def ChangelogStorePlan.Insts.CoreMarkerCopy : core.marker.Copy
   ChangelogStorePlan := {
@@ -284,7 +284,7 @@ def ChangelogStorePlan.Insts.CoreMarkerCopy : core.marker.Copy
 }
 
 /-- [pedra_aeneas_changelog_kernel::{impl core::fmt::Debug for pedra_aeneas_changelog_kernel::ChangelogStorePlan}::fmt]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 296:22-296:27
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 292:22-292:27
     Visibility: public -/
 def ChangelogStorePlan.Insts.CoreFmtDebug.fmt
   (self : ChangelogStorePlan) (f : core.fmt.Formatter) :
@@ -297,7 +297,7 @@ def ChangelogStorePlan.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "SkipStorePublishHolds")
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::fmt::Debug for pedra_aeneas_changelog_kernel::ChangelogStorePlan}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 296:22-296:27 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 292:22-292:27 -/
 @[reducible]
 def ChangelogStorePlan.Insts.CoreFmtDebug : core.fmt.Debug ChangelogStorePlan
   := {
@@ -305,14 +305,14 @@ def ChangelogStorePlan.Insts.CoreFmtDebug : core.fmt.Debug ChangelogStorePlan
 }
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_changelog_kernel::ChangelogStorePlan}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 296:29-296:38 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 292:29-292:38 -/
 @[reducible]
 def ChangelogStorePlan.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq ChangelogStorePlan := {
 }
 
 /-- [pedra_aeneas_changelog_kernel::{impl core::cmp::PartialEq<pedra_aeneas_changelog_kernel::ChangelogStorePlan> for pedra_aeneas_changelog_kernel::ChangelogStorePlan}::eq]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 296:29-296:38
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 292:29-292:38
     Visibility: public -/
 def ChangelogStorePlan.Insts.CoreCmpPartialEqChangelogStorePlan.eq
   (self : ChangelogStorePlan) (other : ChangelogStorePlan) : Result Bool := do
@@ -321,7 +321,7 @@ def ChangelogStorePlan.Insts.CoreCmpPartialEqChangelogStorePlan.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::cmp::PartialEq<pedra_aeneas_changelog_kernel::ChangelogStorePlan> for pedra_aeneas_changelog_kernel::ChangelogStorePlan}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 296:29-296:38 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 292:29-292:38 -/
 @[reducible]
 def ChangelogStorePlan.Insts.CoreCmpPartialEqChangelogStorePlan :
   core.cmp.PartialEq ChangelogStorePlan ChangelogStorePlan := {
@@ -329,14 +329,14 @@ def ChangelogStorePlan.Insts.CoreCmpPartialEqChangelogStorePlan :
 }
 
 /-- [pedra_aeneas_changelog_kernel::{impl core::cmp::Eq for pedra_aeneas_changelog_kernel::ChangelogStorePlan}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 296:40-296:42
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 292:40-292:42
     Visibility: public -/
 def ChangelogStorePlan.Insts.CoreCmpEq.assert_fields_are_eq
   (self : ChangelogStorePlan) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::cmp::Eq for pedra_aeneas_changelog_kernel::ChangelogStorePlan}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 296:40-296:42 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 292:40-292:42 -/
 @[reducible]
 def ChangelogStorePlan.Insts.CoreCmpEq : core.cmp.Eq ChangelogStorePlan := {
   partialEqInst := ChangelogStorePlan.Insts.CoreCmpPartialEqChangelogStorePlan
@@ -345,7 +345,7 @@ def ChangelogStorePlan.Insts.CoreCmpEq : core.cmp.Eq ChangelogStorePlan := {
 }
 
 /-- [pedra_aeneas_changelog_kernel::changelog_store_plan]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 308:0-314:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 304:0-310:1
     Visibility: public -/
 def changelog_store_plan (publish_ok : Bool) : Result ChangelogStorePlan := do
   if publish_ok
@@ -353,14 +353,14 @@ def changelog_store_plan (publish_ok : Bool) : Result ChangelogStorePlan := do
   else ok ChangelogStorePlan.SkipStorePublishHolds
 
 /-- [pedra_aeneas_changelog_kernel::changelog_store_plan_as_is]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 320:0-322:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 316:0-318:1
     Visibility: public -/
 def changelog_store_plan_as_is
   (_publish_ok : Bool) : Result ChangelogStorePlan := do
   ok ChangelogStorePlan.StoreFeed
 
 /-- [pedra_aeneas_changelog_kernel::WalArchiveDelete]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 331:0-336:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 327:0-332:1
     Visibility: public -/
 @[discriminant isize]
 inductive WalArchiveDelete where
@@ -368,14 +368,14 @@ inductive WalArchiveDelete where
 | DeleteCovered : WalArchiveDelete
 
 /-- [pedra_aeneas_changelog_kernel::{impl core::clone::Clone for pedra_aeneas_changelog_kernel::WalArchiveDelete}::clone]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 330:9-330:14
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 326:9-326:14
     Visibility: public -/
 def WalArchiveDelete.Insts.CoreCloneClone.clone
   (self : WalArchiveDelete) : Result WalArchiveDelete := do
   ok self
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::clone::Clone for pedra_aeneas_changelog_kernel::WalArchiveDelete}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 330:9-330:14 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 326:9-326:14 -/
 @[reducible]
 def WalArchiveDelete.Insts.CoreCloneClone : core.clone.Clone WalArchiveDelete
   := {
@@ -383,7 +383,7 @@ def WalArchiveDelete.Insts.CoreCloneClone : core.clone.Clone WalArchiveDelete
 }
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::marker::Copy for pedra_aeneas_changelog_kernel::WalArchiveDelete}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 330:16-330:20 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 326:16-326:20 -/
 @[reducible]
 def WalArchiveDelete.Insts.CoreMarkerCopy : core.marker.Copy WalArchiveDelete
   := {
@@ -391,7 +391,7 @@ def WalArchiveDelete.Insts.CoreMarkerCopy : core.marker.Copy WalArchiveDelete
 }
 
 /-- [pedra_aeneas_changelog_kernel::{impl core::fmt::Debug for pedra_aeneas_changelog_kernel::WalArchiveDelete}::fmt]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 330:22-330:27
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 326:22-326:27
     Visibility: public -/
 def WalArchiveDelete.Insts.CoreFmtDebug.fmt
   (self : WalArchiveDelete) (f : core.fmt.Formatter) :
@@ -404,21 +404,21 @@ def WalArchiveDelete.Insts.CoreFmtDebug.fmt
     core.fmt.Formatter.write_str f (toStr "DeleteCovered")
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::fmt::Debug for pedra_aeneas_changelog_kernel::WalArchiveDelete}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 330:22-330:27 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 326:22-326:27 -/
 @[reducible]
 def WalArchiveDelete.Insts.CoreFmtDebug : core.fmt.Debug WalArchiveDelete := {
   fmt := WalArchiveDelete.Insts.CoreFmtDebug.fmt
 }
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_changelog_kernel::WalArchiveDelete}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 330:29-330:38 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 326:29-326:38 -/
 @[reducible]
 def WalArchiveDelete.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq WalArchiveDelete := {
 }
 
 /-- [pedra_aeneas_changelog_kernel::{impl core::cmp::PartialEq<pedra_aeneas_changelog_kernel::WalArchiveDelete> for pedra_aeneas_changelog_kernel::WalArchiveDelete}::eq]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 330:29-330:38
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 326:29-326:38
     Visibility: public -/
 def WalArchiveDelete.Insts.CoreCmpPartialEqWalArchiveDelete.eq
   (self : WalArchiveDelete) (other : WalArchiveDelete) : Result Bool := do
@@ -427,7 +427,7 @@ def WalArchiveDelete.Insts.CoreCmpPartialEqWalArchiveDelete.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::cmp::PartialEq<pedra_aeneas_changelog_kernel::WalArchiveDelete> for pedra_aeneas_changelog_kernel::WalArchiveDelete}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 330:29-330:38 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 326:29-326:38 -/
 @[reducible]
 def WalArchiveDelete.Insts.CoreCmpPartialEqWalArchiveDelete :
   core.cmp.PartialEq WalArchiveDelete WalArchiveDelete := {
@@ -435,14 +435,14 @@ def WalArchiveDelete.Insts.CoreCmpPartialEqWalArchiveDelete :
 }
 
 /-- [pedra_aeneas_changelog_kernel::{impl core::cmp::Eq for pedra_aeneas_changelog_kernel::WalArchiveDelete}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 330:40-330:42
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 326:40-326:42
     Visibility: public -/
 def WalArchiveDelete.Insts.CoreCmpEq.assert_fields_are_eq
   (self : WalArchiveDelete) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_changelog_kernel::{impl core::cmp::Eq for pedra_aeneas_changelog_kernel::WalArchiveDelete}]
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 330:40-330:42 -/
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 326:40-326:42 -/
 @[reducible]
 def WalArchiveDelete.Insts.CoreCmpEq : core.cmp.Eq WalArchiveDelete := {
   partialEqInst := WalArchiveDelete.Insts.CoreCmpPartialEqWalArchiveDelete
@@ -450,7 +450,7 @@ def WalArchiveDelete.Insts.CoreCmpEq : core.cmp.Eq WalArchiveDelete := {
 }
 
 /-- [pedra_aeneas_changelog_kernel::wal_archive_delete_plan]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 340:0-349:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 336:0-345:1
     Visibility: public -/
 def wal_archive_delete_plan
   (manifest_published_seq : Std.U64) (wal_archive_max_seq : Std.U64) :
@@ -461,7 +461,7 @@ def wal_archive_delete_plan
   else ok WalArchiveDelete.DeleteCovered
 
 /-- [pedra_aeneas_changelog_kernel::wal_archive_delete_plan_as_is]:
-    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 355:0-360:1
+    Source: '../../../crates/pedradb-core/src/changelog_kernel.rs', lines 351:0-356:1
     Visibility: public -/
 def wal_archive_delete_plan_as_is
   (_manifest_published_seq : Std.U64) (_wal_archive_max_seq : Std.U64) :

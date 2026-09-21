@@ -1,4 +1,4 @@
-path=crates/pedradb-core/src/wal/crc.rs
+path=crates/pedradb-core/src/wal/crc_kernel.rs
 sha256=e6df1c22c82d913d6d29aa03abeac8b594206ed4feaad829fa889cbc5866e674
 aeneas=daa85d7
 charon=0.1.232

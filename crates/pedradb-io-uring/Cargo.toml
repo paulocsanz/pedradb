@@ -6,6 +6,9 @@ license.workspace = true
 description = "Linux io_uring Env for PedraDB (WAL/SST write + fsync); POSIX fallback elsewhere"
 rust-version.workspace = true
 
+
+[lib]
+path = "src/lib_kernel.rs"
 [dependencies]
 pedradb-core.workspace = true
 pedradb-posix.workspace = true

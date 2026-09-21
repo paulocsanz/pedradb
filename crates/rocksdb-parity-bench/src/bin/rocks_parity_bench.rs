@@ -5,9 +5,11 @@
 //!   cargo run -q --release -p rocksdb-parity-bench --bin rocks-parity-bench -- <out_dir> [engine]
 //!     engine: compat (default; rocksdb-compat on pedradb-core)
 //!            rocksdb (needs --features real; real RocksDB via the rocksdb crate)
+//!            fjall (needs --features fjall; fjall 3.x peer — RFC-0238 ladder)
 //!   suites: ROCKS_PARITY_SUITE (default "ycsb,deps"; csv; "all" = every
 //!            suite). Opt-in: qs, kvrocks, myrocks, surreal, nebula,
-//!            streaming, ceph, solana, arango, venice, oxigraph, rocksapi (RFC-0043).
+//!            streaming, ceph, solana, arango, venice, oxigraph, rocksapi,
+//!            ladder (RFC-0043; RFC-0238).
 //!
 //! Env: ROCKS_YCSB_RECORDS/OPS/PAYLOAD/DIST (uniform|zipfian), ROCKS_DEPS_BATCH
 //! (ops per apply commit), ROCKS_PARITY_SYNC (rocksdb engine only; **0 = default
@@ -75,6 +77,9 @@ fn main() {
         if suites_enabled("rocksapi") {
             v.push("rocksapi");
         }
+        if suites_enabled("ladder") {
+            v.push("ladder");
+        }
         if v.is_empty() {
             "ycsb,deps".to_string()
         } else {
@@ -137,8 +142,21 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        "fjall" => {
+            #[cfg(feature = "fjall")]
+            {
+                let e = rocksdb_parity_bench::engines::FjallEngine::open(&dbdir);
+                run_and_report(&e, &cfg, suites.as_str(), &out);
+            }
+            #[cfg(not(feature = "fjall"))]
+            {
+                let _ = suites;
+                eprintln!("engine 'fjall' needs --features fjall (RFC-0238 P0.2)");
+                std::process::exit(1);
+            }
+        }
         other => {
-            eprintln!("unknown engine {other:?} (want compat|rocksdb)");
+            eprintln!("unknown engine {other:?} (want compat|compatv|concurrent|rocksdb|fjall)");
             std::process::exit(1);
         }
     }
@@ -152,6 +170,20 @@ fn push_ycsb<E: Engine>(r: &mut YcsbRunner, e: &E, records: usize, benches: &mut
         "[rocks-parity] seed {records} records in {:.1}s",
         t0.elapsed().as_secs_f64()
     );
+    if rocksdb_parity_bench::settle_enabled() {
+        let ts = std::time::Instant::now();
+        if e.settle() {
+            eprintln!(
+                "[rocks-parity] settle {:.1}s (L0 drained)",
+                ts.elapsed().as_secs_f64()
+            );
+        } else {
+            eprintln!(
+                "[rocks-parity] settle INCOMPLETE after {:.1}s (debt carries into the timed window)",
+                ts.elapsed().as_secs_f64()
+            );
+        }
+    }
     if shape_wanted("ycsb_a") {
         benches.push(r.run(e, "ycsb_a", 50, 0, false, false));
     }
@@ -236,6 +268,9 @@ fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) 
     if suites_enabled("rocksapi") {
         benches.extend(r.run_rocksapi(e));
     }
+    if suites_enabled("ladder") {
+        benches.extend(r.run_ladder(e));
+    }
     if suites_enabled("surreal") {
         eprintln!(
             "[rocks-parity] engine {} cannot run surreal (need OccEngine / OptimisticTransactionDB)",
@@ -304,6 +339,9 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
     }
     if suites_enabled("rocksapi") {
         benches.extend(r.run_rocksapi(e));
+    }
+    if suites_enabled("ladder") {
+        benches.extend(r.run_ladder(e));
     }
     if suites_enabled("surreal") {
         benches.extend(r.run_surreal(e));

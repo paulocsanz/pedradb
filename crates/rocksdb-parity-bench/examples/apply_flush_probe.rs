@@ -1,4 +1,4 @@
-//! Isolated apply 2000×(pre+with) under flush policies. Not the harness number.
+//! Isolated apply 2000×(pre+com) under flush policies. Not a harness number.
 //!
 //! cargo run --release -p rocksdb-parity-bench --example apply_flush_probe
 

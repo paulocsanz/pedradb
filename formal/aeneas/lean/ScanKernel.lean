@@ -393,7 +393,7 @@ inductive scan_kernel.SstCrcFate where
 | Reject : scan_kernel.SstCrcFate
 
 /-- [pedra_aeneas_scan_kernel::wal::crc::crc_match_ok]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/crc.rs', lines 80:0-82:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/crc_kernel.rs', lines 80:0-82:1
     Visibility: public -/
 def wal.crc.crc_match_ok
   (stored : Std.U32) (computed : Std.U32) : Result Bool := do

@@ -11,7 +11,7 @@ rocksdb-compat = { path = "../rocksdb-compat" }
 pedradb-core = { path = "../pedradb-core" }
 pedradb-io-uring = { path = "../pedradb-io-uring" }
 rocksdb = { version = "0.22", optional = true, default-features = false }
-fjall = { version = "3", optional = true }
+fjall = { version = "3.1.10", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
@@ -19,7 +19,8 @@ tempfile = "3"
 [features]
 # Builds the real-RocksDB engine adapter (rocksdb crate, bundled C++ build).
 real = ["dep:rocksdb"]
-# Pure-Rust LSM peer for the scale harness (and ycsb-only via engine=fjall).
+# Builds the fjall peer adapter (RFC-0238 P0.2: absolute-QPS ladder; the
+# peer is never a `compat_over_rocksdb` ratio).
 fjall = ["dep:fjall"]
 
 [[test]]
@@ -36,9 +37,5 @@ name = "rocks-parity-compare"
 path = "src/bin/rocks_parity_compare.rs"
 
 [[bin]]
-name = "scale-parity-bench"
-path = "src/bin/scale_parity_bench.rs"
-
-[[bin]]
-name = "pedra"
-path = "src/bin/pedra.rs"
+name = "rocks-parity-column-a"
+path = "src/bin/rocks_parity_column_a.rs"

@@ -9,7 +9,7 @@ publish = false
 description = "Standalone crate whose [lib] path is production wal/crc.rs"
 
 [lib]
-path = "../../../crates/pedradb-core/src/wal/crc.rs"
+path = "../../../crates/pedradb-core/src/wal/crc_kernel.rs"
 
 [dependencies]
 crc32c = "0.6"

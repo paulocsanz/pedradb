@@ -18,7 +18,7 @@ if [[ -z "$CHARON" || -z "$AENEAS" ]]; then
   echo "skip  $msg"; exit 0
 fi
 mkdir -p "$OUT"
-SRC="$ROOT/crates/pedradb-core/src/merge.rs"
+SRC="$ROOT/crates/pedradb-core/src/merge_kernel.rs"
 echo "      charon=$CHARON"
 ( cd "$CRATE" && "$CHARON" cargo --preset=aeneas \
     --start-from 'crate::merge::visible_at' \
@@ -98,7 +98,7 @@ open(p, "w", encoding="utf-8").write(src)
 print(f"      patched write_op_covers_key do-match ({n})")
 PYEOF
 {
-  echo "path=crates/pedradb-core/src/merge.rs"
+  echo "path=crates/pedradb-core/src/merge_kernel.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"
   echo "aeneas=$("$AENEAS" -version 2>/dev/null | awk '{print $NF}')"
   echo "charon=$("$CHARON" version 2>/dev/null | head -1)"

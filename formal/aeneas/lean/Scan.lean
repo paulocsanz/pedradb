@@ -755,10 +755,10 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P0.4 2/9 (atom `catalog:sst_block_crc`): the CRC of
-    block is EXACTLY the cited equality — matches iff stored =
-    computed (without second opinion). The AS-IS always admits (block
-    corrompido enters — tooth planted). -/
+/-- RFC-0218 P0.4 2/9 (atom `catalog:sst_block_crc`): o CRC de
+    bloco é EXATAMENTE a igualdade citada — casa sse stored =
+    computed (sem segunda opinião). O AS-IS admite sempre (bloco
+    corrompido entra — tooth plantado). -/
 theorem sst_block_crc_ok_fate_iff :
     ∀ (stored : U32) (computed : U32) (v : Bool),
       (scan_kernel.sst_block_crc_ok stored computed = ok v) ↔
@@ -773,10 +773,10 @@ theorem sst_block_crc_ok_fate_iff :
     subst hv
     unfold scan_kernel.sst_block_crc_ok wal.crc.crc_match_ok
     rfl
-/-- RFC-0218 P0.4 3/9 (atom `catalog:zero_glue`): residual glue
-    zero NEVER is admitted — the constante cited is false (read
-    fail-closed: without glue there is no the that read). The AS-IS finds that the glue
-    vanished (tooth planted). -/
+/-- RFC-0218 P0.4 3/9 (atom `catalog:zero_glue`): cola residual
+    zero NUNCA é admitida — a constante citada é false (leitura
+    fail-closed: sem cola não há o que ler). O AS-IS acha que a cola
+    sumiu (tooth plantado). -/
 theorem zero_glue_admitted_fate_iff :
     ∀ (v : Bool), (scan_kernel.zero_glue_admitted = ok v) ↔ (v = false) := by
   intro v
@@ -788,11 +788,11 @@ theorem zero_glue_admitted_fate_iff :
   · rintro hv
     subst hv
     rfl
-/-- RFC-0218 P0.4 4/9 (atom `catalog:sst_crc`): the destination of the CRC
-    of SST is EXACTLY the cited tree — checksum matches →
-    StripTrailer; mismatch in file legado (smaller that the ceiling without
+/-- RFC-0218 P0.4 4/9 (atom `catalog:sst_crc`): o destino do CRC
+    de SST é EXATAMENTE a árvore citada — checksum casa →
+    StripTrailer; mismatch em arquivo legado (menor que o teto sem
     CRC) → WholeBuffer; mismatch moderno → Reject (fail-closed). O
-    AS-IS always StripTrailer (trailer of the sorte — tooth planted). -/
+    AS-IS sempre StripTrailer (trailer da sorte — tooth plantado). -/
 theorem sst_crc_fate_flat_fate_iff :
     ∀ (stored : U32) (computed : U32) (buf_len : Usize)
       (fate : scan_kernel.SstCrcFate),
@@ -869,10 +869,10 @@ private noncomputable def key_in_window_before_end (key : Slice U8)
       (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key e
   | core.ops.range.Bound.Unbounded => ok true
 
-/-- RFC-0218 P0.4 5/9 (atom `catalog:key_in_window`): the window
-    booleana of keys is EXACTLY the two gates cited — the key
-    entra iff passed no start E passed no fim (v = a && b). The AS-IS
-    only looks at the start (end of the window ignorado — tooth planted). -/
+/-- RFC-0218 P0.4 5/9 (atom `catalog:key_in_window`): a janela
+    booleana de chaves é EXATAMENTE os dois gates citados — a chave
+    entra sse passou no start E passou no fim (v = a && b). O AS-IS
+    só olha o start (fim da janela ignorado — tooth plantado). -/
 theorem key_in_window_fate_iff :
     ∀ (key : Slice U8) (start : core.ops.range.Bound (Slice U8))
       (end1 : core.ops.range.Bound (Slice U8)) (v : Bool),
@@ -925,11 +925,11 @@ private noncomputable def pbo_file_after_start (hi : Slice U8)
       (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) hi s
   | core.ops.range.Bound.Unbounded => ok true
 
-/-- RFC-0218 P0.4 6/9 (atom `catalog:point_bounds_overlap`): the gate
-    of read of file is EXACTLY the bounds cited — without
-    smallest/largest reads (true); with both, reads iff lo passed in the end E
-    hi passed in the start (v = the && b). The AS-IS delega with bounds
-    overflowing (tooth planted). -/
+/-- RFC-0218 P0.4 6/9 (atom `catalog:point_bounds_overlap`): o gate
+    de leitura de arquivo é EXATAMENTE os bounds citados — sem
+    smallest/largest lê (true); com ambos, lê sse lo passou no fim E
+    hi passou no start (v = a && b). O AS-IS delega com bounds
+    estourados (tooth plantado). -/
 theorem point_bounds_overlap_fate_iff :
     ∀ (smallest : Option (Slice U8)) (largest : Option (Slice U8))
       (start : core.ops.range.Bound (Slice U8))
@@ -1002,11 +1002,11 @@ private noncomputable def trw_starts_before_end (t_start : Slice U8)
       (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) t_start e
   | core.ops.range.Bound.Unbounded => ok true
 
-/-- RFC-0218 P0.4 7/9 (atom `catalog:tombstone_reaches_window`): the
-    window of tombstone is EXACTLY the two gates cited — the tombstone
-    reaches the window iff its end passed of the start and its beginning not
-    passed do fim (v = a && b; half-open). The AS-IS returns false
-    always (tombstone never reaches — tooth planted). -/
+/-- RFC-0218 P0.4 7/9 (atom `catalog:tombstone_reaches_window`): a
+    janela de túmulo é EXATAMENTE os dois gates citados — o túmulo
+    alcança a janela sse seu fim passou do start E seu começo não
+    passou do fim (v = a && b; half-open). O AS-IS devolve false
+    sempre (túmulo nunca alcança — tooth plantado). -/
 theorem tombstone_reaches_window_fate_iff :
     ∀ (t_start : Slice U8) (t_end : Slice U8)
       (start : core.ops.range.Bound (Slice U8))
@@ -1036,12 +1036,12 @@ theorem tombstone_reaches_window_fate_iff :
     unfold scan_kernel.tombstone_reaches_window
     exact bind_intro a hA (bind_intro b hB (by cases a <;> rfl))
 
-/-- RFC-0218 P0.4 8/9 (atom `catalog:scan_guard`, entry
-    `scan_reads_file`): the guard of read is EXACTLY the chain
-    cited — bounds say reads (b true => true); otherwise the any over the
-    tombstones decides (v = b1 of the par retornado). The AS-IS only looks at the
-    bounds (tombstone that reaches the window not hides — tooth
-    planted). -/
+/-- RFC-0218 P0.4 8/9 (atom `catalog:scan_guard`, entrada
+    `scan_reads_file`): o guardião de leitura é EXATAMENTE a cadeia
+    citada — bounds dizem lê (b true => true); senão o any sobre os
+    túmulos decide (v = b1 do par retornado). O AS-IS só olha os
+    bounds (túmulo que alcança a janela não esconde — tooth
+    plantado). -/
 theorem scan_reads_file_fate_iff :
     ∀ (smallest : Option (Slice U8)) (largest : Option (Slice U8))
       (tombs : Slice ((Slice U8) × (Slice U8)))

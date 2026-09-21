@@ -67,10 +67,16 @@ pub fn leftover_page_advice_as_is(
 /// families, but the function stays total).
 #[must_use]
 pub fn family_upper_bound(pfx: &[u8]) -> Option<Vec<u8>> {
-    for (i, &b) in pfx.iter().enumerate().rev() {
+    // Index `while` (not `iter().rev()`) so Charon/Aeneas emit a `def`.
+    // `wrapping_add` after `b < 0xFF` is the successor; raw `u8 + 1` is
+    // unimplemented in the Aeneas pin.
+    let mut i = pfx.len();
+    while i > 0 {
+        i -= 1;
+        let b = pfx[i];
         if b < 0xFF {
             let mut hi = pfx.to_vec();
-            hi[i] = b + 1;
+            hi[i] = b.wrapping_add(1);
             hi.truncate(i + 1);
             return Some(hi);
         }

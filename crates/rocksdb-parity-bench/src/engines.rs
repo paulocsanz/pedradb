@@ -66,13 +66,13 @@ impl CompatEngine<pedradb_core::StdEnv> {
 fn compat_bench_opts() -> rocksdb_compat::Options {
     let mut opts = rocksdb_compat::Options::default();
     opts.create_if_missing(true);
-    // Match RocksDB default memtable (64 MiB). 4 MiB was for apply_mc4;
-    // kvrocks_set_mc50 at 4 MiB flushed ~25× per timed run.
-    // Larger than any timed suite's write volume (mc50 100k×1 KiB) so
-    // auto-flush does not run in the measured window. Rocks default is
-    // 64 MiB — 4 MiB was flushing ~25× during set_mc50.
-    // `ROCKS_PARITY_COMPAT_MEMTABLE` (bytes) overrides for long-window
-    // experiments that want the same flush pressure as Rocks default.
+    // Both engines bench at 256 MiB so no timed suite auto-flushes inside
+    // the measured window (the Rocks side honors this same env/default —
+    // RFC-0217 audit 2026-09-13). 4 MiB flushed ~25× during set_mc50 and
+    // poisoned the ratio; at 256 MiB neither side flushes (suites write
+    // <256 MiB), so the comparison is symmetric and flush-free.
+    // `ROCKS_PARITY_COMPAT_MEMTABLE` (bytes) overrides BOTH sides for
+    // long-window experiments that want real flush pressure.
     opts.write_buffer_size = std::env::var("ROCKS_PARITY_COMPAT_MEMTABLE")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -270,6 +270,25 @@ impl<E: Env> Engine for CompatEngine<E> {
     }
     fn flush(&self) -> bool {
         self.db.flush().is_ok()
+    }
+    fn settle(&self) -> bool {
+        if !self.db.flush().is_ok() {
+            return false;
+        }
+        // RFC-0234 P1.3: Rocks wait_for_compact. Drain parked→L0, leftover
+        // L0 to zero, L1→L2→L3, then L3 coalesce so a short scan overlaps 1 SST.
+        // Returning at the first L0=0 while parked mems remain lets the
+        // flush worker install 1–2 leftover L0s into the timed window.
+        match self
+            .db
+            .wait_for_compact(&rocksdb_compat::WaitForCompactOptions::default())
+        {
+            Ok(()) => true,
+            Err(e) => {
+                eprintln!("[rocks-parity] wait_for_compact: {e}");
+                false
+            }
+        }
     }
     fn wbwi_overlay_get(&self, puts: &[(&[u8], &[u8])], key: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         let mut b = rocksdb_compat::WriteBatchWithIndex::new();
@@ -483,6 +502,27 @@ impl RocksEngine {
         let mut opts = rocksdb::Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
+        // RFC-0217 audit (2026-09-13): the compat side defaults its bench
+        // memtable to 256 MiB so no timed suite flushes mid-window; Rocks
+        // was left at the engine default 64 MiB, so any suite writing
+        // >64 MiB (kvrocks_set_mc50 ~100 MiB) flushed Rocks inside the
+        // measured window while Pedra parked in memory — an asymmetry in
+        // Pedra's favor. Both sides must honor the same window: the same
+        // env override, the same 256 MiB default. `open_cf` creates the
+        // missing CFs from these same Options, so one set covers all.
+        // `ROCKS_PARITY_ROCKS_MEMTABLE` overrides ONLY this side (A/B
+        // probe for the asymmetry: old shape = compat 256 MiB / rocks
+        // default 64 MiB — never set it for an official table).
+        let memtable = std::env::var("ROCKS_PARITY_ROCKS_MEMTABLE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or_else(|| {
+                std::env::var("ROCKS_PARITY_COMPAT_MEMTABLE")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(256 * 1024 * 1024)
+            });
+        opts.set_write_buffer_size(memtable);
         let db = rocksdb::DB::open_cf(&opts, path, DEPS_CFS).expect("rocksdb open_cf");
         let wopts_async = rocksdb::WriteOptions::default();
         let mut wopts_sync = rocksdb::WriteOptions::default();
@@ -748,6 +788,19 @@ impl RocksOccEngine {
         let mut opts = rocksdb::Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
+        // RFC-0217 audit (2026-09-13): same memtable symmetry fix as
+        // `RocksEngine::open` — never let the peer sit at the 64 MiB
+        // default while the compat side runs 256 MiB.
+        let memtable = std::env::var("ROCKS_PARITY_ROCKS_MEMTABLE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or_else(|| {
+                std::env::var("ROCKS_PARITY_COMPAT_MEMTABLE")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(256 * 1024 * 1024)
+            });
+        opts.set_write_buffer_size(memtable);
         let db = rocksdb::OptimisticTransactionDB::open_cf(&opts, path, DEPS_CFS)
             .expect("rocks OptimisticTransactionDB open_cf");
         let wopts_async = rocksdb::WriteOptions::default();
@@ -791,6 +844,17 @@ impl Engine for RocksOccEngine {
     }
     fn flush(&self) -> bool {
         self.db.flush().is_ok()
+    }
+    fn settle(&self) -> bool {
+        // Symmetric with the compat settle: Rocks' background compaction
+        // has been draining the seed all along; flush the memtables and
+        // wait for compaction quiet so both engines start the timed
+        // window from a drained tree (RFC-0217 P2.6).
+        if !self.db.flush().is_ok() {
+            return false;
+        }
+        let wo = rocksdb::WaitForCompactOptions::default();
+        self.db.wait_for_compact(&wo).is_ok()
     }
     fn put(&self, k: &[u8], v: &[u8]) -> bool {
         self.db.put_opt(k, v, self.wopts()).is_ok()
@@ -922,5 +986,115 @@ impl OccEngine for RocksOccEngine {
         let tx = self.db.transaction_opt(self.wopts(), &to);
         let mut wrap = RocksOccTxn { inner: Some(tx) };
         f(&mut wrap)
+    }
+}
+
+/// RFC-0238 P0.2: fjall 3.x peer for the absolute-QPS ladder (TRAJETORIA
+/// C1–C3). Stock defaults (lz4 on); `insert` is the async-journal column —
+/// same class as the Rocks default peer (`sync:false`). One keyspace per
+/// bench "CF" so the `Engine` deps surface stays total; ladder shapes only
+/// use `default`. Never a `compat_over_rocksdb` ratio.
+#[cfg(feature = "fjall")]
+pub struct FjallEngine {
+    db: fjall::Database,
+    default: fjall::Keyspace,
+}
+
+#[cfg(feature = "fjall")]
+impl FjallEngine {
+    pub fn open(path: &Path) -> Self {
+        let db = fjall::Database::builder(path).open().expect("fjall open");
+        let default = db
+            .keyspace("default", fjall::KeyspaceCreateOptions::default)
+            .expect("fjall default keyspace");
+        Self { db, default }
+    }
+
+    /// `db.keyspace` caches open keyspaces, so on-demand creation keeps the
+    /// CF surface total without pre-opening every CF for ladder-only runs.
+    fn cf(&self, cf: &str) -> fjall::Keyspace {
+        self.db
+            .keyspace(cf, fjall::KeyspaceCreateOptions::default)
+            .expect("fjall keyspace {cf}")
+    }
+}
+
+#[cfg(feature = "fjall")]
+impl Engine for FjallEngine {
+    fn label(&self) -> &'static str {
+        "fjall"
+    }
+    fn durability(&self) -> &'static str {
+        "async-journal (fjall default insert; PersistMode::SyncData on flush only)"
+    }
+    fn sync(&self) -> bool {
+        false
+    }
+    fn put(&self, k: &[u8], v: &[u8]) -> bool {
+        self.default.insert(k, v).is_ok()
+    }
+    fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        self.default
+            .get(k)
+            .map(|v| v.map(|s| s.as_ref().to_vec()))
+            .map_err(|_| ())
+    }
+    fn scan_count(&self, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
+        Ok(self
+            .default
+            .range(start.to_vec()..end.to_vec())
+            .take(cap)
+            .count())
+    }
+    fn put_cf(&self, cf: &str, k: &[u8], v: &[u8]) -> bool {
+        self.cf(cf).insert(k, v).is_ok()
+    }
+    fn get_cf(&self, cf: &str, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        self.cf(cf)
+            .get(k)
+            .map(|v| v.map(|s| s.as_ref().to_vec()))
+            .map_err(|_| ())
+    }
+    fn batch(&self, ops: Vec<CfWrite>) -> bool {
+        let mut wb = self.db.batch();
+        for op in ops {
+            match op {
+                CfWrite::Put { cf, k, v } => {
+                    let ks = self.cf(cf);
+                    wb.insert(&ks, k, v);
+                }
+                CfWrite::Delete { cf, k } => {
+                    let ks = self.cf(cf);
+                    wb.remove(&ks, k);
+                }
+            }
+        }
+        wb.commit().is_ok()
+    }
+    fn latest_cf(&self, cf: &str, prefix: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        // Mirror of the compat/Rocks adapters: reverse-seek from
+        // `prefix || u64::MAX` (the newest version sorts last under the
+        // prefix) and take the first hit still inside it.
+        use std::ops::Bound;
+        let mut end = prefix.to_vec();
+        end.extend_from_slice(&u64::MAX.to_be_bytes());
+        let mut it = self.cf(cf).range((Bound::<Vec<u8>>::Unbounded, Bound::Included(end)));
+        while let Some(g) = it.next_back() {
+            let k = g.key().map_err(|_| ())?;
+            if k.starts_with(prefix) {
+                return Ok(Some(k.as_ref().to_vec()));
+            }
+        }
+        Ok(None)
+    }
+    fn scan_count_cf(&self, cf: &str, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
+        Ok(self
+            .cf(cf)
+            .range(start.to_vec()..end.to_vec())
+            .take(cap)
+            .count())
+    }
+    fn flush(&self) -> bool {
+        self.db.persist(fjall::PersistMode::SyncData).is_ok()
     }
 }

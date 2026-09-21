@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-scan-readahead-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate whose [lib] path is production scan_readahead_kernel.rs"
+
+[lib]
+path = "../../../crates/pedradb-core/src/scan_readahead_kernel.rs"
