@@ -63,7 +63,35 @@ pub mod cellcost {
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
 
-    use rocksdb_compat::cost::Snapshot as CostSnapshot;
+    /// Cost columns stay zero. The public `rocksdb-compat` does not ship
+    /// the `cost` trace module; the published cells are the timings.
+    #[derive(Clone, Default)]
+    struct CostSnapshot {
+        point_ops: u64,
+        point_sst_considered: u64,
+        point_sst_rejected: u64,
+        point_block_resident: u64,
+        point_block_tls: u64,
+        point_block_file: u64,
+        point_file_bytes: u64,
+        point_pread_ns: u64,
+        point_image_ns: u64,
+        scan_ops: u64,
+        scan_sst_probed: u64,
+        scan_block_loads: u64,
+        scan_block_hits: u64,
+        scan_block_bytes: u64,
+    }
+
+    impl CostSnapshot {
+        fn line(&self) -> String {
+            "off".into()
+        }
+
+        fn since(&self, _start: &Self) -> Self {
+            Self::default()
+        }
+    }
 
     type Cell = (String, String, CostSnapshot);
 
@@ -84,7 +112,7 @@ pub mod cellcost {
             Self {
                 group: group.to_string(),
                 id: id.to_string(),
-                start: rocksdb_compat::cost::enabled().then(rocksdb_compat::cost::read),
+                start: None,
             }
         }
     }
@@ -93,7 +121,7 @@ pub mod cellcost {
         fn drop(&mut self) {
             let delta = match self.start {
                 Some(start) => {
-                    let d = rocksdb_compat::cost::read().since(&start);
+                    let d = CostSnapshot::default().since(&start);
                     println!("cost/{}/{}: {}", self.group, self.id, d.line());
                     d
                 }
