@@ -113,8 +113,8 @@ theorem lock_interleavings_not_a_theorem :
   unfold lock_interleavings_admitted
   rfl
 
-/-- AS-IS tooth: a green publish is rounded to ∀ lock schedules. -/
-theorem lock_interleavings_as_is_tooth :
+/-- AS-IS dente: a green publish is rounded to ∀ lock schedules. -/
+theorem lock_interleavings_as_is_dente :
     lock_interleavings_admitted_as_is = ok true := by
   unfold lock_interleavings_admitted_as_is
   rfl
@@ -125,8 +125,8 @@ theorem may_publish_group_needs_wal_ok :
   unfold may_publish_group
   rfl
 
-/-- AS-IS tooth: publish even if WAL I/O failed. -/
-theorem may_publish_group_as_is_tooth :
+/-- AS-IS dente: publish even if WAL I/O failed. -/
+theorem may_publish_group_as_is_dente :
     may_publish_group_as_is false = ok true := by
   unfold may_publish_group_as_is
   rfl
@@ -134,7 +134,7 @@ theorem may_publish_group_as_is_tooth :
 /-- RFC-0205 P0.1 (sixth registered close): the group publish gate is
     the EXACT flip of the WAL I/O outcome — a group is published iff its
     WAL write succeeded; there is no third fate (pure-lift mold,
-    precedent dir_sync_required_ok_iff_sync). The tooth above is the
+    precedent dir_sync_required_ok_iff_sync). The dente above is the
     false instance; the AS-IS mutant publishes even on WAL failure. -/
 theorem may_publish_group_ok_iff_wal_io_ok :
     ∀ (wal_io_ok v : Bool),
@@ -234,8 +234,8 @@ theorem fsync_lie_closes_tcg_guest_fate_iff :
   · intro h; injection h with hv; exact hv.symm
   · intro h; subst h; rfl
 
-/-- AS-IS tooth: d≥2 is rounded to forall. -/
-theorem forall_schedules_as_is_tooth :
+/-- AS-IS dente: d≥2 is rounded to forall. -/
+theorem forall_schedules_as_is_dente :
     forall_schedules_admitted_as_is (2#u64) = ok true := by
   unfold forall_schedules_admitted_as_is
   rfl
@@ -284,8 +284,8 @@ theorem occ_member_fate_conflict_via_group_validate :
   · exact LawfulBEq.eq_of_beq (by native_decide)
   · unfold occ_member_fate; rfl
 
-/-- AS-IS tooth: too-old + conflict still Ok. -/
-theorem occ_member_fate_as_is_tooth :
+/-- AS-IS dente: too-old + conflict still Ok. -/
+theorem occ_member_fate_as_is_dente :
     occ_member_fate_as_is true true = ok OccMemberFate.Ok := by
   unfold occ_member_fate_as_is
   rfl
@@ -380,8 +380,8 @@ theorem occ_batch_plan_too_old_wins :
         : alloc.vec.Vec OccMemberFate) := by
   exact LawfulBEq.eq_of_beq (by native_decide)
 
-/-- AS-IS tooth: lagging member still Ok. Unfold the as-is plan. -/
-theorem occ_batch_plan_as_is_tooth :
+/-- AS-IS dente: lagging member still Ok. Unfold the as-is plan. -/
+theorem occ_batch_plan_as_is_dente :
     occ_batch_plan_as_is
         (⟨[false], by native_decide⟩)
         (⟨[{ snap := 7#u64, touched_key_written_after := true }],
@@ -400,8 +400,8 @@ theorem rwlock_client_may_mutate_needs_write :
   · unfold rwlock_client_may_mutate; rfl
   · unfold rwlock_client_may_mutate; rfl
 
-/-- AS-IS tooth: mutate after dropping the write lock. -/
-theorem rwlock_client_may_mutate_as_is_tooth :
+/-- AS-IS dente: mutate after dropping the write lock. -/
+theorem rwlock_client_may_mutate_as_is_dente :
     rwlock_client_may_mutate_as_is false = ok true := by
   unfold rwlock_client_may_mutate_as_is
   rfl
@@ -437,8 +437,8 @@ theorem rwlock_client_may_read_via_write :
     rfl
   · unfold rwlock_client_may_mutate; rfl
 
-/-- AS-IS tooth: read Db with no guard. -/
-theorem rwlock_client_may_read_as_is_tooth :
+/-- AS-IS dente: read Db with no guard. -/
+theorem rwlock_client_may_read_as_is_dente :
     rwlock_client_may_read_as_is false false = ok true := by
   unfold rwlock_client_may_read_as_is
   rfl
@@ -552,12 +552,12 @@ theorem occ_batch_plan_fate_iff :
       refine bind_intro n ?_ hloop
       rw [if_neg hle, hn]
 
-/-- RFC-0218 P0.1 1/4 (atom `catalog:group_commit`, entrada
+/-- RFC-0218 P0.1 1/4 (átomo `catalog:group_commit`, entrada
     `occ_conflict`): o veredito OCC first-committer-wins é exatamente a
     janela — o conflito é ok EXATAMENTE quando a janela `(snap,
     last_seq]` é não-vazia E a resposta é a flag tocada, ou a janela é
     vazia e a resposta é false; sem terceiro destino. O AS-IS
-    serializado planta o tooth oposto no mesmo writer do grupo. -/
+    serializado planta o dente oposto no mesmo writer do grupo. -/
 theorem occ_conflict_fate_iff :
     ∀ (snap last_seq : Std.U64) (touched v : Bool),
       (occ_conflict snap last_seq touched = ok v) ↔
@@ -574,10 +574,10 @@ theorem occ_conflict_fate_iff :
     · rw [occ_conflict_closed_form, if_pos hgt, hv]
     · rw [occ_conflict_closed_form, if_neg hgt, hv]
 
-/-- RFC-0218 P0.1 2/4 (atom `catalog:fsync_promote`, entrada
+/-- RFC-0218 P0.1 2/4 (átomo `catalog:fsync_promote`, entrada
     `fsync_promotes_pending`): pending vira durável EXATAMENTE quando o
     OS/Env é honesto — o corpo é o lift puro `ok os_honest`; sem
-    terceiro destino. O AS-IS promove mesmo com fsync mentiroso (tooth
+    terceiro destino. O AS-IS promove mesmo com fsync mentiroso (dente
     RFC-0078: planta `fsync_promotes_pending_on_live_sim_is_not_ok`). -/
 theorem fsync_promotes_pending_fate_iff :
     ∀ (os_honest v : Bool),
@@ -591,7 +591,7 @@ theorem fsync_promotes_pending_fate_iff :
     rw [h]
 
 
-/-! ### RFC-0218 P0.1 3/4 — `fence_publish_seq` (atom `catalog:group_fence`)
+/-! ### RFC-0218 P0.1 3/4 — `fence_publish_seq` (átomo `catalog:group_fence`)
 
 O fate do fence como cadeia (molde Form/DecodeFate): combustível =
 membros restantes; cada passo `cont` consome exatamente um membro (i'
@@ -805,13 +805,13 @@ private theorem fence_publish_seq_loop_fate (member_seqs : Aeneas.Std.Slice Std.
         · exact absurd (hbody.symm.trans hB) (by simp)
         · exact absurd ((fence_body_at_end member_seqs best i hlen2).symm.trans hB) (by simp)
 
-/-- RFC-0218 P0.1 3/4 (atom `catalog:group_fence`, entrada
+/-- RFC-0218 P0.1 3/4 (átomo `catalog:group_fence`, entrada
     `fence_publish_seq`): o watermark de publish do grupo é exatamente a
     cadeia citada do loop extraído — cada passo lê um membro
     (`Slice.index_usize`), atualiza o máximo e avança i estritamente; o
     fim é `i = len` com o máximo acumulado `best = v`; sem terceiro
     destino. O AS-IS publica o primeiro membro e ignora o resto
-    (tooth plantado). -/
+    (dente plantado). -/
 theorem fence_publish_seq_fate_iff :
     ∀ (member_seqs : Aeneas.Std.Slice Std.U64) (v : Std.U64),
       (fence_publish_seq member_seqs = ok v) ↔
@@ -823,10 +823,10 @@ theorem fence_publish_seq_fate_iff :
   exact fence_publish_seq_loop_fate member_seqs (member_seqs.val).length _ 0#usize
     (Nat.zero_le _) (Nat.sub_le _ _) v
 
-/-! ### RFC-0218 P0.1 4/4 — `group_validate` (atom `catalog:group_validate`)
+/-! ### RFC-0218 P0.1 4/4 — `group_validate` (átomo `catalog:group_validate`)
 
 Mesmo molde do fence: cada passo `cont` lê um OccRead, decide pelo
-`occ_conflict` extraído (candidato a atom 1/4), empurra no out e avança
+`occ_conflict` extraído (candidato a átomo 1/4), empurra no out e avança
 i estritamente; o fim é `i = len` com out = v. -/
 
 /-- No fim (i = len) o corpo devolve exatamente `done out`. -/
@@ -1035,13 +1035,13 @@ private theorem group_validate_loop_fate (reads : Aeneas.Std.Slice OccRead)
         · exact absurd (hbody.symm.trans hB) (by simp)
         · exact absurd ((gv_body_at_end reads last_seq out i hlen2).symm.trans hB) (by simp)
 
-/-- RFC-0218 P0.1 4/4 (atom `catalog:group_validate`): a validação OCC
+/-- RFC-0218 P0.1 4/4 (átomo `catalog:group_validate`): a validação OCC
     do grupo inteiro é exatamente a cadeia citada do loop extraído —
     cada membro é lido (`Slice.index_usize`), decidido pelo
-    `occ_conflict` extraído (atom 1/4) e empurrado no out, i cresce
+    `occ_conflict` extraído (átomo 1/4) e empurrado no out, i cresce
     estritamente; o fim é `i = len` com o vetor de vereditos `out = v`;
     sem terceiro destino. A simultaneidade (janela vazia por membro) é o
-    tooth que o AS-IS serializado perde. -/
+    dente que o AS-IS serializado perde. -/
 theorem group_validate_fate_iff :
     ∀ (reads : Aeneas.Std.Slice OccRead) (last_seq : Std.U64)
       (v : alloc.vec.Vec Bool),
@@ -1060,10 +1060,10 @@ theorem group_validate_fate_iff :
   exact group_validate_loop_fate reads last_seq (reads.val).length _ 0#usize
     (Nat.zero_le _) (Nat.sub_le _ _) v
 
-/-- RFC-0219 P2.1 (atom `catalog:group_ack_plan`): o grupo (ou commit
+/-- RFC-0219 P2.1 (átomo `catalog:group_ack_plan`): o grupo (ou commit
     lone) acka e publica EXATAMENTE quando sua I/O de WAL teve sucesso;
     I/O falhada cerca — sem publish, sem Ok. O AS-IS acka a falha (Ok
-    com mentira — tooth plantado). -/
+    com mentira — dente plantado). -/
 theorem group_ack_plan_fate_iff :
     ∀ (wal_io_ok : Bool) (plan : GroupAckPlan),
       (group_ack_plan wal_io_ok = ok plan) ↔
@@ -1106,7 +1106,7 @@ theorem lock_alphabet_publish_then_submit_not :
     LOCK_ACT_PUBLISH
   simp
 
-/-- AS-IS tooth: the mutant admits the illegal order. -/
+/-- AS-IS dente: the mutant admits the illegal order. -/
 theorem lock_alphabet_as_is_admits_illegal :
     lock_alphabet_linearizes_n2_as_is LOCK_ACT_PUBLISH LOCK_ACT_SUBMIT
       = ok true := by
@@ -1188,7 +1188,7 @@ theorem lock_alphabet_n3_publish_first_not :
     LOCK_ACT_PUBLISH
   simp
 
-/-- AS-IS tooth: illegal N=3 still linearizes. -/
+/-- AS-IS dente: illegal N=3 still linearizes. -/
 theorem lock_alphabet_n3_as_is_admits_illegal :
     lock_alphabet_linearizes_n3_as_is
         LOCK_ACT_PUBLISH LOCK_ACT_SUBMIT LOCK_ACT_ACQUIRE_WRITE

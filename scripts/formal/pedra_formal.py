@@ -597,6 +597,124 @@ TCB_FREEZE_ALLOWLIST: dict[str, str] = {
         "RFC-0209 P0.1 heuristic kernel (should_flush; twin cargo-test)",
     "crates/pedradb-core/src/rmw_sched_kernel.rs":
         "RFC-0211 P0.1 heuristic kernel (rmw_group_sched; twin cargo-test)",
+    # 2026-09-23 public sync: rustc-linked engine files. The decision
+    # atoms stay catalog pairs; these are the modules around them.
+    "crates/pedradb-core/src/buggify_hooks_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/bulk_ingest_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/bulk_run_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/cache_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/change_feed_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/client_axis_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/concurrent_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/concurrent_open_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/concurrent_put_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/corrupt_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/db/lookup_archive_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/db_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/db_open_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/db_put_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/durability_spine_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/env_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/error_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/filter_partition_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/group_window_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/history_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/host_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/leftover_page_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/lib_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/lock_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/manifest_mod_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/memtable_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/occ_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/pct_hooks_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/product_crown_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/ratio_curve_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/rng_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/scan_readahead_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/sst/mod_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/sst/table_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/time_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/tx_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/verified_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/verify_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/vlog_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/wal/format_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/wal/mod_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/wal/reader_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/wal/recover_choose_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/wal/writer_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/wal_ticket_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/workload_class_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-core/src/write_cycle_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-io-uring/src/lib_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-io-uring/src/ring_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/pedradb-spec/src/lib_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/rocksdb-compat/src/api_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/rocksdb-compat/src/backup_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/rocksdb-compat/src/checkpoint_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/rocksdb-compat/src/env_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/rocksdb-compat/src/knobs_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/rocksdb-compat/src/lib_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/rocksdb-compat/src/shape_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
+    "crates/rocksdb-compat/src/txn_kernel.rs":
+        "2026-09-23 public sync: engine module around the catalog atoms",
 }
 
 # RFC-0166 P2.4: catalog accounting. `l28_*` is a campaign gate (named

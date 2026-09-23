@@ -1,8 +1,8 @@
 {
   "comment": "Pedra formal glue catalog for the public engine. Production kernel is the source of record; Aeneas extracts that rustc-linked file. twin_kind: close = entry is the production fn; atom = smaller fn; model = stand-in domain. Verus side-copy twins are retired (single_artifact).",
   "object_kinds": {
-    "proof": "machine-checked twin — exec==spec (Verus/Kani/Lean)",
-    "campaign": "named plant / seed replay — not forall traces"
+    "proof": "machine-checked twin \u2014 exec==spec (Verus/Kani/Lean)",
+    "campaign": "named plant / seed replay \u2014 not forall traces"
   },
   "campaign_prefixes": [],
   "pairs": [
@@ -14,26 +14,26 @@
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_put_kernel.rs"
       ],
       "entry": "changelog_needs_sst_rebuild",
       "as_is": "changelog_needs_sst_rebuild_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db_kernel.rs",
+          "file": "crates/pedradb-core/src/db_put_kernel.rs",
           "handler": "maybe_rebuild_feed_from_live"
         }
       ],
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 1/6 P0.3: changelog_needs_sst_rebuild the cited window — feed empty with seq>0 rebuild, feed live never; floor_atom 186→187"
+        "why": "atom 1/6 P0.3: changelog_needs_sst_rebuild the cited window \u2014 feed empty with seq>0 rebuild, feed live never; floor_atom 186\u2192187"
       }
     },
     {
       "id": "range_covers",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over range_tombstone_covers in the atom rung — cited pair: key >= start E key < end; plants DST range_tombstone_covers_on_live_queued_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over range_tombstone_covers in the atom rung \u2014 cited pair: key >= start E key < end; plants DST range_tombstone_covers_on_live_queued_is_not_ok"
       },
       "finding": "F30",
       "twin_kind": "model",
@@ -42,8 +42,7 @@
       "twin": "crates/pedradb-core/src/merge_kernel.rs",
       "aeneas": "scripts/aeneas_merge.sh",
       "callers": [
-        "crates/pedradb-core/src/merge_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/merge_kernel.rs"
       ],
       "entry": "range_tombstone_covers",
       "as_is": "range_tombstone_covers_as_is",
@@ -58,7 +57,7 @@
       "id": "write_op_range_end",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over write_op_range_end in the atom rung — cited dispatch: Deletion/Value without end, RangeDeletion loads the value; plants DST write_op_range_end_on_live_stage_unapplied_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over write_op_range_end in the atom rung \u2014 cited dispatch: Deletion/Value without end, RangeDeletion loads the value; plants DST write_op_range_end_on_live_stage_unapplied_is_not_ok"
       },
       "finding": "F30",
       "twin_kind": "model",
@@ -113,7 +112,7 @@
       "id": "prefix",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over prefix_exclusive_end in the atom rung — cited dispatch: prefix becomes Vec and the cited loop decides; plants DST prefix_exclusive_end_on_live_queued_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over prefix_exclusive_end in the atom rung \u2014 cited dispatch: prefix becomes Vec and the cited loop decides; plants DST prefix_exclusive_end_on_live_queued_is_not_ok"
       },
       "finding": "F57/F58",
       "twin_kind": "close",
@@ -122,7 +121,12 @@
       "kernel": "crates/pedradb-core/src/prefix_kernel.rs",
       "twin": "crates/pedradb-core/src/prefix_kernel.rs",
       "aeneas": "scripts/aeneas_prefix.sh",
-      "callers": [],
+      "callers": [
+        "crates/rocksdb-compat/src/lib_kernel.rs",
+        "crates/pedradb-core/src/sst/table_kernel.rs",
+        "crates/pedradb-core/src/memtable_kernel.rs",
+        "crates/pedradb-core/src/db_kernel.rs"
+      ],
       "entry": "prefix_exclusive_end",
       "token_src": "prefix_exclusive_end",
       "token_dst": "*",
@@ -147,14 +151,14 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "the coletor of recovery decides exactly by the match extraido — each the of the nine framing kinds mapeia to the its fate by the route that the rustc turns on (torn trio: fail-stop in prefix empty, keep-prefix live, or resync under the budget of the MAX extraido; crc/zero-header mid-walk resync or keep-prefix, fail-stop in alinhamento fresco)"
+        "why": "the coletor of recovery decides exactly by the match extraido \u2014 each the of the nine framing kinds mapeia to the its fate by the route that the rustc turns on (torn trio: fail-stop in prefix empty, keep-prefix live, or resync under the budget of the MAX extraido; crc/zero-header mid-walk resync or keep-prefix, fail-stop in alinhamento fresco)"
       }
     },
     {
       "id": "bloom_header",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "cabecalho of the bloom admits exactly the conjuncao cited — k in [1, MAX_K], nbytes covers div_ceil nbits 8 and nbytes cabe in the residual; the as-is accepts k ate u32::MAX (probe without borne)"
+        "why": "cabecalho of the bloom admits exactly the conjuncao cited \u2014 k in [1, MAX_K], nbytes covers div_ceil nbits 8 and nbytes cabe in the residual; the as-is accepts k ate u32::MAX (probe without borne)"
       },
       "finding": "F166",
       "twin_kind": "close",
@@ -183,7 +187,7 @@
       "id": "bloom_insert",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "insert writes exactly the k probes cited — inactive returns the filter itself; the active one computes hash_pair and runs the cited insert_loop loop over bits; the as-is skips the probes (false negative)"
+        "why": "insert writes exactly the k probes cited \u2014 inactive returns the filter itself; the active one computes hash_pair and runs the cited insert_loop loop over bits; the as-is skips the probes (false negative)"
       },
       "finding": "T1 (docs/formal/bloom-filter-theorems.md)",
       "twin_kind": "close",
@@ -212,7 +216,7 @@
       "id": "bloom_may_contain",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "the query decides exactly in the cited loop — inactive and ok true; the active one computes hash_pair and the answer and the cited may_contain_loop loop over bits; the as-is probes k+1 bits (false negative)"
+        "why": "the query decides exactly in the cited loop \u2014 inactive and ok true; the active one computes hash_pair and the answer and the cited may_contain_loop loop over bits; the as-is probes k+1 bits (false negative)"
       },
       "finding": "T1/T4 (docs/formal/bloom-filter-theorems.md)",
       "twin_kind": "close",
@@ -263,7 +267,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 8/9 P0.4: scan_reads_file the cited chain — bounds say reads; otherwise the any over the tombstones decides (v = b1 of the par); the as-is only looks at bounds (tombstone not hides — tooth planted)"
+        "why": "atom 8/9 P0.4: scan_reads_file the cited chain \u2014 bounds say reads; otherwise the any over the tombstones decides (v = b1 of the par); the as-is only looks at bounds (tombstone not hides \u2014 tooth planted)"
       }
     },
     {
@@ -289,7 +293,7 @@
       "atom": "sst_recover_action",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "RFC-0191 P2.3 cadence (seventeenth if): the manifest-recovery disposition — recovery refuses to open exactly when the manifest observation is Corrupt, or it is Inventory while an SST listed in the manifest is missing on disk (an absent manifest rescans and installs; a complete inventory serves; damage or a missing file never serves, F196/G8) — proven forall over (obs, listed) as sst_recover_action_refuse_iff_corrupt_or_inventory_missing in Manifest.lean; the db trampoline (recover_ssts) matches the kernel decision"
+        "why": "RFC-0191 P2.3 cadence (seventeenth if): the manifest-recovery disposition \u2014 recovery refuses to open exactly when the manifest observation is Corrupt, or it is Inventory while an SST listed in the manifest is missing on disk (an absent manifest rescans and installs; a complete inventory serves; damage or a missing file never serves, F196/G8) \u2014 proven forall over (obs, listed) as sst_recover_action_refuse_iff_corrupt_or_inventory_missing in Manifest.lean; the db trampoline (recover_ssts) matches the kernel decision"
       },
       "three_teeth": true
     },
@@ -302,6 +306,7 @@
       "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "aeneas": "scripts/aeneas_reopen.sh",
       "callers": [
+        "crates/pedradb-core/src/db_open_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "reopen_outcome",
@@ -316,7 +321,7 @@
       "atom": "reopen_outcome",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "RFC-0191 P2.3 cadence (nineteenth if): the reopen disposition — a WAL reopen serves all records exactly when the log carries no damage; any damage (truncated head, CRC mismatch, zero header, resync) is refused or served only as a reported prefix, never silently served whole, F170/F171/G8 — proven forall over (damage, point_in_time, escalated) as reopen_outcome_serve_all_iff_damage_none in Reopen.lean; the db trampoline (open_with_env) matches the kernel decision"
+        "why": "RFC-0191 P2.3 cadence (nineteenth if): the reopen disposition \u2014 a WAL reopen serves all records exactly when the log carries no damage; any damage (truncated head, CRC mismatch, zero header, resync) is refused or served only as a reported prefix, never silently served whole, F170/F171/G8 \u2014 proven forall over (damage, point_in_time, escalated) as reopen_outcome_serve_all_iff_damage_none in Reopen.lean; the db trampoline (open_with_env) matches the kernel decision"
       },
       "three_teeth": true
     },
@@ -377,6 +382,10 @@
         "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "occ_snap_uses_published",
+      "atom_reason": {
+        "date": "2026-09-13",
+        "why": "OCC snapshot reads the published sequence, not an in-flight one (RFC-0045 P2.1 lock order)"
+      },
       "handlers": [
         "occ_snapshot"
       ],
@@ -412,7 +421,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 1/4 P0.1: occ_conflict the iff exact of the window (snap, last_seq] — conflito = touched under window non-empty, false under window empty; floor_atom 178→179"
+        "why": "atom 1/4 P0.1: occ_conflict the iff exact of the window (snap, last_seq] \u2014 conflito = touched under window non-empty, false under window empty; floor_atom 178\u2192179"
       }
     },
     {
@@ -440,7 +449,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 3/4 P0.1: fence_publish_seq the cited chain of the loop extracted (Form/DecodeFate template, fuel = members remaining); floor_atom 180→181"
+        "why": "atom 3/4 P0.1: fence_publish_seq the cited chain of the loop extracted (Form/DecodeFate template, fuel = members remaining); floor_atom 180\u2192181"
       }
     },
     {
@@ -466,7 +475,7 @@
       "atom": "compact_pick",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "RFC-0191 P2.3 cadence (eighteenth if): the compaction-pick disposition — a max-level GC rewrite is chosen exactly when no level holds files while GC was requested and files already sit at the max level (a level holding files yields a Merge of it with its successor; without both flags the plan is NoOp, F177/F20) — proven forall over (lowest_level_with_files, files_at_max_level, gc_requested, max_level) as compact_pick_gc_rewrite_max_iff_none_and_gc_and_files_at_max in Compact.lean; the db trampoline (compact_with_ssts_only) matches the kernel decision"
+        "why": "RFC-0191 P2.3 cadence (eighteenth if): the compaction-pick disposition \u2014 a max-level GC rewrite is chosen exactly when no level holds files while GC was requested and files already sit at the max level (a level holding files yields a Merge of it with its successor; without both flags the plan is NoOp, F177/F20) \u2014 proven forall over (lowest_level_with_files, files_at_max_level, gc_requested, max_level) as compact_pick_gc_rewrite_max_iff_none_and_gc_and_files_at_max in Compact.lean; the db trampoline (compact_with_ssts_only) matches the kernel decision"
       },
       "three_teeth": true
     },
@@ -493,18 +502,19 @@
       "atom": "point_version_fate",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "RFC-0191 P2.3 cadence (sixteenth if): the point-version retention disposition — a point version is dropped exactly when a newer kept version exists AND it sits at or below the oldest snapshot (a version still visible to the oldest snapshot is never dropped, and a version with no newer kept copy is never dropped either, F177/F20) — proven forall over (this_seq, newer_kept_seq, oldest_snapshot) as point_version_fate_drop_iff_newer_kept_at_or_below_oldest_snapshot in Compact.lean; the merge trampoline (gc_snapshot_safe) matches the kernel decision"
+        "why": "RFC-0191 P2.3 cadence (sixteenth if): the point-version retention disposition \u2014 a point version is dropped exactly when a newer kept version exists AND it sits at or below the oldest snapshot (a version still visible to the oldest snapshot is never dropped, and a version with no newer kept copy is never dropped either, F177/F20) \u2014 proven forall over (this_seq, newer_kept_seq, oldest_snapshot) as point_version_fate_drop_iff_newer_kept_at_or_below_oldest_snapshot in Compact.lean; the merge trampoline (gc_snapshot_safe) matches the kernel decision"
       },
       "three_teeth": true
     },
     {
       "id": "dictionary_link",
-      "finding": "G1/G8 (crash dictionary put→get)",
+      "finding": "G1/G8 (crash dictionary put\u2192get)",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "callers": [
+        "crates/pedradb-core/src/db_open_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "reopen_outcome",
@@ -518,7 +528,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 6/6 P0.3: reopen_outcome_flat_fate_iff — table complete 4 rows (without damage serves everything; PIT unscaled serves prefix; scaled or without PIT refuses), finer than the iff agrupada previous; floor_atom 191→192"
+        "why": "atom 6/6 P0.3: reopen_outcome_flat_fate_iff \u2014 table complete 4 rows (without damage serves everything; PIT unscaled serves prefix; scaled or without PIT refuses), finer than the iff agrupada previous; floor_atom 191\u2192192"
       }
     },
     {
@@ -530,7 +540,7 @@
       "twin": "crates/pedradb-core/src/vlog_gc_kernel.rs",
       "aeneas": "scripts/aeneas_vlog_gc.sh",
       "callers": [
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "vlog_recover_action",
       "handlers": [
@@ -544,7 +554,7 @@
       "atom": "vlog_recover_action",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "RFC-0191 P2.3 cadence (twentieth if): the vlog-recovery disposition — recovery refuses to open exactly when the MANIFEST says the swing committed (use_new) while neither file is on disk: blob mode off, large values wanted, no primary, no new (inventing an empty primary would make every large value vanish, F51/G-swing) — proven forall over (blob_active, wants_large, primary_exists, use_new, new_exists) as vlog_recover_action_refuse_open_iff_wants_large_use_new_and_nothing_on_disk in VlogGc.lean; the db trampoline (open_with_env) matches the kernel decision"
+        "why": "RFC-0191 P2.3 cadence (twentieth if): the vlog-recovery disposition \u2014 recovery refuses to open exactly when the MANIFEST says the swing committed (use_new) while neither file is on disk: blob mode off, large values wanted, no primary, no new (inventing an empty primary would make every large value vanish, F51/G-swing) \u2014 proven forall over (blob_active, wants_large, primary_exists, use_new, new_exists) as vlog_recover_action_refuse_open_iff_wants_large_use_new_and_nothing_on_disk in VlogGc.lean; the db trampoline (open_with_env) matches the kernel decision"
       },
       "three_teeth": true
     },
@@ -571,7 +581,7 @@
       "atom": "blob_gc_action",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "RFC-0191 P2.3 cadence (fifteenth if): the blob-GC disposition — the GC rewrites a blob gen exactly when the gen is inactive AND still carries bytes (an active gen is never rewritten; an empty inactive gen has nothing to rewrite, F-active-gen) — proven forall over (is_active, bytes) as blob_gc_action_rewrite_iff_inactive_with_bytes in VlogGc.lean; the db trampoline (compact_blob_auto) matches the kernel decision"
+        "why": "RFC-0191 P2.3 cadence (fifteenth if): the blob-GC disposition \u2014 the GC rewrites a blob gen exactly when the gen is inactive AND still carries bytes (an active gen is never rewritten; an empty inactive gen has nothing to rewrite, F-active-gen) \u2014 proven forall over (is_active, bytes) as blob_gc_action_rewrite_iff_inactive_with_bytes in VlogGc.lean; the db trampoline (compact_blob_auto) matches the kernel decision"
       },
       "three_teeth": true
     },
@@ -627,7 +637,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-11",
-        "why": "RFC-0202 P0.1 data-race row: write-lock client protocol — Db mutation permitted exactly while holding the write guard (forall-iff over the extracted body, GroupCommit.lean); AS-IS mutate-after-drop unreachable"
+        "why": "RFC-0202 P0.1 data-race row: write-lock client protocol \u2014 Db mutation permitted exactly while holding the write guard (forall-iff over the extracted body, GroupCommit.lean); AS-IS mutate-after-drop unreachable"
       }
     },
     {
@@ -679,7 +689,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 2/4 P0.1: fsync_promotes_pending the lift puro — pending promotes iff OS honest; floor_atom 179→180"
+        "why": "atom 2/4 P0.1: fsync_promotes_pending the lift puro \u2014 pending promotes iff OS honest; floor_atom 179\u2192180"
       }
     },
     {
@@ -735,7 +745,7 @@
       "id": "cqe_res",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ over cqe_res_ok in the atom rung — CQE is success iff res >= 0; the as-is cqe_res_ok_as_is (everything success) refused by the plants DST cqe_res_ok_on_live_uring_is_not_ok"
+        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 over cqe_res_ok in the atom rung \u2014 CQE is success iff res >= 0; the as-is cqe_res_ok_as_is (everything success) refused by the plants DST cqe_res_ok_on_live_uring_is_not_ok"
       },
       "finding": "RFC-0074",
       "twin_kind": "close",
@@ -764,7 +774,7 @@
       "id": "cqe_tags",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ over next_user_data in the atom rung — tags unique by SQE (c≠0: (c,c+1) wrapping; c=0: skips the zero reservado, (1,2)); the as-is next_user_data_as_is (tag constante per opcode) refused by the plants DST unique_tags_discard_leftover_same_opcode"
+        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 over next_user_data in the atom rung \u2014 tags unique by SQE (c\u22600: (c,c+1) wrapping; c=0: skips the zero reservado, (1,2)); the as-is next_user_data_as_is (tag constante per opcode) refused by the plants DST unique_tags_discard_leftover_same_opcode"
       },
       "finding": "F203",
       "twin_kind": "close",
@@ -793,7 +803,7 @@
       "id": "cqe_leftover",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ over cqe_act in the atom rung — CQE taken iff user_data = want; leftover descartado; the as-is cqe_act_as_is (toma any CQE) refused by the plants DST cqe_act_as_is_adopts_leftover"
+        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 over cqe_act in the atom rung \u2014 CQE taken iff user_data = want; leftover descartado; the as-is cqe_act_as_is (toma any CQE) refused by the plants DST cqe_act_as_is_adopts_leftover"
       },
       "finding": "F203/U1",
       "twin_kind": "close",
@@ -822,7 +832,7 @@
       "id": "cqe_submit",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ over submit_complete_act in the atom rung — the harvested CQE is used (UseHarvested), otherwise waits (WaitMore), submit_err not releases the buffer under DMA; the as-is submit_complete_act_as_is (Err in the submit with CQE pending, F208) refused by the plants DST harvest_on_submit_err_uses_cqe"
+        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 over submit_complete_act in the atom rung \u2014 the harvested CQE is used (UseHarvested), otherwise waits (WaitMore), submit_err not releases the buffer under DMA; the as-is submit_complete_act_as_is (Err in the submit with CQE pending, F208) refused by the plants DST harvest_on_submit_err_uses_cqe"
       },
       "finding": "F208",
       "twin_kind": "close",
@@ -851,7 +861,7 @@
       "id": "cqe_ring_refusal",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ over cqe_ring_model_admitted in the atom rung — the model of ring Verus is not admitted, the door stays closed (RFC-0074 P2.2); the as-is cqe_ring_model_admitted_as_is (door open) refused by the plants DST cqe_ring_model_is_not_admitted"
+        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 over cqe_ring_model_admitted in the atom rung \u2014 the model of ring Verus is not admitted, the door stays closed (RFC-0074 P2.2); the as-is cqe_ring_model_admitted_as_is (door open) refused by the plants DST cqe_ring_model_is_not_admitted"
       },
       "finding": "RFC-0074 P2.2",
       "twin_kind": "close",
@@ -901,7 +911,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 1/9 P0.4: crc_match_ok the lift puro of the cited equality stored = computed; floor_atom 192→193"
+        "why": "atom 1/9 P0.4: crc_match_ok the lift puro of the cited equality stored = computed; floor_atom 192\u2192193"
       }
     },
     {
@@ -930,7 +940,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 4/9 P0.4: sst_crc_fate the cited tree — matches → StripTrailer, mismatch legado → WholeBuffer, mismatch moderno → Reject; floor_atom 195→196"
+        "why": "atom 4/9 P0.4: sst_crc_fate the cited tree \u2014 matches \u2192 StripTrailer, mismatch legado \u2192 WholeBuffer, mismatch moderno \u2192 Reject; floor_atom 195\u2192196"
       }
     },
     {
@@ -1020,7 +1030,7 @@
       "atom": "cf_encode_effective",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "RFC-0191 P2.3 cadence (twenty-second if): the effective column-family encoding disposition — the effective encoding is empty exactly when the cf is default and default_raw strips it, or the else-branch kept an already-empty cf; any other cf passes through untouched (RFC-0150 P0; the Str equality is the Aeneas boundary, stated over its Result so a fail/div comparison never fakes an empty encoding) — proven forall over (cf, default_raw) as cf_encode_effective_empty_iff_default_raw_else_identity in Cf.lean; the cf trampoline matches the kernel decision"
+        "why": "RFC-0191 P2.3 cadence (twenty-second if): the effective column-family encoding disposition \u2014 the effective encoding is empty exactly when the cf is default and default_raw strips it, or the else-branch kept an already-empty cf; any other cf passes through untouched (RFC-0150 P0; the Str equality is the Aeneas boundary, stated over its Result so a fail/div comparison never fakes an empty encoding) \u2014 proven forall over (cf, default_raw) as cf_encode_effective_empty_iff_default_raw_else_identity in Cf.lean; the cf trampoline matches the kernel decision"
       },
       "three_teeth": true
     },
@@ -1056,7 +1066,7 @@
       "atom": "encode_cf_key",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "(twenty-seventh if): the encode disposition — encoding yields the bare key exactly when the effective cf encoding is empty; otherwise the output is the capacity-planned chain of effective bytes, one 0 separator, then the key, with every step of the chain ok — proven forall over (cf, key, default_raw, v) as encode_cf_key_ok_iff_bare_key_or_prefixed_vec in Cf.lean; the trampolines (rocksdb-compat encode, compact_ssts_only_cf) match the kernel decision."
+        "why": "(twenty-seventh if): the encode disposition \u2014 encoding yields the bare key exactly when the effective cf encoding is empty; otherwise the output is the capacity-planned chain of effective bytes, one 0 separator, then the key, with every step of the chain ok \u2014 proven forall over (cf, key, default_raw, v) as encode_cf_key_ok_iff_bare_key_or_prefixed_vec in Cf.lean; the trampolines (rocksdb-compat encode, compact_ssts_only_cf) match the kernel decision."
       },
       "three_teeth": true
     },
@@ -1087,7 +1097,7 @@
       "atom": "decode_cf_key",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "(twenty-sixth if): the decode disposition — decoding is the identity exactly when the effective cf encoding is empty; otherwise the cf\\0 prefix is stripped by slicing from len+1, and a prefix that does not fit the encoded buffer yields the empty slice, never a partial or shifted view — proven forall over (cf, encoded, default_raw, v) as decode_cf_key_ok_iff_identity_or_stripped_past_prefix in Cf.lean; the rocksdb-compat trampoline (decode) matches the kernel decision."
+        "why": "(twenty-sixth if): the decode disposition \u2014 decoding is the identity exactly when the effective cf encoding is empty; otherwise the cf\\0 prefix is stripped by slicing from len+1, and a prefix that does not fit the encoded buffer yields the empty slice, never a partial or shifted view \u2014 proven forall over (cf, encoded, default_raw, v) as decode_cf_key_ok_iff_identity_or_stripped_past_prefix in Cf.lean; the rocksdb-compat trampoline (decode) matches the kernel decision."
       },
       "three_teeth": true
     },
@@ -1118,7 +1128,7 @@
       "atom": "infer_sst_cf",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "(twenty-eighth if): the SST-tag disposition — an SST is tagged with the family of its bounds exactly when both bounds share one family; one-sided bounds take their sole family; no bounds yield the empty (mixed/legacy) tag — never a tag misrepresenting mixed contents — proven forall over (smallest, largest, v) as infer_sst_cf_ok_iff_shared_family_or_empty in Cf.lean; the pedradb-core trampoline (write_l0_sst_for_family) matches the kernel decision."
+        "why": "(twenty-eighth if): the SST-tag disposition \u2014 an SST is tagged with the family of its bounds exactly when both bounds share one family; one-sided bounds take their sole family; no bounds yield the empty (mixed/legacy) tag \u2014 never a tag misrepresenting mixed contents \u2014 proven forall over (smallest, largest, v) as infer_sst_cf_ok_iff_shared_family_or_empty in Cf.lean; the pedradb-core trampoline (write_l0_sst_for_family) matches the kernel decision."
       },
       "three_teeth": true
     },
@@ -1149,7 +1159,7 @@
       "atom": "compact_rewrites_sst_cf",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "(twenty-fifth if): the compact-rewrite disposition — an empty (mixed/legacy) SST tag is never rewritten; a non-empty tag is decided by the in-family test over the representative encoded key of that tag with every monadic step of the route ok — proven forall over (sst_cf, family, v) as compact_rewrites_sst_cf_ok_iff_empty_tag_never_or_representative_in_family in Cf.lean; the pedradb-core trampoline (compact_ssts_only_cf) matches the kernel decision."
+        "why": "(twenty-fifth if): the compact-rewrite disposition \u2014 an empty (mixed/legacy) SST tag is never rewritten; a non-empty tag is decided by the in-family test over the representative encoded key of that tag with every monadic step of the route ok \u2014 proven forall over (sst_cf, family, v) as compact_rewrites_sst_cf_ok_iff_empty_tag_never_or_representative_in_family in Cf.lean; the pedradb-core trampoline (compact_ssts_only_cf) matches the kernel decision."
       },
       "three_teeth": true
     },
@@ -1167,8 +1177,7 @@
       "aeneas": "scripts/aeneas_merge.sh",
       "callers": [
         "crates/pedradb-core/src/merge_kernel.rs",
-        "crates/pedradb-core/src/memtable_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/memtable_kernel.rs"
       ],
       "entry": "visible_at",
       "as_is": "visible_at_as_is",
@@ -1181,7 +1190,7 @@
       "id": "ikey_pack",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over pack_sequence_and_type in the atom rung — cited chain: ceiling MAX_SEQUENCE_NUMBER read and afirmado (massert), shift 8, type u8→u64, package = or bit the bit; plants DST pack_sequence_and_type_on_live_db_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over pack_sequence_and_type in the atom rung \u2014 cited chain: ceiling MAX_SEQUENCE_NUMBER read and afirmado (massert), shift 8, type u8\u2192u64, package = or bit the bit; plants DST pack_sequence_and_type_on_live_db_is_not_ok"
       },
       "finding": "RFC-0150 P1",
       "twin_kind": "close",
@@ -1251,7 +1260,7 @@
       "atom": "gc_oldest_from_pin",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "RFC-0191 P2.3 cadence (twenty-third if): the GC oldest-boundary disposition — the boundary is exactly the live pin when one exists; unpinned, it is the visible minimum of last and visible seq, so GC never advances past a pin nor past what is visible (RFC-0150 P2b/F20; the Ord.min is the Aeneas boundary, stated over its Result) — proven forall over (oldest_pin, last_seq, visible_seq, v) as gc_oldest_from_pin_value_iff_pin_or_unpinned_visible_min in Compact.lean; the db trampoline (compact_reclaim) matches the kernel decision"
+        "why": "RFC-0191 P2.3 cadence (twenty-third if): the GC oldest-boundary disposition \u2014 the boundary is exactly the live pin when one exists; unpinned, it is the visible minimum of last and visible seq, so GC never advances past a pin nor past what is visible (RFC-0150 P2b/F20; the Ord.min is the Aeneas boundary, stated over its Result) \u2014 proven forall over (oldest_pin, last_seq, visible_seq, v) as gc_oldest_from_pin_value_iff_pin_or_unpinned_visible_min in Compact.lean; the db trampoline (compact_reclaim) matches the kernel decision"
       },
       "three_teeth": true
     },
@@ -1274,7 +1283,7 @@
       },
       "atom_reason": {
         "date": "2026-09-11",
-        "why": "RFC-0202 P1.1 deadlock row: step-edge bridges with lookup hypotheses over the extracted loop body (nowait=alive, cycle-closes=deadlock, revisit=deadlock, Locktab.lean); full cycle iff needs map semantics — dated boundary in formal/aeneas/EXTRACT.md"
+        "why": "RFC-0202 P1.1 deadlock row: step-edge bridges with lookup hypotheses over the extracted loop body (nowait=alive, cycle-closes=deadlock, revisit=deadlock, Locktab.lean); full cycle iff needs map semantics \u2014 dated boundary in formal/aeneas/EXTRACT.md"
       }
     },
     {
@@ -1306,7 +1315,7 @@
       "id": "probe_order",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "tie of lo probes exactly the newest — the result is the cited newer index; the as-is returns the older one (resurrects a delete on the tie)"
+        "why": "tie of lo probes exactly the newest \u2014 the result is the cited newer index; the as-is returns the older one (resurrects a delete on the tie)"
       },
       "finding": "RFC-0164 P0.1",
       "twin_kind": "close",
@@ -1331,7 +1340,7 @@
       "id": "run_disjoint",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "disjuncao of run and exactly the cited pair — n = min of the comprimentos, n >= 2 and the all cited over 1..n (hi[i-1] < lo[i]); the as-is uses <= (tie arma the bisect that ressuscita)"
+        "why": "disjuncao of run and exactly the cited pair \u2014 n = min of the comprimentos, n >= 2 and the all cited over 1..n (hi[i-1] < lo[i]); the as-is uses <= (tie arma the bisect that ressuscita)"
       },
       "finding": "RFC-0164 P1.2",
       "twin_kind": "model",
@@ -1380,7 +1389,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "window of the iterador of compat mantem the entry if and so if the snapshot still this live — identidade over the body extraido; the as-is mantem everything and ressuscita entries escondidas, the plants DST refuta"
+        "why": "window of the iterador of compat mantem the entry if and so if the snapshot still this live \u2014 identidade over the body extraido; the as-is mantem everything and ressuscita entries escondidas, the plants DST refuta"
       }
     },
     {
@@ -1409,7 +1418,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 3/9 P0.4: zero_glue_admitted the constante cited false — residual glue zero is never read; floor_atom 194→195"
+        "why": "atom 3/9 P0.4: zero_glue_admitted the constante cited false \u2014 residual glue zero is never read; floor_atom 194\u2192195"
       }
     },
     {
@@ -1466,7 +1475,7 @@
       "atom": "level_target_bytes",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "(twenty-fourth if): the leveled-target disposition — level 0 has no size target; a non-zero level computes l1_target·FANOUT^min(level−1,18) with saturating arithmetic and every intermediate step ok — proven forall over (level, l1_target, v) as level_target_bytes_ok_iff_zero_or_fanout_chain in Leveling.lean; the pedradb-core trampoline (prepare_l0_compact / prepare_pushdown_compact) matches the kernel decision."
+        "why": "(twenty-fourth if): the leveled-target disposition \u2014 level 0 has no size target; a non-zero level computes l1_target\u00b7FANOUT^min(level\u22121,18) with saturating arithmetic and every intermediate step ok \u2014 proven forall over (level, l1_target, v) as level_target_bytes_ok_iff_zero_or_fanout_chain in Leveling.lean; the pedradb-core trampoline (prepare_l0_compact / prepare_pushdown_compact) matches the kernel decision."
       },
       "three_teeth": true
     },
@@ -1556,7 +1565,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "spec ×4 P0.1 2/4: D1 accepts (acked, survives) exactly when none index ackado falls in or beyond the prefix surviving (put→Ok durable, promise G1); loop real via spec_decr_nat; mutant the as-is (only synced) refused by the plants"
+        "why": "spec \u00d74 P0.1 2/4: D1 accepts (acked, survives) exactly when none index ackado falls in or beyond the prefix surviving (put\u2192Ok durable, promise G1); loop real via spec_decr_nat; mutant the as-is (only synced) refused by the plants"
       }
     },
     {
@@ -1579,7 +1588,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "spec ×4 P0.1 4/4: the answer of read passes R1 exactly when it matches the first hit in probe order (r1_first_hit_fate characterizes IsFirstHit; equality Option is an axiom of extract cited); mutant the as-is (any hit covering, delete resurrected) refused"
+        "why": "spec \u00d74 P0.1 4/4: the answer of read passes R1 exactly when it matches the first hit in probe order (r1_first_hit_fate characterizes IsFirstHit; equality Option is an axiom of extract cited); mutant the as-is (any hit covering, delete resurrected) refused"
       }
     },
     {
@@ -1602,7 +1611,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "spec ×4 P0.1 3/4: T1 accepts exactly when the tx is all-or-nothing (never both flags, visible name staged, committed⇒all, otherwise none); two real loops via spec_decr_nat; the as-is mutant (only byte integrity) refused"
+        "why": "spec \u00d74 P0.1 3/4: T1 accepts exactly when the tx is all-or-nothing (never both flags, visible name staged, committed\u21d2all, otherwise none); two real loops via spec_decr_nat; the as-is mutant (only byte integrity) refused"
       }
     },
     {
@@ -1625,14 +1634,14 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "spec ×4 P0.1 1/4: value servido passes C1 exactly when the majority of TODA config ativa replica (joint requires old E new); mutant the as-is (only majority old) refused by the plants"
+        "why": "spec \u00d74 P0.1 1/4: value servido passes C1 exactly when the majority of TODA config ativa replica (joint requires old E new); mutant the as-is (only majority old) refused by the plants"
       }
     },
     {
       "id": "leveled_enabled",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over leveled_enabled in the atom rung — read cited of PEDRA_LEVELED: absent/error turns on, present turns on except the trimmed value 0; plants DST leveled_env_switch_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over leveled_enabled in the atom rung \u2014 read cited of PEDRA_LEVELED: absent/error turns on, present turns on except the trimmed value 0; plants DST leveled_env_switch_is_not_ok"
       },
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
@@ -1662,7 +1671,7 @@
       "id": "leveling_disjoint",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over is_disjoint in the atom rung — dispatch puro: is the outer_cited loop in 0#usize; plants DST is_disjoint_on_live_stack_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over is_disjoint in the atom rung \u2014 dispatch puro: is the outer_cited loop in 0#usize; plants DST is_disjoint_on_live_stack_is_not_ok"
       },
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
@@ -1692,7 +1701,7 @@
       "id": "leveling_overlaps",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over overlaps in the atom rung — cited pair: lo of the file <= hull_hi and hi of the file >= hull_lo; plants DST overlaps_on_live_slice_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over overlaps in the atom rung \u2014 cited pair: lo of the file <= hull_hi and hi of the file >= hull_lo; plants DST overlaps_on_live_slice_is_not_ok"
       },
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
@@ -1715,7 +1724,7 @@
       "id": "leveling_total_bytes",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate ∀ over total_bytes in the atom rung — adds cited: iter of the slice, map that extrai bytes, sum u64; plants DST total_bytes_on_live_level_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over total_bytes in the atom rung \u2014 adds cited: iter of the slice, map that extrai bytes, sum u64; plants DST total_bytes_on_live_level_is_not_ok"
       },
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
@@ -1761,7 +1770,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 7/9 P0.4: tombstone_reaches_window the the two gates cited half-open — reaches iff t_end>start E t_start≤end (v = the && b); the as-is returns false always (tooth planted)"
+        "why": "atom 7/9 P0.4: tombstone_reaches_window the the two gates cited half-open \u2014 reaches iff t_end>start E t_start\u2264end (v = the && b); the as-is returns false always (tooth planted)"
       }
     },
     {
@@ -1784,7 +1793,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 5/9 P0.4: key_in_window the the two gates cited — the key enters iff passed in the start E in the end (v = the && b); the as-is 0104 only looks at the start (tooth planted)"
+        "why": "atom 5/9 P0.4: key_in_window the the two gates cited \u2014 the key enters iff passed in the start E in the end (v = the && b); the as-is 0104 only looks at the start (tooth planted)"
       }
     },
     {
@@ -1807,7 +1816,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 6/9 P0.4: point_bounds_overlap the bounds cited — without smallest/largest reads; with both reads iff lo≤end E hi≥start; the as-is 0240 delega with bounds overflowing (tooth planted)"
+        "why": "atom 6/9 P0.4: point_bounds_overlap the bounds cited \u2014 without smallest/largest reads; with both reads iff lo\u2264end E hi\u2265start; the as-is 0240 delega with bounds overflowing (tooth planted)"
       }
     },
     {
@@ -1836,7 +1845,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 2/9 P0.4: sst_block_crc_ok the lift of the cited equality stored = computed (chains crc_match_ok); floor_atom 193→194"
+        "why": "atom 2/9 P0.4: sst_block_crc_ok the lift of the cited equality stored = computed (chains crc_match_ok); floor_atom 193\u2192194"
       }
     },
     {
@@ -1869,7 +1878,7 @@
       "aeneas": "scripts/aeneas_magic.sh",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 9/9 P0.4: sst_magic_is_pedra the cited chain — without 8 bytes refuses; with prefix possible admits iff the slice-eq PEDRSST\\0 matches; the as-is admits any header (drop-in in disk — tooth planted); extract new MagicKernel via aeneas_magic.sh (shim with const pinada)"
+        "why": "atom 9/9 P0.4: sst_magic_is_pedra the cited chain \u2014 without 8 bytes refuses; with prefix possible admits iff the slice-eq PEDRSST\\0 matches; the as-is admits any header (drop-in in disk \u2014 tooth planted); extract new MagicKernel via aeneas_magic.sh (shim with const pinada)"
       }
     },
     {
@@ -1898,7 +1907,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 2/4 P0.2: is_length_resyncable the classificador cited — trio of damage of length (Truncated/LengthCorrupt/UnknownType) → true, demais six → false; floor_atom 183→184"
+        "why": "atom 2/4 P0.2: is_length_resyncable the classificador cited \u2014 trio of damage of length (Truncated/LengthCorrupt/UnknownType) \u2192 true, demais six \u2192 false; floor_atom 183\u2192184"
       }
     },
     {
@@ -1927,7 +1936,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 3/4 P0.2: physical_payload_act the tree of three ifs cited — oversize → FailStop, payload beyond the block → FailStop/Truncated by alignment, inside → Continue; floor_atom 184→185"
+        "why": "atom 3/4 P0.2: physical_payload_act the tree of three ifs cited \u2014 oversize \u2192 FailStop, payload beyond the block \u2192 FailStop/Truncated by alignment, inside \u2192 Continue; floor_atom 184\u2192185"
       }
     },
     {
@@ -1956,7 +1965,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 4/4 P0.2: fragment_act the table complete FragKind × scratch_empty cited — orphan Middle/Last with scratch empty fail-stopa; floor_atom 185→186"
+        "why": "atom 4/4 P0.2: fragment_act the table complete FragKind \u00d7 scratch_empty cited \u2014 orphan Middle/Last with scratch empty fail-stopa; floor_atom 185\u2192186"
       }
     },
     {
@@ -1985,14 +1994,14 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 1/4 P0.2: from_record_type the bijection total cited RecordType→FragKind (5 branches); floor_atom 182→183"
+        "why": "atom 1/4 P0.2: from_record_type the bijection total cited RecordType\u2192FragKind (5 branches); floor_atom 182\u2192183"
       }
     },
     {
       "id": "compact_split",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ over compact_should_split in the atom rung — bind cited: the gate COMPACT_TARGET_FILE_BYTES produces the alvo and the comparison decides; plants DST compact_should_split_bounds_one_output_file"
+        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 over compact_should_split in the atom rung \u2014 bind cited: the gate COMPACT_TARGET_FILE_BYTES produces the alvo and the comparison decides; plants DST compact_should_split_bounds_one_output_file"
       },
       "finding": "RFC-0160 OOM",
       "twin_kind": "close",
@@ -2015,7 +2024,7 @@
       "id": "compact_split_at",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ over compact_should_split_at in the atom rung — decides (written >= target), mutants never dividem; plants DST compact_split_mutants_never_split_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 over compact_should_split_at in the atom rung \u2014 decides (written >= target), mutants never dividem; plants DST compact_split_mutants_never_split_is_not_ok"
       },
       "finding": "RFC-0160 OOM",
       "twin_kind": "close",
@@ -2038,7 +2047,7 @@
       "id": "lone_tombstone",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ over lone_tombstone_fate in the atom rung — Drop requires bottommost and single-newest; resto Keep; plants DST theorem_lone_tombstone_on_finite_domain"
+        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 over lone_tombstone_fate in the atom rung \u2014 Drop requires bottommost and single-newest; resto Keep; plants DST theorem_lone_tombstone_on_finite_domain"
       },
       "finding": "F177",
       "twin_kind": "close",
@@ -2089,7 +2098,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 2/6 P0.3: changelog_should_store the gate cited — interval 0 never, interval > 0 when commits >= interval; floor_atom 187→188"
+        "why": "atom 2/6 P0.3: changelog_should_store the gate cited \u2014 interval 0 never, interval > 0 when commits >= interval; floor_atom 187\u2192188"
       }
     },
     {
@@ -2100,13 +2109,14 @@
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "callers": [
+        "crates/pedradb-core/src/db_put_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "changelog_rebuild_within_budget",
       "as_is": "changelog_rebuild_within_budget_as_is",
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db_kernel.rs",
+          "file": "crates/pedradb-core/src/db_put_kernel.rs",
           "handler": "maybe_rebuild_feed_from_live"
         }
       ],
@@ -2117,7 +2127,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 3/6 P0.3: changelog_rebuild_within_budget the lift puro of the cited comparison live_entries ≤ budget_entries; floor_atom 188→189"
+        "why": "atom 3/6 P0.3: changelog_rebuild_within_budget the lift puro of the cited comparison live_entries \u2264 budget_entries; floor_atom 188\u2192189"
       }
     },
     {
@@ -2127,20 +2137,21 @@
       "atom": "changelog_durable_commit_fate",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P0.1: the destination of the debounce of CHANGELOG in a finished commit is decision of the kernel — counts iff the resolution of sync of the write-admission (flag of the client wins, otherwise default of the DB) made the commit durable, proved ∀ over (client_set, client_sync, db_sync) the changelog_durable_commit_fate_fate_iff in Changelog.lean; the trampoline db.rs commit_ops_with does match in the plan of the kernel"
+        "why": "RFC-0219 P0.1: the destination of the debounce of CHANGELOG in a finished commit is decision of the kernel \u2014 counts iff the resolution of sync of the write-admission (flag of the client wins, otherwise default of the DB) made the commit durable, proved \u2200 over (client_set, client_sync, db_sync) the changelog_durable_commit_fate_fate_iff in Changelog.lean; the trampoline db.rs commit_ops_with does match in the plan of the kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
       "aeneas": "scripts/aeneas_changelog.sh",
       "callers": [
+        "crates/pedradb-core/src/db_put_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "changelog_durable_commit_fate",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db_kernel.rs",
+          "file": "crates/pedradb-core/src/db_put_kernel.rs",
           "handler": "commit_ops_with"
         }
       ],
@@ -2157,7 +2168,7 @@
       "atom": "wal_archive_delete_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P0.2: the destination keep-vs-delete of the chain arquivada of WAL is decision of the kernel — guard while the publish of the MANIFEST atrasa the files (segments above of manifest_published_seq are the single durable copy of the window), proved ∀ over (manifest_published_seq, wal_archive_max_seq) the wal_archive_delete_plan_fate_iff in Changelog.lean; the trampoline db.rs delete_wal_archives does match in the plan of the kernel"
+        "why": "RFC-0219 P0.2: the destination keep-vs-delete of the chain arquivada of WAL is decision of the kernel \u2014 guard while the publish of the MANIFEST atrasa the files (segments above of manifest_published_seq are the single durable copy of the window), proved \u2200 over (manifest_published_seq, wal_archive_max_seq) the wal_archive_delete_plan_fate_iff in Changelog.lean; the trampoline db.rs delete_wal_archives does match in the plan of the kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
@@ -2187,7 +2198,7 @@
       "atom": "bulk_manifest_persist_fate",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P0.3: the the publish of the MANIFEST of the bulk install is paid is decision of the kernel — sync (dir-sync) persiste inline and zeroes the debt; async amortiza by bulk_manifest_debt the each BULK_MANIFEST_EVERY, proved ∀ over sync the bulk_manifest_persist_fate_fate_iff in Manifest.lean; the trampoline db.rs persist_bulk_manifest does match in the plan of the kernel"
+        "why": "RFC-0219 P0.3: the the publish of the MANIFEST of the bulk install is paid is decision of the kernel \u2014 sync (dir-sync) persiste inline and zeroes the debt; async amortiza by bulk_manifest_debt the each BULK_MANIFEST_EVERY, proved \u2200 over sync the bulk_manifest_persist_fate_fate_iff in Manifest.lean; the trampoline db.rs persist_bulk_manifest does match in the plan of the kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
@@ -2217,7 +2228,7 @@
       "atom": "point_cache_validity",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.1: the gate F198/F207 of fill/hit of the point/prefix cache is decision of the kernel — fill admissible only while published seq is still equal to the seq of the answer (publish in progress invalidates the answer pre-publish), proved ∀ over (published, answer) the point_cache_validity_fate_iff in Lookup.lean; the three trampolines db.rs (get_after_point_miss, get_at double-check, last_under_user_prefix) match in the plan of the kernel"
+        "why": "RFC-0219 P1.1: the gate F198/F207 of fill/hit of the point/prefix cache is decision of the kernel \u2014 fill admissible only while published seq is still equal to the seq of the answer (publish in progress invalidates the answer pre-publish), proved \u2200 over (published, answer) the point_cache_validity_fate_iff in Lookup.lean; the three trampolines db.rs (get_after_point_miss, get_at double-check, last_under_user_prefix) match in the plan of the kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
@@ -2255,7 +2266,7 @@
       "atom": "point_tombstone_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.1: if the point found is servido or shadowed by range tombstone is decision of the kernel — tombstone covering (t.seq > point_seq via merge::range_deleted) shadows the value and the caller reads Deleted (RFC-0150), proved ∀ over range_hidden the point_tombstone_plan_fate_iff in Lookup.lean; the four trampolines db.rs (lookup x2, path lock-free x2) match in the plan of the kernel"
+        "why": "RFC-0219 P1.1: if the point found is servido or shadowed by range tombstone is decision of the kernel \u2014 tombstone covering (t.seq > point_seq via merge::range_deleted) shadows the value and the caller reads Deleted (RFC-0150), proved \u2200 over range_hidden the point_tombstone_plan_fate_iff in Lookup.lean; the four trampolines db.rs (lookup x2, path lock-free x2) match in the plan of the kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
@@ -2285,7 +2296,7 @@
       "atom": "dir_sync_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.1: if the dir-fsync post-rename is paid is decision of the kernel — modo sync pays inline (dentry of the rename durable before the reply), async skips, proved ∀ over sync the dir_sync_plan_fate_iff in WriteAdmission.lean (the predicate dir_sync_required follows live in the body of the plan); the five trampolines db.rs (rename SST x2, sync_dir_if_required, fsync_sst_paths, finish_merged_chunk_on) match in the plan"
+        "why": "RFC-0219 P1.1: if the dir-fsync post-rename is paid is decision of the kernel \u2014 modo sync pays inline (dentry of the rename durable before the reply), async skips, proved \u2200 over sync the dir_sync_plan_fate_iff in WriteAdmission.lean (the predicate dir_sync_required follows live in the body of the plan); the five trampolines db.rs (rename SST x2, sync_dir_if_required, fsync_sst_paths, finish_merged_chunk_on) match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -2315,7 +2326,7 @@
       "atom": "fence_admission_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.2: admit or refuse operations after the fence of durability is decision of the kernel — fence armed refuses fail-closed each new operation (the report acked-prefix/window-incerta already is registered), proved ∀ over the bool the fence_admission_plan_fate_iff in WriteAdmission.lean; the trampoline db.rs ensure_not_fenced does match in the plan"
+        "why": "RFC-0219 P1.2: admit or refuse operations after the fence of durability is decision of the kernel \u2014 fence armed refuses fail-closed each new operation (the report acked-prefix/window-incerta already is registered), proved \u2200 over the bool the fence_admission_plan_fate_iff in WriteAdmission.lean; the trampoline db.rs ensure_not_fenced does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -2345,7 +2356,7 @@
       "atom": "fence_record_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.2: if the fence new registers the report is decision of the kernel — only the FIRST fence registers the uncertain window visible to the client (the widest, the honest one); a later fence maintains, proved ∀ over has_report the fence_record_plan_fate_iff in WriteAdmission.lean; the trampoline db.rs fence_durability does match in the plan"
+        "why": "RFC-0219 P1.2: if the fence new registers the report is decision of the kernel \u2014 only the FIRST fence registers the uncertain window visible to the client (the widest, the honest one); a later fence maintains, proved \u2200 over has_report the fence_record_plan_fate_iff in WriteAdmission.lean; the trampoline db.rs fence_durability does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -2375,7 +2386,7 @@
       "atom": "group_batch_sync_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.2: if the batch forces the single barrier of the group is decision of the kernel — the batch with the sync flag forces the one-fsync shared of the group (context of the DB group: client_set=true, db_sync=false), proved ∀ over client_sync the group_batch_sync_plan_fate_iff in WriteAdmission.lean; the trampoline db.rs group_prepare does match in the plan"
+        "why": "RFC-0219 P1.2: if the batch forces the single barrier of the group is decision of the kernel \u2014 the batch with the sync flag forces the one-fsync shared of the group (context of the DB group: client_set=true, db_sync=false), proved \u2200 over client_sync the group_batch_sync_plan_fate_iff in WriteAdmission.lean; the trampoline db.rs group_prepare does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -2405,20 +2416,20 @@
       "atom": "pit_resync_rewrite_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.4: rewriting the WAL starting from the prefix recovered is decision of the kernel — rewrites EXACTLY when the report of recovery is the resync (pit_resync_needs_rewrite follows live and proved in the body), proved ∀ over is_resync the pit_resync_rewrite_plan_fate_iff in WriteAdmission.lean; the AS-IS never rewrites (the damage mid-log survives to the next open fail-closed — tooth); the trampoline db.rs open_with_env_sourced does match in the plan"
+        "why": "RFC-0219 P1.4: rewriting the WAL starting from the prefix recovered is decision of the kernel \u2014 rewrites EXACTLY when the report of recovery is the resync (pit_resync_needs_rewrite follows live and proved in the body), proved \u2200 over is_resync the pit_resync_rewrite_plan_fate_iff in WriteAdmission.lean; the AS-IS never rewrites (the damage mid-log survives to the next open fail-closed \u2014 tooth); the trampoline db.rs open_with_env_sourced does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "aeneas": "scripts/aeneas_write_admission.sh",
       "callers": [
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "pit_resync_rewrite_plan",
       "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-core/src/db_kernel.rs",
+          "file": "crates/pedradb-core/src/db_open_kernel.rs",
           "handler": "open_with_env_sourced"
         }
       ],
@@ -2435,7 +2446,7 @@
       "atom": "parked_pair_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.3: if the queue parked-unflushed delivers the oldest pair for fold is decision of the kernel — two or more deliver (F174 revalidates on swap), a short queue waits, proved ∀ over parked_len the parked_pair_plan_fate_iff in Flush.lean; the trampoline db.rs parked_oldest_pair_arcs does match in the plan"
+        "why": "RFC-0219 P1.3: if the queue parked-unflushed delivers the oldest pair for fold is decision of the kernel \u2014 two or more deliver (F174 revalidates on swap), a short queue waits, proved \u2200 over parked_len the parked_pair_plan_fate_iff in Flush.lean; the trampoline db.rs parked_oldest_pair_arcs does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
@@ -2465,7 +2476,7 @@
       "atom": "auto_flush_gate",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.3: if the scan of auto-flush runs is decision of the kernel — the two eixos of mem under its limits pulam the scan whole (nothing due); any eixo above scana each CF (gate due by-CF aplica), proved ∀ over (global_under, cf_under) the auto_flush_gate_fate_iff in Flush.lean (the predicate skip_auto_flush follows live in the body of the gate); the trampoline db.rs maybe_auto_flush does match in the plan"
+        "why": "RFC-0219 P1.3: if the scan of auto-flush runs is decision of the kernel \u2014 the two eixos of mem under its limits pulam the scan whole (nothing due); any eixo above scana each CF (gate due by-CF aplica), proved \u2200 over (global_under, cf_under) the auto_flush_gate_fate_iff in Flush.lean (the predicate skip_auto_flush follows live in the body of the gate); the trampoline db.rs maybe_auto_flush does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
@@ -2495,7 +2506,7 @@
       "atom": "mem_auto_flush_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.3: flushing the mem is decision of the kernel — triggers EXACTLY armed and at or above the limit (auto_flush_due composes the plan); disarmed or below keeps accumulating, proved ∀ over (mem_bytes, limit, armed) the mem_auto_flush_plan_fate_iff in Flush.lean; the AS-IS never triggers (mem grows until the host hangs — tooth planted); the trampoline db.rs maybe_auto_flush does match in the plan"
+        "why": "RFC-0219 P1.3: flushing the mem is decision of the kernel \u2014 triggers EXACTLY armed and at or above the limit (auto_flush_due composes the plan); disarmed or below keeps accumulating, proved \u2200 over (mem_bytes, limit, armed) the mem_auto_flush_plan_fate_iff in Flush.lean; the AS-IS never triggers (mem grows until the host hangs \u2014 tooth planted); the trampoline db.rs maybe_auto_flush does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
@@ -2525,7 +2536,7 @@
       "atom": "manifest_publish_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.4: publishing MANIFEST/CURRENT is decision of the kernel — publishes EXACTLY when every listed SST is durable (may_publish_manifest follows live and proved in the body), proved ∀ over sst_durable the manifest_publish_plan_fate_iff in Flush.lean; the AS-IS publishes with SST unsynced (CURRENT names the file that turns post-crash — tooth); the trampoline db.rs persist_manifest does match in the plan"
+        "why": "RFC-0219 P1.4: publishing MANIFEST/CURRENT is decision of the kernel \u2014 publishes EXACTLY when every listed SST is durable (may_publish_manifest follows live and proved in the body), proved \u2200 over sst_durable the manifest_publish_plan_fate_iff in Flush.lean; the AS-IS publishes with SST unsynced (CURRENT names the file that turns post-crash \u2014 tooth); the trampoline db.rs persist_manifest does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
@@ -2555,7 +2566,7 @@
       "atom": "changelog_store_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.4: write the feed in the store point synchronous is decision of the kernel — writes EXACTLY when the publish durable of the MANIFEST covered the window arquivada (publish failed holds: the segments archived are the single copy durable), proved ∀ over publish_ok the changelog_store_plan_fate_iff in Changelog.lean; the AS-IS writes with publish failed (the store deletes segments without coverage — tooth); the trampoline db.rs changelog_store_point does match in the plan"
+        "why": "RFC-0219 P1.4: write the feed in the store point synchronous is decision of the kernel \u2014 writes EXACTLY when the publish durable of the MANIFEST covered the window arquivada (publish failed holds: the segments archived are the single copy durable), proved \u2200 over publish_ok the changelog_store_plan_fate_iff in Changelog.lean; the AS-IS writes with publish failed (the store deletes segments without coverage \u2014 tooth); the trampoline db.rs changelog_store_point does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
@@ -2585,7 +2596,7 @@
       "atom": "parked_pop_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P2.1: popar the queue estacionada is decision of the kernel — pops EXACTLY when the queue is non-empty (batch_is_empty follows live and proved in the body), proved ∀ over parked_len the parked_pop_plan_fate_iff in WriteAdmission.lean; the AS-IS pops of the queue empty (tooth); the trampoline db.rs take_oldest_parked does match in the plan"
+        "why": "RFC-0219 P2.1: popar the queue estacionada is decision of the kernel \u2014 pops EXACTLY when the queue is non-empty (batch_is_empty follows live and proved in the body), proved \u2200 over parked_len the parked_pop_plan_fate_iff in WriteAdmission.lean; the AS-IS pops of the queue empty (tooth); the trampoline db.rs take_oldest_parked does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
@@ -2615,7 +2626,7 @@
       "atom": "group_ack_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P2.1: acking and publishing the group is decision of the kernel — publishes EXACTLY when the group's WAL I/O succeeded (may_publish_group follows live and proved in the body), proved ∀ over wal_io_ok the group_ack_plan_fate_iff in GroupCommit.lean; the AS-IS acks the failure (Ok with lie — tooth); the trampoline db.rs lone_sync_commit does match in the plan"
+        "why": "RFC-0219 P2.1: acking and publishing the group is decision of the kernel \u2014 publishes EXACTLY when the group's WAL I/O succeeded (may_publish_group follows live and proved in the body), proved \u2200 over wal_io_ok the group_ack_plan_fate_iff in GroupCommit.lean; the AS-IS acks the failure (Ok with lie \u2014 tooth); the trampoline db.rs lone_sync_commit does match in the plan"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
@@ -2653,7 +2664,7 @@
       "live_callers": [
         {
           "file": "crates/pedradb-core/src/db_kernel.rs",
-          "handler": "flush_pipeline"
+          "handler": "flush"
         }
       ],
       "dst_plant": {
@@ -2663,7 +2674,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 4/6 P0.3: flush_plan the two-if cited tree — imm present ends-and-flushes, memtable empty rotaciona, live writes SST before; floor_atom 189→190"
+        "why": "atom 4/6 P0.3: flush_plan the two-if cited tree \u2014 imm present ends-and-flushes, memtable empty rotaciona, live writes SST before; floor_atom 189\u2192190"
       }
     },
     {
@@ -2682,7 +2693,7 @@
       "live_callers": [
         {
           "file": "crates/pedradb-core/src/db_kernel.rs",
-          "handler": "recover_ssts"
+          "handler": "first_install_action"
         }
       ],
       "dst_plant": {
@@ -2692,14 +2703,14 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 5/6 P0.3: first_install_action the cited table — commitado (with/without sync) proceeds, failure refuses to open (F196); floor_atom 190→191"
+        "why": "atom 5/6 P0.3: first_install_action the cited table \u2014 commitado (with/without sync) proceeds, failure refuses to open (F196); floor_atom 190\u2192191"
       }
     },
     {
       "id": "probe_order_covering",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "the list of candidatos and exactly the cited loop — newest_first with capacity len, of the zero, porte covering_pos and gate covering_hi_ge decidindo push or skip"
+        "why": "the list of candidatos and exactly the cited loop \u2014 newest_first with capacity len, of the zero, porte covering_pos and gate covering_hi_ge decidindo push or skip"
       },
       "finding": "RFC-0164 P0.2",
       "twin_kind": "model",
@@ -2707,16 +2718,10 @@
       "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
       "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/probe_order_kernel.rs"
       ],
       "entry": "probe_order_covering",
       "as_is": "probe_order_covering_as_is",
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/db_kernel.rs",
-          "handler": "lookup_sst_packed"
-        }
-      ],
       "dst_plant": {
         "file": "crates/pedradb-core/src/probe_order_kernel.rs",
         "test": "probe_order_covering_on_live_gate_is_not_ok"
@@ -2731,16 +2736,10 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/concurrent_kernel.rs"
+        "crates/pedradb-core/src/group_commit_kernel.rs"
       ],
       "entry": "group_validate",
       "as_is": "occ_conflict_as_is_serialized",
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
-          "handler": "validate_occ_batch"
-        }
-      ],
       "dst_plant": {
         "file": "crates/pedradb-core/src/group_commit_kernel.rs",
         "test": "group_members_are_simultaneous"
@@ -2748,7 +2747,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 4/4 P0.1: group_validate the cited chain of the loop extracted (index→occ_conflict→push, fuel = members); floor_atom 181→182"
+        "why": "atom 4/4 P0.1: group_validate the cited chain of the loop extracted (index\u2192occ_conflict\u2192push, fuel = members); floor_atom 181\u2192182"
       }
     },
     {
@@ -2759,19 +2758,13 @@
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/concurrent_kernel.rs"
+        "crates/pedradb-core/src/group_commit_kernel.rs"
       ],
       "entry": "occ_member_fate",
       "handlers": [
         "validate_occ_batch"
       ],
       "as_is": "occ_member_fate_as_is",
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
-          "handler": "validate_occ_batch"
-        }
-      ],
       "dst_plant": {
         "file": "crates/pedradb-core/src/group_commit_kernel.rs",
         "test": "occ_member_fate_on_live_conflict_is_not_ok"
@@ -2815,7 +2808,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "the group plan decides exactly by the min-len route: n is the smaller input and every fate comes from the extracted loop — upgrade of the RFC-0198 close (glue by member) to the whole extract"
+        "why": "the group plan decides exactly by the min-len route: n is the smaller input and every fate comes from the extracted loop \u2014 upgrade of the RFC-0198 close (glue by member) to the whole extract"
       }
     },
     {
@@ -2900,7 +2893,7 @@
       "id": "env_crash",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate ∀ of the crash_legal — cut legal exactly when synced ≤ cut ≤ written (floor of the barrier and ceiling written); the as-is ignora the floor and come bytes prometidos."
+        "why": "RFC-0214 P0.2: fate \u2200 of the crash_legal \u2014 cut legal exactly when synced \u2264 cut \u2264 written (floor of the barrier and ceiling written); the as-is ignora the floor and come bytes prometidos."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -2924,7 +2917,7 @@
       "id": "env_append",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate ∀ of the append of the Env — ok {m with written := w} exactly when written+n does not overflow (ok w); the barrier does not move."
+        "why": "RFC-0214 P0.2: fate \u2200 of the append of the Env \u2014 ok {m with written := w} exactly when written+n does not overflow (ok w); the barrier does not move."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -2948,7 +2941,7 @@
       "id": "env_sync",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: ∀ fate of the Env sync — exactly two ok futures: Honest promotes the barrier to the full length; Lying returns Ok and the model rolls back entirely (RFC-0078); the as-is always promotes."
+        "why": "RFC-0214 P0.2: \u2200 fate of the Env sync \u2014 exactly two ok futures: Honest promotes the barrier to the full length; Lying returns Ok and the model rolls back entirely (RFC-0078); the as-is always promotes."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -2972,7 +2965,7 @@
       "id": "env_barrier_floor",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate ∀ of the floor of the barrier — ok v with v = true exact: cut illegal not loses nothing; cut legal maintains cut ≥ synced (leg crash_legal_fate_iff, atom 1/6 of the fatia)."
+        "why": "RFC-0214 P0.2: fate \u2200 of the floor of the barrier \u2014 ok v with v = true exact: cut illegal not loses nothing; cut legal maintains cut \u2265 synced (leg crash_legal_fate_iff, atom 1/6 of the fatia)."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -2996,7 +2989,7 @@
       "id": "env_no_invented",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate ∀ of the ceiling — ok v with v = true exact: cut illegal or cut ≤ written (ceiling of the window of the crash_legal_fate_iff); the recovery never invents byte."
+        "why": "RFC-0214 P0.2: fate \u2200 of the ceiling \u2014 ok v with v = true exact: cut illegal or cut \u2264 written (ceiling of the window of the crash_legal_fate_iff); the recovery never invents byte."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -3020,7 +3013,7 @@
       "id": "env_honest_sync",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate ∀ of the sync honest — ok v with v = true exact: after the barrier honest the window legal collapses to a single point (written ≤ cut ≤ written forces cut = written); every crash legal preserves the log whole; legs sync_fate_iff + crash_legal_fate_iff."
+        "why": "RFC-0214 P0.2: fate \u2200 of the sync honest \u2014 ok v with v = true exact: after the barrier honest the window legal collapses to a single point (written \u2264 cut \u2264 written forces cut = written); every crash legal preserves the log whole; legs sync_fate_iff + crash_legal_fate_iff."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
@@ -3044,7 +3037,7 @@
       "id": "wal_state",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate ∀ of inv_wal — ok v exactly when v decides (acked ⊆ synced ∧ synced ⊆ written); leg cited wal_inv_closed (RFC-0191 P2.1)."
+        "why": "RFC-0214 P0.1: fate \u2200 of inv_wal \u2014 ok v exactly when v decides (acked \u2286 synced \u2227 synced \u2286 written); leg cited wal_inv_closed (RFC-0191 P2.1)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3068,7 +3061,7 @@
       "id": "wal_append",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate ∀ of the append — ok {s with written := w} exactly when the adds written+n does not overflow (ok w); leg cited wal_append_closed (RFC-0191 P2.1)."
+        "why": "RFC-0214 P0.1: fate \u2200 of the append \u2014 ok {s with written := w} exactly when the adds written+n does not overflow (ok w); leg cited wal_append_closed (RFC-0191 P2.1)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3092,7 +3085,7 @@
       "id": "wal_sync",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: ∀ fate of the sync — exactly two ok futures, split by honesty (Honest promotes the barrier to what was written; Lying returns the watermarks clipped by the min); cited legs wal_sync_honest_closed/wal_sync_lying_closed (RFC-0198 P1.2)."
+        "why": "RFC-0214 P0.1: \u2200 fate of the sync \u2014 exactly two ok futures, split by honesty (Honest promotes the barrier to what was written; Lying returns the watermarks clipped by the min); cited legs wal_sync_honest_closed/wal_sync_lying_closed (RFC-0198 P1.2)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3116,7 +3109,7 @@
       "id": "wal_ack",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate ∀ of the ack — exactly two ok futures: inside the barrier {s with acked := a} (saturated value contained in synced), outside it refuses fail-closed (state rolls back whole); the Ok never advances acked beyond the barrier."
+        "why": "RFC-0214 P0.1: fate \u2200 of the ack \u2014 exactly two ok futures: inside the barrier {s with acked := a} (saturated value contained in synced), outside it refuses fail-closed (state rolls back whole); the Ok never advances acked beyond the barrier."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3140,7 +3133,7 @@
       "id": "wal_rotate",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate ∀ of the rotate — zeroes the log exactly when everything is durable and acked (acked = synced = written); a non-durable tail is refused and the state rolls back whole; the as-is drops the log always."
+        "why": "RFC-0214 P0.1: fate \u2200 of the rotate \u2014 zeroes the log exactly when everything is durable and acked (acked = synced = written); a non-durable tail is refused and the state rolls back whole; the as-is drops the log always."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3164,7 +3157,7 @@
       "id": "wal_acked_survives",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate ∀ of the corollary of survival — two ok futures decided by the Env stitch (legal cut: v = cut ≥ acked; illegal cut: v = true); the legality is the Env's, not re-proved (P0.2 will pin crash_legal)."
+        "why": "RFC-0214 P0.1: fate \u2200 of the corollary of survival \u2014 two ok futures decided by the Env stitch (legal cut: v = cut \u2265 acked; illegal cut: v = true); the legality is the Env's, not re-proved (P0.2 will pin crash_legal)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
@@ -3236,7 +3229,7 @@
       "id": "write_ack_append",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate ∀ over on_append in the atom rung — the step append of the ledger is the atom wal_append (written grows, acked/synced untouched); the as-is write_ack_ledger_as_is (ack without barrier) refused by the plants DST verified_write_ack_on_live_profile_is_not_ok"
+        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 over on_append in the atom rung \u2014 the step append of the ledger is the atom wal_append (written grows, acked/synced untouched); the as-is write_ack_ledger_as_is (ack without barrier) refused by the plants DST verified_write_ack_on_live_profile_is_not_ok"
       },
       "finding": "RFC-0166 P1.4",
       "twin_kind": "close",
@@ -3261,7 +3254,7 @@
       "id": "write_ack_barrier",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "atom write_ack_barrier: the Ok of the barrier Honest is exactly the state promovido (synced := written) — wal_sync with fsync_promotes_pending; without Ok with pending items (RFC-0214 P1.1 7/8)"
+        "why": "atom write_ack_barrier: the Ok of the barrier Honest is exactly the state promovido (synced := written) \u2014 wal_sync with fsync_promotes_pending; without Ok with pending items (RFC-0214 P1.1 7/8)"
       },
       "finding": "RFC-0166 P1.4",
       "twin_kind": "close",
@@ -3286,7 +3279,7 @@
       "id": "write_ack_ack",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "atom write_ack_ack: the Ok of the ack there is iff acked ≤ synced and is exactly acked := synced (gap becomes acknowledged, saturated promotes only up to the barrier); outside of the invariant the checked subtraction failure (RFC-0214 P1.1 8/8)"
+        "why": "atom write_ack_ack: the Ok of the ack there is iff acked \u2264 synced and is exactly acked := synced (gap becomes acknowledged, saturated promotes only up to the barrier); outside of the invariant the checked subtraction failure (RFC-0214 P1.1 8/8)"
       },
       "finding": "RFC-0166 P1.4",
       "twin_kind": "close",
@@ -3311,7 +3304,7 @@
       "id": "lsm_probe",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ over lsm_probe in the atom rung — one step of the cited loop via loop.eq_def: body in the level 0 ends (done) or goes down the level (cont); plants DST r1_modelo_on_live_delete_shape_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 over lsm_probe in the atom rung \u2014 one step of the cited loop via loop.eq_def: body in the level 0 ends (done) or goes down the level (cont); plants DST r1_modelo_on_live_delete_shape_is_not_ok"
       },
       "entry": "lsm_probe",
       "as_is": "lsm_probe_as_is",
@@ -3335,7 +3328,7 @@
       "id": "lsm_compact",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ over lsm_compact in the atom rung — cited dispatch: level 0 and level >= MAX_LEVELS do not compact; inside, the cited loop with drop_all_tombs false; plants DST r1_modelo_on_live_delete_shape_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 over lsm_compact in the atom rung \u2014 cited dispatch: level 0 and level >= MAX_LEVELS do not compact; inside, the cited loop with drop_all_tombs false; plants DST r1_modelo_on_live_delete_shape_is_not_ok"
       },
       "entry": "lsm_compact",
       "as_is": "lsm_compact_as_is",
@@ -3359,7 +3352,7 @@
       "id": "lsm_reopen",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate ∀ over lsm_reopen in the atom rung — identidade cited, the state exits intacto; plants DST r1_modelo_on_live_delete_shape_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 over lsm_reopen in the atom rung \u2014 identidade cited, the state exits intacto; plants DST r1_modelo_on_live_delete_shape_is_not_ok"
       },
       "entry": "lsm_reopen",
       "as_is": "lsm_reopen_as_is",
@@ -3411,6 +3404,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
+        "crates/pedradb-core/src/db_put_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "write_admission_idle",
@@ -3461,6 +3455,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
+        "crates/pedradb-core/src/db_put_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "wal_sync_required",
@@ -3475,7 +3470,7 @@
       },
       "atom_reason": {
         "date": "2026-09-11",
-        "why": "RFC-0200 P2.1 data-fate atom: per-commit fdatasync decision is single-valued — client's explicit sync choice when set, else the db-level default (forall-iff over the extracted body, WriteAdmission.lean)"
+        "why": "RFC-0200 P2.1 data-fate atom: per-commit fdatasync decision is single-valued \u2014 client's explicit sync choice when set, else the db-level default (forall-iff over the extracted body, WriteAdmission.lean)"
       }
     },
     {
@@ -3486,6 +3481,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
+        "crates/pedradb-core/src/db_open_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "seq_exhausted",
@@ -3512,6 +3508,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
+        "crates/pedradb-core/src/db_open_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "batch_is_empty",
@@ -3527,7 +3524,7 @@
       "atom": "batch_is_empty",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "(twenty-ninth if): the empty-batch disposition — a batch of length n routes through the empty path exactly when the machine comparison of n against zero lands in v — proven forall over (n, v) as batch_is_empty_ok_iff_zero in WriteAdmission.lean; the body holds no monadic step, so the iff is the full computation rule of the extracted do-block; the pedradb-core trampoline (group_start in db.rs) matches the kernel decision."
+        "why": "(twenty-ninth if): the empty-batch disposition \u2014 a batch of length n routes through the empty path exactly when the machine comparison of n against zero lands in v \u2014 proven forall over (n, v) as batch_is_empty_ok_iff_zero in WriteAdmission.lean; the body holds no monadic step, so the iff is the full computation rule of the extracted do-block; the pedradb-core trampoline (group_start in db.rs) matches the kernel decision."
       }
     },
     {
@@ -3538,6 +3535,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
+        "crates/pedradb-core/src/db_open_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "fence_on_sync_fail",
@@ -3563,6 +3561,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
+        "crates/pedradb-core/src/db_open_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "wal_commit_plan",
@@ -3588,7 +3587,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/write_admission_kernel.rs"
       ],
       "entry": "torn_head_is_empty_log",
       "handlers": [
@@ -3613,7 +3612,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "torn_tail_needs_cut",
       "handlers": [
@@ -3638,7 +3637,7 @@
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "seq_after_feed",
       "handlers": [
@@ -3703,7 +3702,7 @@
       "atom": "dir_sync_required",
       "atom_reason": {
         "date": "2026-09-10",
-        "why": "(thirtieth if): the dir-sync disposition — a rename/create is followed by a directory fsync exactly when open-options sync is on and the flag lands in v — proven forall over (sync, v) as dir_sync_required_ok_iff_sync in WriteAdmission.lean; the body is the pure lift ok sync, so the iff is the full computation rule of the extracted do-block; the pedradb-core trampoline (sync_dir_if_required) matches the kernel decision."
+        "why": "(thirtieth if): the dir-sync disposition \u2014 a rename/create is followed by a directory fsync exactly when open-options sync is on and the flag lands in v \u2014 proven forall over (sync, v) as dir_sync_required_ok_iff_sync in WriteAdmission.lean; the body is the pure lift ok sync, so the iff is the full computation rule of the extracted do-block; the pedradb-core trampoline (sync_dir_if_required) matches the kernel decision."
       }
     },
     {
@@ -3764,6 +3763,7 @@
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
       "callers": [
+        "crates/pedradb-core/src/db_put_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "snap_below_watermark",
@@ -3835,7 +3835,7 @@
       "id": "scale_probes",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "point-get probes are exactly the saturating_add cited — levels + L0 covering; the as-is walks every live SST (lying GPS)"
+        "why": "point-get probes are exactly the saturating_add cited \u2014 levels + L0 covering; the as-is walks every live SST (lying GPS)"
       },
       "finding": "RFC-0176 P0",
       "twin_kind": "close",
@@ -3858,7 +3858,7 @@
       "id": "scale_warm",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "the WARM ceiling is exactly the cited chain — ceiling 0 is the floor 3 GiB; otherwise max(floor, 3/4 ceiling) cut by the reserved ceiling - 1 GiB; the as-is ignores the ceiling (u64::MAX)"
+        "why": "the WARM ceiling is exactly the cited chain \u2014 ceiling 0 is the floor 3 GiB; otherwise max(floor, 3/4 ceiling) cut by the reserved ceiling - 1 GiB; the as-is ignores the ceiling (u64::MAX)"
       },
       "finding": "RFC-0176 P0",
       "twin_kind": "close",
@@ -3881,7 +3881,7 @@
       "id": "scale_probes_worst",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "worse matches of producao and exactly the same adds cited — point_get_probes with the trigger full of the L0; the as-is still walks each file live"
+        "why": "worse matches of producao and exactly the same adds cited \u2014 point_get_probes with the trigger full of the L0; the as-is still walks each file live"
       },
       "finding": "RFC-0176 P1",
       "twin_kind": "close",
@@ -3904,7 +3904,7 @@
       "id": "scale_predict",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "the relogio previsto and exactly the cited chain — clamps min(hot,SCALE_BPS)/min(noisy,9000), mix hot.tau_ram+(SCALE_BPS-hot).tau_disk, counts u128, taxa (1+eta), try_from with ceiling u64::MAX; the as-is ignora eta"
+        "why": "the relogio previsto and exactly the cited chain \u2014 clamps min(hot,SCALE_BPS)/min(noisy,9000), mix hot.tau_ram+(SCALE_BPS-hot).tau_disk, counts u128, taxa (1+eta), try_from with ceiling u64::MAX; the as-is ignora eta"
       },
       "finding": "RFC-0176 P1",
       "twin_kind": "model",
@@ -3927,7 +3927,7 @@
       "id": "scale_happy_hot",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "the hot fraction of the happy path is exactly the cited gate — the store fitting in the warm_cap returns SCALE_BPS; otherwise the residual SCALE_HAPPY_COLD_HOT_BPS; the as-is says 100% always"
+        "why": "the hot fraction of the happy path is exactly the cited gate \u2014 the store fitting in the warm_cap returns SCALE_BPS; otherwise the residual SCALE_HAPPY_COLD_HOT_BPS; the as-is says 100% always"
       },
       "finding": "RFC-0176 P1",
       "twin_kind": "model",
@@ -3950,7 +3950,7 @@
       "id": "scale_forecast",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "the RFC-0176 table is exactly the cited composition — each field is the kernel's atom (sat_mul, level_count callee, point_get_probes, probes_worst, div_ceil, warm_cap_bytes, happy_hot_bps, best/happy/worst_get_ns) and hot is the store <= warm_cap gate; the as-is walks all the files and always says hot"
+        "why": "the RFC-0176 table is exactly the cited composition \u2014 each field is the kernel's atom (sat_mul, level_count callee, point_get_probes, probes_worst, div_ceil, warm_cap_bytes, happy_hot_bps, best/happy/worst_get_ns) and hot is the store <= warm_cap gate; the as-is walks all the files and always says hot"
       },
       "finding": "RFC-0176 P1.2",
       "twin_kind": "model",
@@ -3958,7 +3958,10 @@
       "kernel": "crates/pedradb-core/src/scale_kernel.rs",
       "twin": "crates/pedradb-core/src/scale_kernel.rs",
       "aeneas": "scripts/aeneas_scale.sh",
-      "callers": [],
+      "callers": [
+        "crates/pedradb-core/src/ratio_curve_kernel.rs",
+        "crates/snapshot-bench/src/diagnose.rs"
+      ],
       "entry": "scale_forecast",
       "as_is": "scale_forecast_as_is",
       "three_teeth": true,
@@ -3997,7 +4000,7 @@
       "atom": "cf_flush_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P2.1: inside the armed auto-flush scan, flushing the family EXACTLY at or above the limit is decision of the kernel (auto_flush_due follows live and proved in the body), proved ∀ over (mem_bytes, limit) the cf_flush_plan_fate_iff in Flush.lean; the AS-IS skips every family (CF armed only grows — tooth); the trampoline db.rs maybe_auto_flush does match in the plan per family"
+        "why": "RFC-0219 P2.1: inside the armed auto-flush scan, flushing the family EXACTLY at or above the limit is decision of the kernel (auto_flush_due follows live and proved in the body), proved \u2200 over (mem_bytes, limit) the cf_flush_plan_fate_iff in Flush.lean; the AS-IS skips every family (CF armed only grows \u2014 tooth); the trampoline db.rs maybe_auto_flush does match in the plan per family"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",

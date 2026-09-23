@@ -33,7 +33,7 @@ theorem merge_sift_step_swap_right_iff :
   unfold merge.sift_step
   cases r_exists <;> cases r_lt_l <;> cases best_lt_hole <;> simp
 
-/-- AS-IS tooth (Lean side): on every repairing input the mutant stays
+/-- AS-IS dente (Lean side): on every repairing input the mutant stays
 and the kernel does not — the decisions diverge. -/
 theorem merge_sift_step_as_is_diverges_on_repair (r_exists r_lt_l : Bool) :
     merge.sift_step_as_is r_exists r_lt_l true
@@ -215,8 +215,8 @@ theorem visible_at_range_deletion :
   unfold merge.visible_at
   rfl
 
-/-- AS-IS tooth: a deletion still scans live. -/
-theorem visible_at_as_is_tooth :
+/-- AS-IS dente: a deletion still scans live. -/
+theorem visible_at_as_is_dente :
     merge.visible_at_as_is key.ValueType.Deletion true = ok true := by
   unfold merge.visible_at_as_is
   rfl
@@ -372,8 +372,8 @@ theorem iter_window_keep_hidden :
   unfold merge.iter_window_keep
   rfl
 
-/-- AS-IS tooth: a hidden version still emits. -/
-theorem iter_window_keep_as_is_tooth :
+/-- AS-IS dente: a hidden version still emits. -/
+theorem iter_window_keep_as_is_dente :
     merge.iter_window_keep_as_is false = ok true := by
   unfold merge.iter_window_keep_as_is
   rfl
@@ -420,21 +420,21 @@ theorem range_tombstone_covers_as_is_is_eq (start end1 user) :
   unfold merge.range_tombstone_covers_as_is
   rfl
 
-/-- AS-IS tooth: point put never conflicts. -/
+/-- AS-IS dente: point put never conflicts. -/
 theorem write_op_covers_key_as_is_value (start end1 user) :
     merge.write_op_covers_key_as_is key.ValueType.Value start end1 user
     = ok false := by
   unfold merge.write_op_covers_key_as_is
   rfl
 
-/-- AS-IS tooth: point delete never conflicts. -/
+/-- AS-IS dente: point delete never conflicts. -/
 theorem write_op_covers_key_as_is_deletion (start end1 user) :
     merge.write_op_covers_key_as_is key.ValueType.Deletion start end1 user
     = ok false := by
   unfold merge.write_op_covers_key_as_is
   rfl
 
-/-- AS-IS tooth: range only hits start. Dual-unfold. -/
+/-- AS-IS dente: range only hits start. Dual-unfold. -/
 theorem write_op_covers_key_as_is_range (start end1 user) :
     merge.write_op_covers_key_as_is key.ValueType.RangeDeletion start end1 user
     = merge.range_tombstone_covers_as_is start end1 user := by
@@ -599,7 +599,7 @@ theorem tagged_stay_preserves_newest_first (t : TaggedSift)
     merge_step_newest_first_congr s s' hpair.1.symm hpair.2.symm hprem⟩
 
 /-- O mutante as-is fica em TODO input de reparo — fato definicional
-do tooth (mesma forma de prova da divergência registrada). -/
+do dente (mesma forma de prova da divergência registrada). -/
 theorem merge_sift_step_as_is_stays_on_repair :
     ∀ (r_exists r_lt_l : Bool),
       merge.sift_step_as_is r_exists r_lt_l true
@@ -656,11 +656,11 @@ theorem visible_at_fate_iff :
   unfold merge.visible_at
   cases kind <;> cases range_hidden <;> simp
 
-/-- RFC-0218 P1.2 2/11 (atom `catalog:write_op_range_end`, entrada
+/-- RFC-0218 P1.2 2/11 (átomo `catalog:write_op_range_end`, entrada
     `merge.write_op_range_end`): o fim do range é EXATAMENTE o despacho
     citado — Deletion e Value não têm fim (none); RangeDeletion carrega
     o próprio valor (some value). O AS-IS devolve sempre none (fim de
-    range engolido — tooth plantado). -/
+    range engolido — dente plantado). -/
 theorem write_op_range_end_fate_iff :
     ∀ (kind : key.ValueType) (value : Slice U8)
       (r : Option (Slice U8)),
@@ -696,10 +696,10 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P1.2 6/11 (atom `catalog:range_covers`, entrada
+/-- RFC-0218 P1.2 6/11 (átomo `catalog:range_covers`, entrada
     `merge.range_tombstone_covers`): cobrir por túmulo de range é
     EXATAMENTE o par citado — `key >= start` E `key < end`. O AS-IS
-    testa só igualdade com start (fim ignorado — tooth plantado). -/
+    testa só igualdade com start (fim ignorado — dente plantado). -/
 theorem range_tombstone_covers_fate_iff :
     ∀ (start : Slice U8) (end1 : Slice U8) (key : Slice U8) (v : Bool),
       (merge.range_tombstone_covers start end1 key = ok v) ↔

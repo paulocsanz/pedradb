@@ -21,7 +21,7 @@ theorem iter_merge_keep_hidden_agree :
   unfold pedra_aeneas_merge_kernel.merge.iter_window_keep
   rfl
 
-/-- AS-IS tooth: both clones emit a hidden version. -/
+/-- AS-IS dente: both clones emit a hidden version. -/
 theorem iter_merge_keep_as_is_agree :
     pedra_aeneas_iter_kernel.iter_window_keep_as_is false
       = pedra_aeneas_merge_kernel.merge.iter_window_keep_as_is false := by

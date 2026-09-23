@@ -2,7 +2,7 @@
 //!
 //! One generic runner, two engine adapters (see [`engines`]) — the op schedule
 //! (rng seed, zipf CDF, read/insert/scan/RMW mix) is identical for both engines
-//! by construction. Same shape semantics as the Distributed `ycsb` suite (FDB
+//! by construction. Same shape semantics as the Montanha `ycsb` suite (FDB
 //! benchmark tool workloads): ycsb_a 50/50, b 95/5, c 100r, d 95r/5
 //! insert-latest, e 5 insert + short scans, f 50 read-modify-write.
 //!
@@ -2257,7 +2257,7 @@ impl YcsbRunner {
     }
 
     /// Run one workload; returns the bench JSON block (same schema as the
-    /// Distributed fdb-bench summarize).
+    /// Montanha fdb-bench summarize).
     #[allow(clippy::too_many_arguments)]
     pub fn run<E: Engine>(
         &mut self,

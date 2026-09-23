@@ -15,8 +15,8 @@ theorem sst_crc_fate_modern_mismatch :
   unfold scan_kernel.SST_LEGACY_NO_CRC_MAX
   rfl
 
-/-- AS-IS tooth: mismatch still StripTrailer. -/
-theorem sst_crc_fate_as_is_tooth :
+/-- AS-IS dente: mismatch still StripTrailer. -/
+theorem sst_crc_fate_as_is_dente :
     scan_kernel.sst_crc_fate_as_is (1#u32) (2#u32) (32#usize)
       = ok scan_kernel.SstCrcFate.StripTrailer := by
   unfold scan_kernel.sst_crc_fate_as_is
@@ -29,8 +29,8 @@ theorem sst_block_crc_ok_equal :
   unfold wal.crc.crc_match_ok
   rfl
 
-/-- AS-IS tooth: block mismatch still admits. -/
-theorem sst_block_crc_ok_as_is_tooth :
+/-- AS-IS dente: block mismatch still admits. -/
+theorem sst_block_crc_ok_as_is_dente :
     scan_kernel.sst_block_crc_ok_as_is (1#u32) (2#u32) = ok true := by
   unfold scan_kernel.sst_block_crc_ok_as_is
   rfl
@@ -41,8 +41,8 @@ theorem zero_glue_admitted_false :
   unfold scan_kernel.zero_glue_admitted
   rfl
 
-/-- AS-IS tooth: glue looks gone. -/
-theorem zero_glue_admitted_as_is_tooth :
+/-- AS-IS dente: glue looks gone. -/
+theorem zero_glue_admitted_as_is_dente :
     scan_kernel.zero_glue_admitted_as_is = ok true := by
   unfold scan_kernel.zero_glue_admitted_as_is
   rfl
@@ -307,8 +307,8 @@ theorem scan_reads_file_excluded_start_included_end
   unfold scan_kernel.point_bounds_overlap
   rfl
 
-/-- AS-IS tooth: scan is bounds-only (tombs ignored). -/
-theorem scan_reads_file_as_is_tooth
+/-- AS-IS dente: scan is bounds-only (tombs ignored). -/
+theorem scan_reads_file_as_is_dente
     (smallest largest tombs start end1) :
     scan_kernel.scan_reads_file_as_is smallest largest tombs start end1
       = scan_kernel.point_bounds_overlap smallest largest start end1 := by
@@ -316,7 +316,7 @@ theorem scan_reads_file_as_is_tooth
   rfl
 
 /-- Model as-is: tombstone span is ignored (always false). -/
-theorem tombstone_reaches_window_as_is_tooth
+theorem tombstone_reaches_window_as_is_dente
     (t_start t_end start end1) :
     scan_kernel.tombstone_reaches_window_as_is t_start t_end start end1
       = ok false := by
@@ -755,10 +755,10 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P0.4 2/9 (atom `catalog:sst_block_crc`): o CRC de
+/-- RFC-0218 P0.4 2/9 (átomo `catalog:sst_block_crc`): o CRC de
     bloco é EXATAMENTE a igualdade citada — casa sse stored =
     computed (sem segunda opinião). O AS-IS admite sempre (bloco
-    corrompido entra — tooth plantado). -/
+    corrompido entra — dente plantado). -/
 theorem sst_block_crc_ok_fate_iff :
     ∀ (stored : U32) (computed : U32) (v : Bool),
       (scan_kernel.sst_block_crc_ok stored computed = ok v) ↔
@@ -773,10 +773,10 @@ theorem sst_block_crc_ok_fate_iff :
     subst hv
     unfold scan_kernel.sst_block_crc_ok wal.crc.crc_match_ok
     rfl
-/-- RFC-0218 P0.4 3/9 (atom `catalog:zero_glue`): cola residual
+/-- RFC-0218 P0.4 3/9 (átomo `catalog:zero_glue`): cola residual
     zero NUNCA é admitida — a constante citada é false (leitura
     fail-closed: sem cola não há o que ler). O AS-IS acha que a cola
-    sumiu (tooth plantado). -/
+    sumiu (dente plantado). -/
 theorem zero_glue_admitted_fate_iff :
     ∀ (v : Bool), (scan_kernel.zero_glue_admitted = ok v) ↔ (v = false) := by
   intro v
@@ -788,11 +788,11 @@ theorem zero_glue_admitted_fate_iff :
   · rintro hv
     subst hv
     rfl
-/-- RFC-0218 P0.4 4/9 (atom `catalog:sst_crc`): o destino do CRC
+/-- RFC-0218 P0.4 4/9 (átomo `catalog:sst_crc`): o destino do CRC
     de SST é EXATAMENTE a árvore citada — checksum casa →
     StripTrailer; mismatch em arquivo legado (menor que o teto sem
     CRC) → WholeBuffer; mismatch moderno → Reject (fail-closed). O
-    AS-IS sempre StripTrailer (trailer da sorte — tooth plantado). -/
+    AS-IS sempre StripTrailer (trailer da sorte — dente plantado). -/
 theorem sst_crc_fate_flat_fate_iff :
     ∀ (stored : U32) (computed : U32) (buf_len : Usize)
       (fate : scan_kernel.SstCrcFate),
@@ -869,10 +869,10 @@ private noncomputable def key_in_window_before_end (key : Slice U8)
       (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) key e
   | core.ops.range.Bound.Unbounded => ok true
 
-/-- RFC-0218 P0.4 5/9 (atom `catalog:key_in_window`): a janela
+/-- RFC-0218 P0.4 5/9 (átomo `catalog:key_in_window`): a janela
     booleana de chaves é EXATAMENTE os dois gates citados — a chave
     entra sse passou no start E passou no fim (v = a && b). O AS-IS
-    só olha o start (fim da janela ignorado — tooth plantado). -/
+    só olha o start (fim da janela ignorado — dente plantado). -/
 theorem key_in_window_fate_iff :
     ∀ (key : Slice U8) (start : core.ops.range.Bound (Slice U8))
       (end1 : core.ops.range.Bound (Slice U8)) (v : Bool),
@@ -925,11 +925,11 @@ private noncomputable def pbo_file_after_start (hi : Slice U8)
       (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) hi s
   | core.ops.range.Bound.Unbounded => ok true
 
-/-- RFC-0218 P0.4 6/9 (atom `catalog:point_bounds_overlap`): o gate
+/-- RFC-0218 P0.4 6/9 (átomo `catalog:point_bounds_overlap`): o gate
     de leitura de arquivo é EXATAMENTE os bounds citados — sem
     smallest/largest lê (true); com ambos, lê sse lo passou no fim E
     hi passou no start (v = a && b). O AS-IS delega com bounds
-    estourados (tooth plantado). -/
+    estourados (dente plantado). -/
 theorem point_bounds_overlap_fate_iff :
     ∀ (smallest : Option (Slice U8)) (largest : Option (Slice U8))
       (start : core.ops.range.Bound (Slice U8))
@@ -1002,11 +1002,11 @@ private noncomputable def trw_starts_before_end (t_start : Slice U8)
       (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) t_start e
   | core.ops.range.Bound.Unbounded => ok true
 
-/-- RFC-0218 P0.4 7/9 (atom `catalog:tombstone_reaches_window`): a
+/-- RFC-0218 P0.4 7/9 (átomo `catalog:tombstone_reaches_window`): a
     janela de túmulo é EXATAMENTE os dois gates citados — o túmulo
     alcança a janela sse seu fim passou do start E seu começo não
     passou do fim (v = a && b; half-open). O AS-IS devolve false
-    sempre (túmulo nunca alcança — tooth plantado). -/
+    sempre (túmulo nunca alcança — dente plantado). -/
 theorem tombstone_reaches_window_fate_iff :
     ∀ (t_start : Slice U8) (t_end : Slice U8)
       (start : core.ops.range.Bound (Slice U8))
@@ -1036,11 +1036,11 @@ theorem tombstone_reaches_window_fate_iff :
     unfold scan_kernel.tombstone_reaches_window
     exact bind_intro a hA (bind_intro b hB (by cases a <;> rfl))
 
-/-- RFC-0218 P0.4 8/9 (atom `catalog:scan_guard`, entrada
+/-- RFC-0218 P0.4 8/9 (átomo `catalog:scan_guard`, entrada
     `scan_reads_file`): o guardião de leitura é EXATAMENTE a cadeia
     citada — bounds dizem lê (b true => true); senão o any sobre os
     túmulos decide (v = b1 do par retornado). O AS-IS só olha os
-    bounds (túmulo que alcança a janela não esconde — tooth
+    bounds (túmulo que alcança a janela não esconde — dente
     plantado). -/
 theorem scan_reads_file_fate_iff :
     ∀ (smallest : Option (Slice U8)) (largest : Option (Slice U8))

@@ -12,8 +12,8 @@ theorem crash_legal_in_window :
   unfold env_crash_kernel.crash_legal
   rfl
 
-/-- AS-IS tooth: a cut below the barrier still admits. -/
-theorem crash_legal_as_is_tooth :
+/-- AS-IS dente: a cut below the barrier still admits. -/
+theorem crash_legal_as_is_dente :
     env_crash_kernel.crash_legal_as_is
       { written := 10#u64, synced := 4#u64 }
       (3#u64) = ok true := by
@@ -42,7 +42,7 @@ theorem sync_lying_does_not_promote :
   unfold group_commit_kernel.fsync_promotes_pending
   simp [env_crash_kernel.SyncHonesty.read_discriminant]
 
-/-! ## RFC-0214 P0.2 — costura Env no degrau atom (fate ∀) -/
+/-! ## RFC-0214 P0.2 — costura Env no degrau átomo (fate ∀) -/
 
 /-- RFC-0214 P0.2 (atom `catalog:env_crash`): um corte é legal
 EXATAMENTE quando sobrevive entre o piso da barreira e o teto
@@ -157,11 +157,11 @@ theorem sync_fate_iff :
 /-- RFC-0214 P0.2 (atom `catalog:env_barrier_floor`): a corolária
 do piso vale SEMPRE — o desfecho é `ok v` com `v = true` exato: ou
 o corte é ilegal (nada a perder), ou é legal e então `cut ≥
-synced` (o piso da janela do `crash_legal_fate_iff`, atom 1/6
+synced` (o piso da janela do `crash_legal_fate_iff`, átomo 1/6
 desta fatia). Um crash legal nunca perde byte que a barreira
 honesta tornou durável. Fate forall sobre o corpo extraído; CITA
 `crash_legal_fate_iff`. O mutante AS-IS é o `crash_legal` sem
-piso — o mesmo tooth da entrada 1/6. -/
+piso — o mesmo dente da entrada 1/6. -/
 theorem barrier_floor_fate_iff :
     ∀ (m : env_crash_kernel.CrashModel) (cut : U64) (v : Bool),
       (env_crash_kernel.barrier_floor_holds m cut = ok v) ↔
@@ -249,7 +249,7 @@ sync honesto vale SEMPRE — o desfecho é `ok v` com `v = true`
 exato: após a barreira honesta (`synced := written`), a janela
 legal colapsa num ponto (`written ≤ cut ≤ written` força
 `cut = written`, pernas `sync_fate_iff` + `crash_legal_fate_iff`,
-atoms 3/6 e 1/6 desta fatia) — todo crash legal preserva o log
+átomos 3/6 e 1/6 desta fatia) — todo crash legal preserva o log
 INTEIRO. Fate forall sobre o corpo extraído. O mutante AS-IS
 promove sync mentiroso — a barreira prometida não existe. -/
 theorem honest_sync_fate_iff :

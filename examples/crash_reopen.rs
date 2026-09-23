@@ -14,7 +14,7 @@
 //!
 //! Next: `concurrent` — many threads, one fsync per group, OCC on conflict.
 
-use pedradb_core::Db;
+use pedradb_core::ConcurrentDb;
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now()
@@ -30,8 +30,8 @@ fn run() -> pedradb_core::Result<()> {
     let dir = scratch("crash");
 
     {
-        let mut db = Db::open(&dir)?;
-        let mut tx = db.begin();
+        let mut db = ConcurrentDb::open(&dir)?;
+        let mut tx = db.begin_occ();
         tx.put(b"row/42", br#"{"name":"ada"}"#)?;
         tx.put(b"idx/ada", b"42")?;
         tx.commit()?;
@@ -39,7 +39,7 @@ fn run() -> pedradb_core::Result<()> {
     }
 
     {
-        let db = Db::open(&dir)?;
+        let db = ConcurrentDb::open(&dir)?;
         assert_eq!(
             db.get(b"row/42").as_deref(),
             Some(br#"{"name":"ada"}"#.as_ref())
@@ -50,15 +50,15 @@ fn run() -> pedradb_core::Result<()> {
 
     // Uncommitted staging never reaches the WAL.
     {
-        let mut db = Db::open(&dir)?;
-        let mut tx = db.begin();
+        let mut db = ConcurrentDb::open(&dir)?;
+        let mut tx = db.begin_occ();
         tx.put(b"row/99", b"ghost")?;
         tx.put(b"idx/ghost", b"99")?;
         tx.abort();
         db.close()?;
     }
     {
-        let db = Db::open(&dir)?;
+        let db = ConcurrentDb::open(&dir)?;
         assert!(db.get(b"row/99").is_none());
         assert!(db.get(b"idx/ghost").is_none());
         println!(

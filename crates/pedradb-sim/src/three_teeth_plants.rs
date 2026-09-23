@@ -25,7 +25,7 @@ use pedradb_core::probe_order_kernel::{
     first_probe_on_equal_lo, first_probe_on_equal_lo_as_is, run_pairwise_disjoint_los,
     run_pairwise_disjoint_los_as_is,
 };
-use pedradb_core::{BatchOp, Db, OpenOptions, WriteOptions, CURRENT_FILE};
+use pedradb_core::{BatchOp, db::Db, OpenOptions, WriteOptions, CURRENT_FILE};
 
 use super::{FailingEnv, FaultKind, OpClass};
 

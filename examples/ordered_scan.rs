@@ -12,7 +12,7 @@
 
 use std::ops::Bound;
 
-use pedradb_core::{prefix_exclusive_end, Db, ScanProjection};
+use pedradb_core::{prefix_exclusive_end, ConcurrentDb, ScanProjection};
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now()
@@ -26,7 +26,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 fn run() -> pedradb_core::Result<()> {
     let dir = scratch("scan");
-    let mut db = Db::open(&dir)?;
+    let mut db = ConcurrentDb::open(&dir)?;
 
     // Naive ids: lexicographic order is not numeric order.
     for (k, v) in [
@@ -42,13 +42,14 @@ fn run() -> pedradb_core::Result<()> {
 
     let user_end = prefix_exclusive_end(b"user/");
     let naive: Vec<_> = db
-        .scan(
+        .scan_collect(
             Bound::Included(b"user/".as_ref()),
             user_end
                 .as_deref()
                 .map_or(Bound::Unbounded, Bound::Excluded),
         )
-        .map(|kv| String::from_utf8_lossy(&kv.key).into_owned())
+        .into_iter()
+        .map(|(key, _)| String::from_utf8_lossy(&key).into_owned())
         .collect();
     assert_eq!(naive, ["user/1", "user/10", "user/2"]);
 
@@ -58,13 +59,14 @@ fn run() -> pedradb_core::Result<()> {
     }
     let acct_end = prefix_exclusive_end(b"acct/");
     let padded: Vec<_> = db
-        .scan(
+        .scan_collect(
             Bound::Included(b"acct/".as_ref()),
             acct_end
                 .as_deref()
                 .map_or(Bound::Unbounded, Bound::Excluded),
         )
-        .map(|kv| String::from_utf8_lossy(&kv.key).into_owned())
+        .into_iter()
+        .map(|(key, _)| String::from_utf8_lossy(&key).into_owned())
         .collect();
     assert_eq!(padded, ["acct/0001", "acct/0002", "acct/0010"]);
 
@@ -79,14 +81,15 @@ fn run() -> pedradb_core::Result<()> {
 
     // Key-only projection skips loading values (listings, counts).
     let names: Vec<_> = db
-        .scan_projected(
+        .scan_collect_projected(
             Bound::Included(b"user/".as_ref()),
             Bound::Excluded(b"user0".as_ref()),
             ScanProjection::KeyOnly,
         )
-        .map(|kv| {
-            assert!(kv.value.is_empty());
-            kv.key
+        .into_iter()
+        .map(|(key, value)| {
+            assert!(value.is_empty());
+            key
         })
         .collect();
     assert_eq!(names.len(), 3);

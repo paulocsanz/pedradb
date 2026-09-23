@@ -9,7 +9,7 @@ theorem iter_window_keep_live :
   unfold iter_window_keep
   rfl
 
-theorem iter_window_keep_as_is_tooth :
+theorem iter_window_keep_as_is_dente :
     iter_window_keep_as_is false = ok true := by
   unfold iter_window_keep_as_is
   rfl

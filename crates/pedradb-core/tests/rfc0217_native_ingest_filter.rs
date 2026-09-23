@@ -7,7 +7,7 @@
 use bytes::Bytes;
 use pedradb_core::key::InternalKey;
 use pedradb_core::merge::CompactFilterDecision;
-use pedradb_core::{Db, MemTable, ValueType};
+use pedradb_core::{db::Db, MemTable, ValueType};
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(

@@ -45,7 +45,7 @@ theorem prefix_exclusive_end_def (p : Slice U8) :
         prefix_exclusive_end_loop e) := rfl
 
 /-- F57/F58 AS-IS tooth: extracted mutant is to_vec then push 255 (`prefix || 0xff`). -/
-theorem prefix_exclusive_end_as_is_tooth (p : Slice U8) :
+theorem prefix_exclusive_end_as_is_dente (p : Slice U8) :
     prefix_exclusive_end_as_is p =
       (do
         let e ← alloc.slice.Slice.to_vec core.clone.CloneU8 p
@@ -86,11 +86,11 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P1.2 4/11 (atom `catalog:prefix`, entrada
+/-- RFC-0218 P1.2 4/11 (átomo `catalog:prefix`, entrada
     `prefix_exclusive_end`): o fim exclusivo é EXATAMENTE o
     encaminhamento citado — o prefixo vira Vec e o loop citado decide
     (incrementa o último byte ou some). O AS-IS empurra 255 (fim
-    errado engole chaves — tooth plantado). -/
+    errado engole chaves — dente plantado). -/
 theorem prefix_exclusive_end_fate_iff :
     ∀ (prefix1 : Slice U8) (r : Option (alloc.vec.Vec U8)),
       (prefix_exclusive_end prefix1 = ok r) ↔

@@ -121,7 +121,7 @@ pub enum CoreError {
     ///
     /// History required for `requested` may have been dropped by
     /// [`crate::db::Db::compact_reclaim`], `latest_only`, or an explicit GC floor.
-    /// Distributed maps the store-level cousin to FDB `transaction_too_old`.
+    /// Montanha maps the store-level cousin to FDB `transaction_too_old`.
     #[error("snapshot too old: requested sequence {requested}, earliest readable {earliest}")]
     SnapshotTooOld {
         /// Sequence the caller asked to read at.

@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-product-crown-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Shim exposing production product_crown_kernel.rs (+ d1/env/wal + properties) to Charon"
+
+[lib]
+path = "src/lib.rs"

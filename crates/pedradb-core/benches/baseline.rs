@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use pedradb_core::{Db, OpenOptions, WriteOptions};
+use pedradb_core::{db::Db, OpenOptions, WriteOptions};
 
 fn temp_dir() -> std::path::PathBuf {
     let n = std::time::SystemTime::now()

@@ -22,7 +22,7 @@ theorem spine_replay_fate_iff :
   unfold spine_replay
   rfl
 
-/-- AS-IS tooth: the barrier never runs — each append acks itself. -/
+/-- AS-IS dente: the barrier never runs — each append acks itself. -/
 theorem spine_replay_as_is_fate_iff :
     ∀ (l : write_ack_kernel.WriteAckLedger)
       (steps : Slice SpineStep),

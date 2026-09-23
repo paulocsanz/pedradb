@@ -162,7 +162,7 @@ theorem recovery_blob_gc_rewrite_iff :
   blob_gc_action_rewrite_iff_inactive_with_bytes
 
 /-- RFC-0224 P1.1: first-install Failed recusa E blob GC do gen ativo
-    nunca reescreve — os dois atoms compostos. -/
+    nunca reescreve — os dois átomos compostos. -/
 theorem recovery_failed_install_and_active_gen_never_rewrite :
     ∀ (act : FirstInstallAction) (bytes : U64),
       first_install_action FirstInstallOutcome.Failed = ok act →

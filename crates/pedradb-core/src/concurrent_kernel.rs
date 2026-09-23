@@ -212,9 +212,10 @@ struct WriteGroup {
     /// CPUs the auto policy compares in-flight writers against
     /// (`available_parallelism`, computed once at open).
     axis_ncpu: usize,
-    /// RFC-0045 P0.2 → RFC-0233 P1.4: bounded spin before parking on the
-    /// bypass write lock (`PEDRA_WRITE_SPIN`, default 256 — a Darwin
-    /// ulock wake per contended acquire cost more than the spin).
+    /// RFC-0045 P0.2 → RFC-0233 P1.4 → RFC-0239 P0.4: bounded spin before
+    /// parking on the bypass write lock (`PEDRA_WRITE_SPIN`, default 0 —
+    /// spin-256 was a Darwin-only lift; on Linux it burns the memtable
+    /// critical section's cachelines, see the RFC-0239 finding).
     write_spin: AtomicUsize,
     /// RFC-0045 P2.2: fair handoff on the bypass write lock
     /// (`PEDRA_WRITE_FAIR=1`, default off). Unfair release wakes every
@@ -266,7 +267,7 @@ const MULTI_HOLD: Duration = Duration::from_micros(250);
 /// (`client_axis_kernel::async_merge_policy`): concurrent async writers
 /// merge iff they outnumber the CPUs. The 0044 A/B that kept it off ran a
 /// 50-thread herd on a 12-CPU box against the dead WriteThread-merge
-/// shape; the 2026-09-11 attribution meter on the 4-vCPU board box
+/// shape; the 2026-09-11 attribution meter on the 4-vCPU cartaz box
 /// (`findings/2026-09-11-p201-meter-atribuicao/`) has the merge at
 /// 1.52× min-of-3 / 2.10× median vs Rocks `sync=false` on
 /// `kvrocks_set_mc50` while the bypass sits at 0.96×. `PEDRA_ASYNC_GROUP=1`
@@ -461,16 +462,19 @@ impl WriteGroup {
             axis_ncpu: std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1),
-            // RFC-0233 P1.4 (2026-09-16): default 256. The RFC-0045
-            // plain park paid a Darwin ulock wake per contended
-            // db.write() (mc4 ycsb_f: 339k parked vs 466–495k at 256;
-            // fair handoff 96k; ≥512 starves readers — 352–393k).
-            // `PEDRA_WRITE_SPIN=0` restores park-immediately.
+            // RFC-0239 P0.4 (2026-09-21): default 0 (park immediately).
+            // The RFC-0233 P1.4 default of 256 was a Darwin-only lift
+            // (ulock wake; DIAG, never cartaz). On the Linux cartaz box
+            // the spin burns the very cachelines the memtable critical
+            // section mutates: apply_mc4 without instrumentation runs
+            // 2767–2858 qps at 256 vs 9224–9988 at 0 (vs Rocks default
+            // 5930–6790); ycsb_f_mc4 is spin-insensitive (74–82k either
+            // way). `PEDRA_WRITE_SPIN=N` still overrides.
             write_spin: AtomicUsize::new(
                 std::env::var("PEDRA_WRITE_SPIN")
                     .ok()
                     .and_then(|v| v.parse().ok())
-                    .unwrap_or(256),
+                    .unwrap_or(0),
             ),
             write_fair: std::env::var("PEDRA_WRITE_FAIR")
                 .ok()
@@ -2871,6 +2875,23 @@ impl<E: Env> ConcurrentDb<E> {
             .range_at_limited(snapshot, start, end, limit)
     }
 
+    /// Same collect as [`Self::scan_collect`] with [`crate::ScanProjection`]
+    /// (`KeyOnly` skips value-log resolve).
+    #[must_use]
+    pub fn scan_collect_projected(
+        &self,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        projection: crate::ScanProjection,
+    ) -> Vec<(Bytes, Bytes)> {
+        self.reads_served.fetch_add(1, Ordering::Relaxed);
+        self.inner
+            .read()
+            .scan_projected(start, end, projection)
+            .map(|VisibleKv { key, value }| (key, value))
+            .collect()
+    }
+
     /// Streaming scan collected under a read lock (iterator cannot outlive the lock).
     ///
     /// Values are resolved through the value log when large-value pointers are present.
@@ -4586,6 +4607,27 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         dir
     }
+
+    /// RFC-0239 P0.4: the bypass write lock parks immediately by default.
+    /// The RFC-0233 P1.4 spin-256 default was a Darwin-only lift (DIAG);
+    /// on the Linux cartaz box the spin loop burns the cachelines the
+    /// memtable critical section mutates — apply_mc4 without
+    /// instrumentation ran 2767–2858 qps at 256 vs 9224–9988 at 0
+    /// (findings/2026-09-21-rfc0239-a5-a6-convoy-unpaid/ + probe p239s).
+    #[test]
+    fn rfc0239_write_spin_default_is_park_immediately() {
+        let src = include_str!("concurrent_kernel.rs");
+        let init = src
+            .split("write_spin: AtomicUsize::new(")
+            .nth(1)
+            .and_then(|s| s.split("},").next())
+            .expect("write_spin initializer");
+        assert!(
+            init.contains("unwrap_or(0)"),
+            "default must be park-immediately (spin 0), got: {init}"
+        );
+    }
+
 
     /// RFC-0236 P0.2: get (hit, newest of two overlapping L0s, in-range miss)
     /// and a short scan during a held compact write lock use the published

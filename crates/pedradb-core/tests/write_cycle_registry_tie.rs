@@ -26,7 +26,7 @@
 //!    REAL `auto_flush_due` gate never exceeds the registered
 //!    1000-permille bound;
 //! 3. the forecast renders with its `tier=ceiling` disclaimer — a
-//!    count multiplier is never a board claim.
+//!    count multiplier is never a cartaz claim.
 
 use std::fs;
 use std::path::PathBuf;
@@ -89,7 +89,7 @@ fn registry_path() -> PathBuf {
 /// Every count row the forecast composes is live in the registry with
 /// the exact theorem name, over a zero-`sorry` Lean proof. A renamed
 /// theorem, a removed row, or a proof that gained a `sorry` fails the
-/// forecast (RFC-0199 P1.3: no hat becomes a board claim).
+/// forecast (RFC-0199 P1.3: no hat becomes a cartaz claim).
 #[test]
 fn registry_rows_pin_the_forecast_counts() {
     let tsv = fs::read_to_string(registry_path())
@@ -222,15 +222,15 @@ fn flush_multiplier_within_registered_bound() {
     );
 }
 
-/// The forecast output carries its non-board disclaimer on the real
-/// render path (RFC-0199: count multipliers never become board
+/// The forecast output carries its non-cartaz disclaimer on the real
+/// render path (RFC-0199: count multipliers never become cartaz
 /// claims; RFC-0192 P0.4's `tier=ceiling` label is load-bearing).
 #[test]
-fn forecast_render_is_not_a_board_claim() {
+fn forecast_render_is_not_a_cartaz_claim() {
     let f = write_cycle_forecast(LINUX_QUIET_0189_P01, 4);
     let rendered = f.render();
     assert!(rendered.contains("tier=ceiling"));
-    assert!(rendered.contains("not a board qps forecast"));
+    assert!(rendered.contains("not a cartaz qps forecast"));
     assert!(rendered.contains("cs_ns="));
     assert!(rendered.contains("qps_hat="));
 }

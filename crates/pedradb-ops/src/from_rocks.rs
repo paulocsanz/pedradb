@@ -10,7 +10,7 @@ use std::path::PathBuf;
 #[cfg(feature = "from-rocks")]
 use pedradb_core::sst::SST_VERSION;
 #[cfg(feature = "from-rocks")]
-use pedradb_core::{encode_cf_key, BatchOp, Db, OpenOptions, WriteOptions};
+use pedradb_core::{encode_cf_key, BatchOp, db::Db, OpenOptions, WriteOptions};
 use pedradb_core::{Env, SequenceNumber};
 
 use crate::dir_kind::{
@@ -43,7 +43,7 @@ pub struct RocksMigrateReport {
 #[cfg(not(feature = "from-rocks"))]
 const FEATURE_HINT: &str = "migrate-from-rocks requires rebuilding with --features from-rocks (links RocksDB C++ as a reader only; Pedra still does not open a C++ SST directory)";
 
-/// Ops grouped through [`pedradb_core::Db::apply_batch`] (RFC-0186 P1.2).
+/// Ops grouped through [`pedradb_core::db::Db::apply_batch`] (RFC-0186 P1.2).
 #[cfg(feature = "from-rocks")]
 const APPLY_CHUNK: usize = 256;
 

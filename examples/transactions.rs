@@ -11,7 +11,7 @@
 //!
 //! Next: `secondary_index` — the same TX primitive as a real layer.
 
-use pedradb_core::{BatchOp, Db};
+use pedradb_core::{BatchOp, ConcurrentDb};
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now()
@@ -30,8 +30,8 @@ fn parse_i64(bytes: &[u8]) -> i64 {
         .expect("i64")
 }
 
-fn transfer(db: &mut Db, from: &[u8], to: &[u8], amount: i64) -> pedradb_core::Result<bool> {
-    let mut tx = db.begin();
+fn transfer(db: &mut ConcurrentDb, from: &[u8], to: &[u8], amount: i64) -> pedradb_core::Result<bool> {
+    let mut tx = db.begin_occ();
     let src = parse_i64(&tx.get(from)?.expect("src account"));
     let dst = parse_i64(&tx.get(to)?.expect("dst account"));
     if src < amount {
@@ -52,7 +52,7 @@ fn transfer(db: &mut Db, from: &[u8], to: &[u8], amount: i64) -> pedradb_core::R
 
 fn run() -> pedradb_core::Result<()> {
     let dir = scratch("tx");
-    let mut db = Db::open(&dir)?;
+    let mut db = ConcurrentDb::open(&dir)?;
 
     db.put(b"acct/ada", b"100")?;
     db.put(b"acct/bob", b"40")?;
@@ -67,7 +67,7 @@ fn run() -> pedradb_core::Result<()> {
 
     // Drop without commit is also abort.
     {
-        let mut tx = db.begin();
+        let mut tx = db.begin_occ();
         tx.put(b"acct/ada", b"0")?;
         tx.put(b"acct/bob", b"0")?;
         // drop

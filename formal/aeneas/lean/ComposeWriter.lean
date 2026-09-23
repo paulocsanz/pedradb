@@ -9,7 +9,7 @@
 --
 -- Sem worker (Workerless) NADA parqueia — inclusive com dívida no cap.
 -- O AS-IS diz WorkerDrains sempre (writer workerless dorme para sempre).
--- Cada perna é o atom iff já registrado; os corpos extraídos não abrem.
+-- Cada perna é o átomo iff já registrado; os corpos extraídos não abrem.
 import Aeneas
 import Flush
 import Changelog
@@ -21,7 +21,7 @@ open pedra_aeneas_write_admission_kernel
 
 /-- RFC-0222 P2.1: a cadeia workerless COMPOSTA — o gate é Workerless
     EXATAMENTE quando nenhum worker está attached, e a dívida parked é
-    DebtAtCap EXATAMENTE no/acima do cap. Dual-unfold dos dois atoms
+    DebtAtCap EXATAMENTE no/acima do cap. Dual-unfold dos dois átomos
     (`catalog:flusher_gate_plan`, `catalog:parked_debt_plan`). Sem worker
     o plano NÃO vira WorkerDrains mesmo com dívida no cap. -/
 theorem writer_workerless_gate_and_debt_iff :
@@ -55,7 +55,7 @@ theorem workerless_never_drains :
   · cases htrue
   · exact hg
 
-/-- AS-IS tooth: o gate ignora `attached` e sempre WorkerDrains —
+/-- AS-IS dente: o gate ignora `attached` e sempre WorkerDrains —
     writer workerless dorme para sempre (RFC-0219 P2.2 plant). -/
 theorem flusher_gate_plan_as_is_always_drains :
     ∀ (attached : Bool),
@@ -68,7 +68,7 @@ theorem flusher_gate_plan_as_is_always_drains :
     changelog Count EXATAMENTE na resolução de sync do cliente/DB, e o
     plano WAL é AppendSyncFence / AppendSyncApplyOk / AppendApplyOk
     EXATAMENTE no trio (need_sync, sync_failed). Dual-unfold dos dois
-    atoms (`catalog:changelog_durable_commit`, `catalog:wal_commit_plan`).
+    átomos (`catalog:changelog_durable_commit`, `catalog:wal_commit_plan`).
     Corpos extraídos não abrem. -/
 theorem writer_sync_chain_iff :
     ∀ (client_set client_sync db_sync need_sync sync_failed : Bool)
@@ -133,7 +133,7 @@ theorem skip_async_is_append_apply_ok :
   · cases hok.2.1
   · exact happly.1
 
-/-- AS-IS tooth composto: changelog nunca conta (Skip em todo input) e
+/-- AS-IS dente composto: changelog nunca conta (Skip em todo input) e
     o WAL nunca cerca (Apply/Ok mesmo com sync requerido falho). -/
 theorem writer_sync_as_is_never_counts_and_never_fences :
     changelog_durable_commit_fate_as_is true true true
@@ -186,7 +186,7 @@ theorem append_sync_fence_refuses_all_after :
   · exact hrefuse.2
   · cases hadmit.1
 
-/-- AS-IS tooth composto: WAL nunca cerca (Apply/Ok no sync falho) e a
+/-- AS-IS dente composto: WAL nunca cerca (Apply/Ok no sync falho) e a
     admissão admite mesmo com fence armado. -/
 theorem writer_fence_as_is_admits :
     wal_commit_plan_as_is true true
@@ -258,7 +258,7 @@ theorem not_durable_holds_fail_closed :
   · cases hpub.1
   · exact hhold.2
 
-/-- AS-IS tooth composto: publica mesmo com SST unsynced, e o changelog
+/-- AS-IS dente composto: publica mesmo com SST unsynced, e o changelog
     nunca conta. -/
 theorem writer_publish_as_is_publishes_unsynced :
     manifest_publish_plan_as_is false

@@ -8,7 +8,7 @@
 //! cargo run -p pedradb-examples --example backup
 //! ```
 
-use pedradb_core::{Db, StdEnv};
+use pedradb_core::{ConcurrentDb, StdEnv};
 use pedradb_ops::BackupEngine;
 
 fn scratch(name: &str) -> std::path::PathBuf {
@@ -27,20 +27,20 @@ fn run() -> pedradb_ops::Result<()> {
     let backups = root.join("backups");
     let restored = root.join("restored");
 
-    let mut db = Db::open(&live)?;
+    let mut db = ConcurrentDb::open(&live)?;
     db.put(b"epoch", b"base")?;
     db.put(b"k", b"v1")?;
 
     let mut engine = BackupEngine::open_with_env(&backups, StdEnv)?;
-    let base = engine.create_base_backup(&mut db)?;
+    let base = engine.create_base_backup_concurrent(&db)?;
 
     db.put(b"k", b"v2")?;
     db.put(b"later", b"yes")?;
-    let shipped = engine.ship_wal(&db)?;
+    let shipped = engine.ship_wal_concurrent(&db)?;
 
     engine.restore_pitr(base.id, &restored, Some(shipped.last_shipped_sequence))?;
 
-    let replayed = Db::open(&restored)?;
+    let replayed = ConcurrentDb::open(&restored)?;
     assert_eq!(replayed.get(b"epoch").as_deref(), Some(b"base".as_ref()));
     assert_eq!(replayed.get(b"k").as_deref(), Some(b"v2".as_ref()));
     assert_eq!(replayed.get(b"later").as_deref(), Some(b"yes".as_ref()));
@@ -48,7 +48,7 @@ fn run() -> pedradb_ops::Result<()> {
     // Base-only restore (no WAL replay) still has the checkpoint contents.
     let base_only = root.join("base-only");
     engine.restore(base.id, &base_only)?;
-    let frozen = Db::open(&base_only)?;
+    let frozen = ConcurrentDb::open(&base_only)?;
     assert_eq!(frozen.get(b"k").as_deref(), Some(b"v1".as_ref()));
     assert!(frozen.get(b"later").is_none());
 

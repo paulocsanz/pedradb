@@ -7,7 +7,7 @@
 //!
 //!   ./scripts/aeneas_manifest.sh --required
 //!
-//! Production `recover_ssts` (called by [`crate::Db::open_with_env`])
+//! Production `recover_ssts` (called by [`crate::db::Db::open_with_env`])
 //! routes every decision through this kernel: given what `manifest::load`
 //! observed (absent inventory / committed inventory / damaged
 //! CURRENT-or-MANIFEST) and whether every listed SST file is on disk, the

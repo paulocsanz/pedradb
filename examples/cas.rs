@@ -10,7 +10,7 @@
 //!
 //! Next: `snapshots` — read the past without copying the database.
 
-use pedradb_core::{CoreError, Db};
+use pedradb_core::{CoreError, ConcurrentDb};
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now()
@@ -24,7 +24,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 fn run() -> pedradb_core::Result<()> {
     let dir = scratch("cas");
-    let mut db = Db::open(&dir)?;
+    let mut db = ConcurrentDb::open(&dir)?;
 
     // Acquire a free lease (IF NOT EXISTS).
     db.put_if_absent(b"lease/volume-1", b"node-a")?;
