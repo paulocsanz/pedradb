@@ -17,10 +17,10 @@ local disk. A commit writes the row and its index as one WAL record and
 fsyncs before `Ok`. The engine is `#![forbid(unsafe_code)]`. Status is
 alpha: the format and the API can still break.
 
-The only speed claim is against **RocksDB default**
-(`WriteOptions.sync=false`), on Linux. A ratio above 1 means Pedra is
-faster. macOS numbers are not the claim. A win against `sync=true` is not
-a win. Per-run values, the loss list, and how to reproduce a cell are in
+The speed claim is Pedra against **RocksDB default**
+(`WriteOptions.sync=false`) and against **fjall**, on Linux. A ratio
+above 1 means Pedra is faster. macOS numbers are not the claim. Per-run
+values, the loss list, and how to reproduce a cell are in
 [`docs/benchmarks.md`](docs/benchmarks.md).
 
 ## Quickstart
@@ -66,9 +66,10 @@ The catalog map, what each check refuses, and how to run it:
 
 ## Benchmarks
 
-Linux, 4 vCPU on a Threadripper PRO 3975WX, RocksDB default
-`sync=false`. Bold is a win. Plain is a tie or parity. A dash is not
-measured on the current engine, or the peer was outside its own band.
+Linux, 4 vCPU on a Threadripper PRO 3975WX. Peers: RocksDB default
+(`WriteOptions.sync=false`) and fjall. Bold is a win. Plain is a tie or
+parity. A dash is not measured on the current engine, or the peer was
+outside its own band.
 
 **Same durability as production Rocks** (Pedra WAL `write()`, no fsync
 per operation). September 2026.
@@ -115,8 +116,13 @@ re-run; 25M was not measured. At 100M on the current engine the probe is
 211 ns versus 571 ns. Absolute times and the loss list are in
 [`docs/benchmarks.md`](docs/benchmarks.md).
 
-Fjall, same binary, not the Rocks gate: random read/write at 1M keys
-**1.03×** (min 1.02×), a 1,024-key scan **1.09×** (one round 0.996×).
+**fjall**, same binary, 21 September 2026. Not a different durability
+class: both sides buffer the measured window.
+
+| Workload | Median | Min | Rounds |
+|---|---:|---:|---|
+| Random read/write, 1M keys | **1.03×** | 1.02× | 3/3 |
+| Scan, 1,024 keys | **1.09×** | 0.996× | 3/3 |
 
 ## Crates
 

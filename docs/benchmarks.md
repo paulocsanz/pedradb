@@ -7,21 +7,19 @@ behind every median, and every named loss. Nothing here is a win claim
 unless the README says so. Verification is a separate annex:
 [`verification.md`](verification.md).
 
-## The peer
+## The peers
 
-The only peer that counts is **RocksDB default** with
-`WriteOptions.sync=false` — the class production Rocks actually runs.
-Consequences, stated as law:
+The published claim is two peers, both on Linux:
 
-- A ratio against `sync=true` is never a win.
-- The Pedra engine still `fdatasync`s before `Ok` in its default
-  configuration; the async column matches the peer's durability class
-  explicitly.
-- A cell publishes only when both backends are in band. If the peer
-  measures outside its own historical band on a shape, the ratio is
-  refused (see 25M `get_loop` below).
-- Bold in the README is a win claim. Plain is a tie or parity. `—` is
-  not measured or refused.
+- **RocksDB default**, `WriteOptions.sync=false`.
+- **fjall**, same binary, measured window buffered on both sides.
+
+The Pedra engine still `fdatasync`s before `Ok` in its default
+configuration. The Rocks tables below are the async column, same
+durability class as that default peer. A cell publishes only when both
+sides are in band. If a peer measures outside its own historical band,
+the ratio is refused (see 25M `get_loop` below). Bold in the README is
+a win. Plain is a tie or parity. `—` is not measured or refused.
 
 ## Harnesses
 
