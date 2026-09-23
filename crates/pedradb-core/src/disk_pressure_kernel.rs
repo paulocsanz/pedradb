@@ -375,7 +375,7 @@ mod tests {
             submit.contains("WriteStallMem"),
             "only WriteStall/WriteStallMem retry"
         );
-        let del = include_str!("db_kernel.rs")
+        let del = include_str!("db_put_kernel.rs")
             .split(concat!("pub fn ", "delete_with("))
             .nth(1)
             .and_then(|s| s.split(concat!("pub fn ", "delete_range(")).next())

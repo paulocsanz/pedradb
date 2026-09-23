@@ -610,6 +610,7 @@ impl<E: Env> Db<E> {
             scan_sst_probed: AtomicU64::new(0),
             get_mem_hit: AtomicU64::new(0),
             get_sst_fallback: AtomicU64::new(0),
+            lookup_sst_probes: AtomicU64::new(0),
             class_z0: Arc::new(AtomicU64::new(0)),
             class_z1: Arc::new(AtomicU64::new(0)),
             class_q: AtomicU64::new(0),

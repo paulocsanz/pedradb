@@ -575,8 +575,8 @@ mod tests {
         let residuals = crate_dir.join("../../scripts/formal/residuals.json");
         let text = std::fs::read_to_string(&residuals).expect("residuals.json");
         assert!(
-            text.contains("\"db_rs_extracted\": true"),
-            "glue.db_rs_extracted true after split+extracted plans"
+            text.contains("\"db_rs_extracted\": false"),
+            "glue.db_rs_extracted stays false — db.rs is not extracted"
         );
         assert!(
             text.contains("\"id\": \"R-glue\""),
