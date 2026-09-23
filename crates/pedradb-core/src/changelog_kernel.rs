@@ -720,7 +720,7 @@ mod tests {
         // do_sync resolution feeding wal_commit_plan stays — that is the
         // write-admission family's own call).
         let coc =
-            named_fn_src(include_str!("db_kernel.rs"), "commit_ops_with").expect("commit_ops_with");
+            named_fn_src(include_str!("db_put_kernel.rs"), "commit_ops_with").expect("commit_ops_with");
         assert!(
             coc.contains("match crate::changelog_kernel::changelog_durable_commit_fate("),
             "commit_ops_with must match changelog_durable_commit_fate"

@@ -112,8 +112,8 @@
       "crates/rocksdb-compat/src/txn_kernel.rs"
     ],
     "kernel_files": 94,
-    "kernel_loc": 100568,
-    "handler_loc": 82489,
+    "kernel_loc": 100916,
+    "handler_loc": 82899,
     "db_rs_extracted": false,
     "proof_depth": {
       "atom": 139,
@@ -191,12 +191,15 @@
         "bytes",
         "is_empty",
         "keys",
+        "kinds",
         "len",
         "lookup",
+        "lookup_entry",
         "push",
         "reserve",
         "seqs",
         "sort_bulk_key_vals",
+        "upsert",
         "vals"
       ],
       "crates/pedradb-core/src/cache_kernel.rs": [
@@ -704,6 +707,7 @@
         "sst_cached_entries",
         "sst_collapsed_bounds",
         "sst_count",
+        "sst_fast_miss_view",
         "sst_file_nums",
         "sst_index_bytes",
         "sst_levels",

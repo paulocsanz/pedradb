@@ -2971,9 +2971,10 @@ pub fn write_sst_bulk_arrays(
     keys: &[Bytes],
     vals: &[Bytes],
     seqs: &[SequenceNumber],
+    kinds: &[ValueType],
     sync: bool,
 ) -> Result<SstTable> {
-    write_sst_bulk_arrays_body(env, path.as_ref(), keys, vals, seqs, sync)
+    write_sst_bulk_arrays_body(env, path.as_ref(), keys, vals, seqs, kinds, sync)
 }
 
 const BULK_SST_HEADER_LEN: usize = 40;
@@ -2986,9 +2987,10 @@ fn write_sst_bulk_arrays_body(
     keys: &[Bytes],
     vals: &[Bytes],
     seqs: &[SequenceNumber],
+    kinds: &[ValueType],
     sync: bool,
 ) -> Result<SstTable> {
-    if keys.len() != vals.len() || keys.len() != seqs.len() {
+    if keys.len() != vals.len() || keys.len() != seqs.len() || keys.len() != kinds.len() {
         return Err(CoreError::Internal(
             "bulk SST keys/vals/seqs length mismatch".into(),
         ));
@@ -3044,7 +3046,7 @@ fn write_sst_bulk_arrays_body(
         ) {
             block_first_user = Some(keys[i].clone());
         }
-        append_bulk_entry(&mut staged, k, seq, v);
+        append_bulk_entry(&mut staged, k, seq, kinds[i], v);
     }
     if !crate::write_admission_kernel::batch_is_empty(
         staged.len().saturating_sub(block_start) as u64
@@ -3166,13 +3168,19 @@ fn finish_staged_block(
 }
 
 #[inline]
-fn append_bulk_entry(buf: &mut Vec<u8>, k: &[u8], seq: SequenceNumber, v: &[u8]) {
+fn append_bulk_entry(
+    buf: &mut Vec<u8>,
+    k: &[u8],
+    seq: SequenceNumber,
+    kind: ValueType,
+    v: &[u8],
+) {
     // Hydrate keys/vals are tens/hundreds of bytes; skip try_from / Result.
     let ikey_len = (k.len() + 8) as u32;
     let val_len = v.len() as u32;
     buf.extend_from_slice(&ikey_len.to_le_bytes());
     buf.extend_from_slice(k);
-    buf.extend_from_slice(&pack_sequence_and_type(seq, ValueType::Value).to_be_bytes());
+    buf.extend_from_slice(&pack_sequence_and_type(seq, kind).to_be_bytes());
     buf.extend_from_slice(&val_len.to_le_bytes());
     buf.extend_from_slice(v);
 }
@@ -3879,7 +3887,15 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        let table = write_sst_bulk_arrays(
+            &StdEnv,
+            &path,
+            &keys,
+            &vals,
+            &seqs,
+            &vec![ValueType::Value; keys.len()],
+            true,
+        ).unwrap();
         assert!(!table.compressed_blocks);
         assert!(table.block_crc);
         assert!(!table.has_bloom());
@@ -3910,7 +3926,15 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        write_sst_bulk_arrays(
+            &StdEnv,
+            &path,
+            &keys,
+            &vals,
+            &seqs,
+            &vec![ValueType::Value; keys.len()],
+            true,
+        ).unwrap();
         let orig = std::fs::read(&path).unwrap();
         assert!(orig.len() > BULK_SST_HEADER_LEN + 8);
 
@@ -3948,7 +3972,15 @@ mod tests {
             .collect();
         let vals: Vec<Bytes> = (0..n).map(|_| Bytes::from(vec![b'v'; 80])).collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        let table = write_sst_bulk_arrays(
+            &StdEnv,
+            &path,
+            &keys,
+            &vals,
+            &seqs,
+            &vec![ValueType::Value; keys.len()],
+            true,
+        ).unwrap();
         let blocks = table.data_block_count();
         // ~160 KiB of values at 4 KiB → tens of blocks (not one 256 KiB).
         assert!(
@@ -3987,7 +4019,15 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        let table = write_sst_bulk_arrays(
+            &StdEnv,
+            &path,
+            &keys,
+            &vals,
+            &seqs,
+            &vec![ValueType::Value; keys.len()],
+            true,
+        ).unwrap();
         assert!(!table.payload_resident());
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1 << 20)));
@@ -4037,7 +4077,15 @@ mod tests {
             .collect();
         let vals: Vec<Bytes> = (0..n).map(|_| Bytes::from(vec![b'v'; 80])).collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        let table = write_sst_bulk_arrays(
+            &StdEnv,
+            &path,
+            &keys,
+            &vals,
+            &seqs,
+            &vec![ValueType::Value; keys.len()],
+            true,
+        ).unwrap();
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
         pool.arm();
@@ -4066,7 +4114,15 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        let table = write_sst_bulk_arrays(
+            &StdEnv,
+            &path,
+            &keys,
+            &vals,
+            &seqs,
+            &vec![ValueType::Value; keys.len()],
+            true,
+        ).unwrap();
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
         pool.arm();
