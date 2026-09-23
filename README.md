@@ -173,6 +173,39 @@ plain is a tie or parity; `—` is not measured or refused. A win against
 Protocol, per-run values, and the full loss registry live in
 [`docs/benchmarks.md`](docs/benchmarks.md).
 
+**Linux gate, 21–23 September 2026.** Same 4 vCPU guest (Threadripper
+PRO 3975WX host), RocksDB default `WriteOptions.sync=false`. This table
+is the async same-class column: Pedra WAL `write()` with no per-op
+barrier, the same durability class as the peer. Ratio > 1 means Pedra
+is faster. A cold-boot canary under the guest's floor is discarded; the
+published median uses the rounds that stayed in band.
+
+| shape | median × | min × | rounds | status |
+|---|---:|---:|---|---|
+| `deps_cache_overwrite_mc4`, 25M keys, 4 clients | **1.32** | 1.06 | 2 valid of 3 | win |
+| `deps_apply_batch_mc4`, 4 clients | **1.23** | 1.19 | 3/3 | win |
+| `ycsb_b_mc4`, 4 clients | **1.13** | 1.00 | 3/3 | win |
+| `qs_neg_lookup`, 100M keys | **17.6** | 14.4 | 2 valid of 3 | win |
+| `ycsb_f_mc4`, 4 clients | 0.70 | **0.67** | 2 valid of 3 | open, below 1× |
+
+`ycsb_f_mc4` is a read-modify-write. The 1-op spin that closed
+overwrite does not close it. The 100M prefix scan on a 4 GiB guest with
+the bounded cache is still the registered open cell at **0.70×**; the
+1.05× further down is the 5 September snapshot harness, a different
+measurement. Sequential fill versus fjall is not a published win: Pedra
+led the process in the room, and that fjall process sat under its own
+healthy band.
+
+Fjall on the same binary (third peer, not the Rocks gate): random
+read/write at 1M keys, median **1.03×** (min 1.02×, 3/3); a 1 024-window
+scan, median **1.09×** (one round 0.996×).
+
+What moved the three wins: a short spin on the 1-op write bypass
+(overwrite), park-immediately on the multi-op group commit (`apply`
+batch; the older **2.79×** figure further down is the fdatasync-before-Ok
+column, a different durability class), and the negative-lookup path at
+100M keys (`qs_neg_lookup` QPS, not the snapshot `probe_miss` p50 cell).
+
 **Async WAL, same class as production Rocks.** PedraDB with WAL `write()`
 and no per-op barrier vs Rocks `sync=false`. This is engine speed at equal
 durability. Linux 4 vCPU (Threadripper PRO 3975WX, 2026-08-25, 3 rounds,
