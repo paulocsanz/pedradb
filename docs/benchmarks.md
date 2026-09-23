@@ -139,6 +139,78 @@ A same-day reconfirmation run (whole campaign re-executed after a
 restart, all exits 0) landed inside these bands: probe_miss Pedra 230 ns
 vs Rocks 531–621 ns, prefix 346 vs 350–360 µs, get_hit 60.7 vs 77–98 µs.
 
+## Linux gate, 21–23 September 2026
+
+Async same-class column (`PEDRA_PARITY_ASYNC=1`) against RocksDB default
+`WriteOptions.sync=false`. Guest: 4 vCPU / 4 GiB, `linux-gate-p238`.
+A round whose Rocks canary sits under that wave's floor is discarded.
+Per-run QPS is Pedra / Rocks.
+
+### `deps_cache_overwrite_mc4`, 25M keys, 4 clients (2026-09-23)
+
+Canary floor 165k. Round 1 canary 146.8k, discarded.
+
+| round | Pedra qps | Rocks qps | ratio |
+|---|---:|---:|---:|
+| r2 | 321 948 | 203 201 | **1.5844** |
+| r3 | 295 988 | 278 627 | **1.0623** |
+| **valid median** | | | **1.3233** |
+
+Pedra p50/p95/p99 beat Rocks on all three rounds, including the
+discarded cold boot. p99 tails still spike on an L0 flush (round 3
+p999 1.1 ms).
+
+### `deps_apply_batch_mc4`, 4 clients (2026-09-21)
+
+Canary floor 190k, 3/3 in band. This is the async column. The 2.79×
+cited in the README is the fdatasync-before-Ok column.
+
+| round | Pedra qps | Rocks qps | ratio |
+|---|---:|---:|---:|
+| r1 | 8 590 | 6 617 | 1.2983 |
+| r2 | 7 998 | 6 494 | 1.2315 |
+| r3 | 8 034 | 6 779 | 1.1852 |
+| **median** | | | **1.2315** |
+
+### `ycsb_b_mc4`, 4 clients, 100k keys (2026-09-21)
+
+| round | Pedra qps | Rocks qps | ratio |
+|---|---:|---:|---:|
+| r1 | 431 080 | 430 652 | 1.0010 |
+| r2 | 523 617 | 438 117 | 1.1952 |
+| r3 | 455 309 | 404 078 | 1.1268 |
+| **median** | | | **1.1268** |
+
+### `qs_neg_lookup`, 100M keys (2026-09-22)
+
+Negative point lookup, QPS. Not the snapshot-harness `probe_miss` p50
+in the 5 September table.
+
+| round | canary | Pedra qps | Rocks qps | ratio |
+|---|---:|---:|---:|---:|
+| r1 | 146k, discarded | 433 468 | 26 885 | 16.12 |
+| r2 | 219k | 454 379 | 31 543 | **14.4053** |
+| r3 | 221k | 669 075 | 32 043 | **20.8807** |
+| **valid median** | | | | **17.6430** |
+
+### Still open
+
+| cell | figure | date | why it stays open |
+|---|---|---|---|
+| `ycsb_f_mc4` | valid rounds 0.7276 and **0.6718** | 2026-09-23 | read-modify-write; 1-op spin does not close it |
+| prefix scan, 100M @ 4 GiB, bounded cache | **0.70×** | registered 2026-09-17 | different cell from the 5 September snapshot 1.05× |
+| fjall sequential 1M | Pedra 330–357k vs fjall 103–264k | 2026-09-23 | fjall under its healthy band (≥ ~300k); a win against a collapsed peer is not published |
+
+### Fjall, same binary (2026-09-21)
+
+Not the Rocks gate. Both sides buffer the measured window; fjall
+`persist` runs outside the timer.
+
+| shape | rounds (Pedra / fjall / ratio) | median | min |
+|---|---|---:|---:|
+| `fjall_rand_rw_1m` | 338k/316k/1.071 · 331k/321k/1.030 · 332k/325k/1.023 | **1.0302** | 1.0233 |
+| `fjall_scan_1k` | 1563/1570/0.996 · 1697/1560/1.087 · 1707/1547/1.103 | **1.0872** | 0.9959 |
+
 ## Loss registry
 
 Named losses and refusals, in the open, with dates. A loss moves off
@@ -152,7 +224,10 @@ this list only by a 3-run of the current engine.
 | 25M get_loop | refused — Rocks 4.17–4.48 ms, out of its 3.86–4.03 ms band, every attempt (2026-09-02/03) | — | no ratio published; Pedra 3.65 ms is a number, not a claim |
 | 10M get_hit | tie, CIs overlap (13.05 vs 13.05 µs) | 2026-09-02 | published as tie |
 | 25M hydrate | parity 1.02× inside ±3 s noise | 2026-09-03 | published non-bold |
-| G1 single-client write-per-op | below 1× by construction (one barrier per op vs peer's zero) | standing | group commit closes them under concurrency (`apply_mc4` 2.79×) |
+| G1 single-client write-per-op | below 1× by construction (one barrier per op vs peer's zero) | standing | group commit closes them under concurrency (`apply_mc4` 2.79× on the fdatasync column; async same-class `deps_apply_batch_mc4` median 1.23× on 2026-09-21) |
+| `ycsb_f_mc4` | **0.67×** min of the valid rounds (0.7276 / 0.6718) | 2026-09-23 | open; read-modify-write, 1-op spin does not close it |
+| prefix scan 100M @ 4 GiB, bounded cache | **0.70×** | 2026-09-17 | open; not the 5 September snapshot cell (1.05×) |
+| fjall sequential 1M | peer 103–264k, under the ≥ ~300k healthy band | 2026-09-23 | Pedra 330–357k led the room; not published as a win |
 
 ## What moved the cells (mechanisms, not knobs)
 
