@@ -1,10 +1,11 @@
 # Benchmarks — protocol, per-run values, and loss registry
 
 This is the scrutiny annex for the tables in the main
-[`README.md`](../README.md). The README carries the results; this file
-carries how each cell was measured, the per-run values behind every
-median, and every named loss. Nothing here is a win claim unless the
-README says so.
+[`README.md`](../README.md). The README carries one ratio per published
+cell. This file carries how each cell was measured, the per-run values
+behind every median, and every named loss. Nothing here is a win claim
+unless the README says so. Verification is a separate annex:
+[`verification.md`](verification.md).
 
 ## The peer
 
