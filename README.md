@@ -44,9 +44,10 @@ consistency above the engine. The API is
   peer behind `rocksdb-parity-bench --features real` (off by default;
   the engine never links it).
 - **Machine-checked where it counts.** Decision kernels are proved
-  on the file `rustc` links (Aeneas extract → Lean, 150 catalog
+  on the file `rustc` links (Aeneas extract → Lean, 151 catalog
   pairs — table in [Verification](#verification)). Around them:
-  seeded fault injection and close to 1,000 tests.
+  seeded fault injection and 1,094 passing tests in the engine
+  crate.
 - **A modern write path.** io_uring on Linux with transparent POSIX
   fallback, group commit, a value log for large values, LZ4 block
   compression, bloom filters, block cache, sorted bulk ingest, and local
@@ -130,18 +131,12 @@ No C++ toolchain is needed.
 Not “no bugs” — machine-checked where it counts. Decision kernels are
 extracted from the production file `rustc` links (Charon + Aeneas → Lean).
 The catalog (`scripts/formal/catalog.json`) lists **151 pairs** in
-the shipped crates. `scripts/pedra_formal.sh --ci` refuses silent
-drift between the kernel, its callers, and the extract. Not proven: the
-OS, the disk, rustc, Aeneas, Lean, or Z3.
-
-Reading the gate's exit code: the drift checks (extract stamps, twins,
-clones) are the hard guarantee and pass on this tree. The remaining
-`FAIL` lines are registered classification debt — residuals-freeze and
-tcb-freeze rows mirrored from the main tree on purpose (this tree adds
-none of its own; see *In-flight rows* in
-[`scripts/formal/README.md`](scripts/formal/README.md)). CI holds that
-debt at its current ceiling (107 on `--lint`) and fails on any drift or
-any growth; it does not pretend the tree is at zero.
+the shipped crates. CI runs `scripts/formal/pedra_formal.py --lint`
+and holds the result with `scripts/ci_ratchet.py`: a `FAIL` that names
+drift (extract stamp, twin, clone) fails the build, and so does a
+non-drift `FAIL` count above 107. On the current tree that lint is
+**0 `FAIL`**. Not proven: the OS, the disk, rustc, Aeneas, Lean, or Z3.
+The area table below is an orientation, not a line per catalog id.
 
 | Area | Proves | Proof files |
 |---|---|---|
@@ -309,7 +304,8 @@ Fjall settles during hydrate (≈0 s) and is ahead cross-harness on 100M
 
 ## How it's tested
 
-- **Close to 1,000 tests** across the shipped crates: unit tests, model tests
+- **1,094 passing tests** in `pedradb-core` (4 ignored) on the green
+  CI run: unit tests, model tests
   against `stateright` specifications (recovery, bloom, changelog, prefix,
   range, scan), codec fuzz smoke tests, a WAL durability adversarial suite,
   and a concurrent race stress suite.
