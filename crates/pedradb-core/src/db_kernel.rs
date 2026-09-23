@@ -3780,7 +3780,7 @@ impl<E: Env> Db<E> {
             while i > 0 {
                 i -= 1;
                 let k = &run.keys()[i];
-                if !k.starts_with(prefix) {
+                if !crate::prefix::key_in_prefix_range(k.as_ref(), prefix, before) {
                     break;
                 }
                 if run.seqs()[i] > snapshot {
@@ -3846,7 +3846,7 @@ impl<E: Env> Db<E> {
                 while i > 0 {
                     i -= 1;
                     let k = &run.keys()[i];
-                    if !k.starts_with(prefix) {
+                    if !crate::prefix::key_in_prefix_range(k.as_ref(), prefix, bulk_before) {
                         break;
                     }
                     if run.seqs()[i] > snapshot {
@@ -9144,8 +9144,10 @@ impl<E: Env> Db<E> {
         let mut bulk_hit: Option<(SequenceNumber, Lookup)> = None;
         let mut note_bulk = |run: &crate::bulk_run::BulkRun| {
             if let Some((seq, look)) = run.lookup_entry(key, snapshot) {
+                let have = bulk_hit.is_some();
+                let best = bulk_hit.as_ref().map(|(s, _)| *s).unwrap_or(0);
                 if !matches!(look, Lookup::NotFound)
-                    && bulk_hit.as_ref().is_none_or(|(s, _)| seq > *s)
+                    && crate::lookup_kernel::prefer_newer_seq(have, seq, best)
                 {
                     bulk_hit = Some((seq, look));
                 }
@@ -9183,7 +9185,7 @@ impl<E: Env> Db<E> {
                 // A bulk tail newer than this mem point wins (absorb / open
                 // run). An older tail loses to a ladder delete.
                 if let Some((bseq, look)) = bulk_hit.as_ref() {
-                    if *bseq > seq {
+                    if crate::lookup_kernel::prefer_newer_seq(true, *bseq, seq) {
                         self.get_mem_hit.fetch_add(1, Ordering::Relaxed);
                         return look.clone();
                     }
