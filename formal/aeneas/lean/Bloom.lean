@@ -158,11 +158,11 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P2.2 (atom `catalog:bloom_header`, entrada
+/-- RFC-0218 P2.2 (átomo `catalog:bloom_header`, entrada
     `bloom_header_ok`): o cabeçalho admite EXATAMENTE a conjunção
     citada — k dentro de [1, MAX_K], nbytes cobre div_ceil nbits 8
     e nbytes cabe no residual. O AS-IS aceita qualquer k (probe
-    sem borne — tooth plantado). -/
+    sem borne — dente plantado). -/
 theorem bloom_header_fate_iff :
     ∀ (nbits k nbytes : U32) (residual : U64) (v : Bool),
       (bloom_header_ok nbits k nbytes residual = ok v) ↔
@@ -232,11 +232,11 @@ theorem bloom_header_fate_iff :
       rw [if_neg (by simp)]
       rw [hv]
 
-/-- RFC-0218 P2.2 (atom `catalog:bloom_insert`, entrada `insert`):
+/-- RFC-0218 P2.2 (átomo `catalog:bloom_insert`, entrada `insert`):
     o insert escreve EXATAMENTE os k probes citados — inativo devolve
     o próprio filtro; ativo calcula hash_pair, o nbits citado e roda o
     loop citado insert_loop sobre bits. O AS-IS pula os probes (falso
-    negativo depois — tooth plantado). -/
+    negativo depois — dente plantado). -/
 theorem insert_fate_iff :
     ∀ (self : BloomFilter) (key : Slice U8) (r : BloomFilter),
       (BloomFilter.insert self key = ok r) ↔
@@ -283,12 +283,12 @@ theorem insert_fate_iff :
       rw [if_neg (by simp)]
       rw [hr]
 
-/-- RFC-0218 P2.2 (atom `catalog:bloom_may_contain`, entrada
+/-- RFC-0218 P2.2 (átomo `catalog:bloom_may_contain`, entrada
     `may_contain`): a consulta decide EXATAMENTE no loop citado —
     inativo é ok true (sem filtro, tudo pode estar presente); ativo
     calcula hash_pair e a resposta é o loop citado
     may_contain_loop sobre bits (false ⇒ ausência certa). O AS-IS
-    probeia k+1 bits (falso negativo — tooth plantado). -/
+    probeia k+1 bits (falso negativo — dente plantado). -/
 theorem may_contain_fate_iff :
     ∀ (self : BloomFilter) (key : Slice U8) (v : Bool),
       (BloomFilter.may_contain self key = ok v) ↔

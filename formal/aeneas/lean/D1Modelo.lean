@@ -13,9 +13,9 @@ theorem d1_modelo_unacked_vacuous :
   unfold wal.wal_state_kernel.inv_wal
   rfl
 
-/-- AS-IS tooth: a cut below the barrier is treated as legal and the
+/-- AS-IS dente: a cut below the barrier is treated as legal and the
     corollary fails (fixed kernel is vacuously true on that cut). -/
-theorem d1_modelo_as_is_tooth :
+theorem d1_modelo_as_is_dente :
     d1_modelo_kernel.d1_modelo_as_is
       { acked := 10#u64, synced := 10#u64, written := 10#u64 }
       (10#u64) (3#u64) = ok false := by
@@ -64,7 +64,7 @@ theorem put_ok_append_sync_ack :
     simp [lift, hsat, hadd]
   simp [happ, hsync, hsub, hack]
 
-/-- AS-IS tooth: Lying sync plus ack-past-barrier (acked > synced). -/
+/-- AS-IS dente: Lying sync plus ack-past-barrier (acked > synced). -/
 theorem put_ok_as_is_acks_unsynced :
     d1_modelo_kernel.put_ok_as_is
       { acked := 0#u64, synced := 0#u64, written := 0#u64 }
@@ -81,7 +81,7 @@ theorem put_ok_as_is_acks_unsynced :
     env_crash_kernel.SyncHonesty.read_discriminant]
   rfl
 
-/-! ## RFC-0215 P0.2 — crown de produto no degrau atom (modelo ×4) -/
+/-! ## RFC-0215 P0.2 — coroa de produto no degrau átomo (modelo ×4) -/
 
 /-- Any ok-valued Result bind forces the bound term to be ok
 (Cf.lean's `bind_ok_inv`, restated for this module). -/
@@ -210,7 +210,7 @@ theorem d1_modelo_fate_iff :
           simpa [ge_iff_le] using hN
         rw [decide_eq_false_iff_not.mpr hNG]
 
-/-! ## RFC-0215 P1.1 — crown de produto no degrau atom (fate ×2) -/
+/-! ## RFC-0215 P1.1 — coroa de produto no degrau átomo (fate ×2) -/
 
 /-- RFC-0215 P1.1 1/2 (atom `catalog:d1_put_ok`, entry `put_ok`):
 o put confirma exatamente quando o ledger cruza a barreira — a
@@ -218,7 +218,7 @@ confirmação `ok s'` do put é exatamente a cadeia honesta
 append→sync→ack com o vão acked→synced (`wal_append`/`wal_sync`/
 `wal_ack` citados, corpos não reabertos). O mutante AS-IS
 (`put_ok_as_is`) promove synced sem barreira e acka o vão inteiro
-(`put_ok_as_is_acks_unsynced`); planta três-teeth recusa. -/
+(`put_ok_as_is_acks_unsynced`); planta três-dentes recusa. -/
 theorem put_ok_fate_iff :
     ∀ (s0 : wal.wal_state_kernel.WalState) (rec_len : U64)
       (s' : wal.wal_state_kernel.WalState),

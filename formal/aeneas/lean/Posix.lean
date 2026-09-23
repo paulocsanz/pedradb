@@ -17,8 +17,8 @@ theorem fdatasync_rc_ok_nonzero :
   unfold fdatasync_rc_ok
   rfl
 
-/-- AS-IS tooth: nonzero still admits. -/
-theorem fdatasync_rc_ok_as_is_tooth :
+/-- AS-IS dente: nonzero still admits. -/
+theorem fdatasync_rc_ok_as_is_dente :
     fdatasync_rc_ok_as_is (5#i32) = ok true := by
   unfold fdatasync_rc_ok_as_is
   rfl
@@ -29,8 +29,8 @@ theorem fdatasync_eintr_retry_admitted_false :
   unfold fdatasync_eintr_retry_admitted
   rfl
 
-/-- AS-IS tooth: EINTR is swallowed. -/
-theorem fdatasync_eintr_retry_admitted_as_is_tooth :
+/-- AS-IS dente: EINTR is swallowed. -/
+theorem fdatasync_eintr_retry_admitted_as_is_dente :
     fdatasync_eintr_retry_admitted_as_is = ok true := by
   unfold fdatasync_eintr_retry_admitted_as_is
   rfl
@@ -51,7 +51,7 @@ theorem posix_nonzero_rc_not_ok :
   · unfold fdatasync_rc_ok; rfl
   · unfold fdatasync_eintr_retry_admitted; rfl
 
-/-- AS-IS tooth: nonzero rc and EINTR retry both admit. -/
+/-- AS-IS dente: nonzero rc and EINTR retry both admit. -/
 theorem posix_as_is_admits_nonzero_and_eintr :
     fdatasync_rc_ok_as_is (5#i32) = ok true
       ∧ fdatasync_eintr_retry_admitted_as_is = ok true := by

@@ -434,7 +434,7 @@ impl Env for RecordingEnv {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pedradb_core::{Db, OpenOptions, WAL_FILE_NAME};
+    use pedradb_core::{db::Db, OpenOptions, WAL_FILE_NAME};
     use std::path::PathBuf;
 
     fn opts() -> OpenOptions {

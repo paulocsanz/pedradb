@@ -7,7 +7,7 @@ use pedradb_core::batch::{encode_ops, WriteOp};
 use pedradb_core::change_feed::ChangeEntry;
 use pedradb_core::concurrent::ConcurrentDb;
 use pedradb_core::memtable::MemTable;
-use pedradb_core::{BatchOp, Db, OpenOptions, WriteOptions};
+use pedradb_core::{BatchOp, db::Db, OpenOptions, WriteOptions};
 use std::collections::BTreeMap;
 use std::time::Instant;
 

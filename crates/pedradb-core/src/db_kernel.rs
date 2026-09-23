@@ -1521,8 +1521,10 @@ impl LiveMem {
     }
 }
 
-/// [`Db`] itself is single-threaded (`&mut` for writes). Use [`ConcurrentDb`] for
-/// multi-thread access with a coarse mutex/rwlock.
+/// Engine behind [`crate::ConcurrentDb`]. Not the embed handle: open
+/// [`crate::ConcurrentDb`]. A lone writer there pays one atomic on the
+/// in-flight counter, then this commit (write lock held through `fdatasync`).
+#[doc(hidden)]
 pub struct Db<E: Env = StdEnv> {
     dir: PathBuf,
     env: E,
@@ -15757,7 +15759,7 @@ mod tests {
             "disk probe cache default must skip per-put statvfs (Fjall 1c)"
         );
         let dir = temp_dir();
-        let mut db = crate::Db::open_with(
+        let mut db = crate::db::Db::open_with(
             &dir,
             OpenOptions {
                 sync: false,
@@ -15768,7 +15770,7 @@ mod tests {
         db.put(b"k", b"v").unwrap();
         assert_eq!(db.get(b"k").as_deref(), Some(&b"v"[..]));
         db.close().unwrap();
-        let mut db = crate::Db::open(&dir).unwrap();
+        let mut db = crate::db::Db::open(&dir).unwrap();
         assert_eq!(
             db.get(b"k").as_deref(),
             Some(&b"v"[..]),
@@ -15796,7 +15798,7 @@ mod tests {
         let walk = fn_src.find("cf_write_buffer").unwrap_or(usize::MAX);
         assert!(due < walk, "must not walk CFs before the global skip");
         let dir = temp_dir();
-        let mut db = crate::Db::open(&dir).unwrap();
+        let mut db = crate::db::Db::open(&dir).unwrap();
         db.put(b"k", b"v").unwrap();
         assert!(
             !db.maybe_auto_flush().unwrap(),

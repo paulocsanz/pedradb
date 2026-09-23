@@ -867,7 +867,7 @@ mod tests {
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("pedra-bloom-ins-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut db = crate::Db::open_with(
+        let mut db = crate::db::Db::open_with(
             &dir,
             crate::OpenOptions {
                 wal_full_fsync: true,
@@ -919,7 +919,7 @@ mod tests {
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("pedra-bloom-mc-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut db = crate::Db::open_with(
+        let mut db = crate::db::Db::open_with(
             &dir,
             crate::OpenOptions {
                 wal_full_fsync: true,

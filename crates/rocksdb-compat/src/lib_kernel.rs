@@ -3292,7 +3292,7 @@ impl<E: PedraEnv> DB<E> {
     }
 
     /// Version-GC watermark; advances when reclaim GC drops versions
-    /// (see [`pedradb_core::Db::earliest_readable_sequence`]).
+    /// (see [`pedradb_core::db::Db::earliest_readable_sequence`]).
     #[must_use]
     pub fn earliest_readable_sequence(&self) -> pedradb_core::SequenceNumber {
         self.inner.earliest_readable_sequence()
@@ -3343,7 +3343,7 @@ impl<E: PedraEnv> DB<E> {
         self.inner.write_phase_stats()
     }
 
-    /// Fold the memtable tail (no SST). See [`pedradb_core::Db::fold_active_tail`].
+    /// Fold the memtable tail (no SST). See [`pedradb_core::db::Db::fold_active_tail`].
     pub fn fold_mem_tail(&self) -> usize {
         self.inner.fold_mem_tail()
     }

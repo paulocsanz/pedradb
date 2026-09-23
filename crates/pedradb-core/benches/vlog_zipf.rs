@@ -10,7 +10,7 @@
 use std::env;
 use std::time::Instant;
 
-use pedradb_core::{CompactOptions, Db, OpenOptions, Rng, SeedRng, WriteOptions};
+use pedradb_core::{CompactOptions, db::Db, OpenOptions, Rng, SeedRng, WriteOptions};
 
 fn parse_u64(flag: &str, default: u64) -> u64 {
     let mut args = env::args().skip(1);

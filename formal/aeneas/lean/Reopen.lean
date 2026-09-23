@@ -106,11 +106,11 @@ theorem reopen_outcome_fate_iff :
   intro damage point_in_time escalated v
   cases damage <;> cases point_in_time <;> cases escalated <;>
     simp [reopen_outcome, eq_comm]
-/-- RFC-0218 P0.3 6/6 (atom `catalog:dictionary_link`): o destino
+/-- RFC-0218 P0.3 6/6 (átomo `catalog:dictionary_link`): o destino
     do reopen é EXATAMENTE a política citada — sem dano serve tudo;
     dano com point-in-time não escalado serve o prefixo reportado;
     dano escalado ou sem point-in-time recusa abrir. O AS-IS silencia
-    (serve tudo sobre dano — tooth plantado no crash-recover). -/
+    (serve tudo sobre dano — dente plantado no crash-recover). -/
 theorem reopen_outcome_flat_fate_iff :
     ∀ (damage : ReopenDamage) (point_in_time : Bool) (escalated : Bool)
       (outcome : ReopenOutcome),

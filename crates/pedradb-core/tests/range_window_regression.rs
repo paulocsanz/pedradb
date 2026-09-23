@@ -1,4 +1,4 @@
-use pedradb_core::Db;
+use pedradb_core::db::Db;
 
 /// F220 regression: `range_limited` over a window whose bounds carry no NUL
 /// (`["d/m/", "d/m0")`) must still return keys that DO carry one

@@ -13,7 +13,7 @@
 //!
 //! Next: `ordered_scan` — list every row under a prefix, in order.
 
-use pedradb_core::{Db, Result};
+use pedradb_core::{ConcurrentDb, Result};
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now()
@@ -45,10 +45,10 @@ fn idx_email(email: &[u8]) -> Vec<u8> {
 }
 
 /// Insert or update a user. Email uniqueness is checked inside the TX.
-fn upsert_user(db: &mut Db, id: &[u8], email: &[u8], payload: &[u8]) -> Result<bool> {
+fn upsert_user(db: &mut ConcurrentDb, id: &[u8], email: &[u8], payload: &[u8]) -> Result<bool> {
     let pk = row_key(id);
     let idx = idx_email(email);
-    let mut tx = db.begin();
+    let mut tx = db.begin_occ();
 
     if let Some(owner) = tx.get(&idx)? {
         if owner.as_ref() != id {
@@ -75,13 +75,13 @@ fn upsert_user(db: &mut Db, id: &[u8], email: &[u8], payload: &[u8]) -> Result<b
     Ok(true)
 }
 
-fn lookup_id_by_email(db: &Db, email: &[u8]) -> Option<Vec<u8>> {
+fn lookup_id_by_email(db: &ConcurrentDb, email: &[u8]) -> Option<Vec<u8>> {
     db.get(&idx_email(email)).map(|b| b.to_vec())
 }
 
 fn run() -> Result<()> {
     let dir = scratch("index");
-    let mut db = Db::open(&dir)?;
+    let mut db = ConcurrentDb::open(&dir)?;
 
     assert!(upsert_user(
         &mut db,
@@ -111,7 +111,7 @@ fn run() -> Result<()> {
 
     // Abort: neither the row nor the index lands.
     {
-        let mut tx = db.begin();
+        let mut tx = db.begin_occ();
         tx.put(row_key(b"7"), b"ghost")?;
         tx.put(idx_email(b"ghost@ex.com"), b"7")?;
         tx.abort();

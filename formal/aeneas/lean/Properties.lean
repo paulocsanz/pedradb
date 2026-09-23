@@ -17,7 +17,7 @@ private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : 
   | fail e => exact absurd h (by simp)
   | div => exact absurd h (by simp)
 
-/-! ## RFC-0215 P0.1 — crown de produto no degrau atom (spec ×4) -/
+/-! ## RFC-0215 P0.1 — coroa de produto no degrau átomo (spec ×4) -/
 
 /-- C1 semântica (forma-ramo: cita `majority` só onde o corpo chama):
 valor servido passa quando ¬servido, ou a maioria antiga atingiu e

@@ -6,8 +6,8 @@ import CfKernel
 open Aeneas Aeneas.Std Result
 open pedra_aeneas_cf_kernel
 
-/-- AS-IS tooth: every key is in-family. -/
-theorem key_in_cf_family_as_is_tooth (k f) :
+/-- AS-IS dente: every key is in-family. -/
+theorem key_in_cf_family_as_is_dente (k f) :
     key_in_cf_family_as_is k f = ok true := by
   unfold key_in_cf_family_as_is
   rfl
@@ -28,8 +28,8 @@ theorem infer_sst_cf_none_none :
   unfold infer_sst_cf
   rfl
 
-/-- AS-IS tooth: compact rewrites every SST. -/
-theorem compact_rewrites_sst_cf_as_is_tooth (s f) :
+/-- AS-IS dente: compact rewrites every SST. -/
+theorem compact_rewrites_sst_cf_as_is_dente (s f) :
     compact_rewrites_sst_cf_as_is s f = ok true := by
   unfold compact_rewrites_sst_cf_as_is
   rfl

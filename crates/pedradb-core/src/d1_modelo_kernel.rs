@@ -1,5 +1,5 @@
-//! Named model-level D1 corollary (RFC-0166 P1.3): **put Ok ⇒ survives
-//! every torn prefix**.
+//! Named model-level D1 corollary (RFC-0166 P1.3): **put Ok ⇒ sobrevive a
+//! todo prefixo de torn**.
 //!
 //! Composes the P1.1 crash geometry ([`crate::env_crash_kernel`]) with the
 //! P1.2 inductive invariant ([`crate::wal::wal_state_kernel`]):

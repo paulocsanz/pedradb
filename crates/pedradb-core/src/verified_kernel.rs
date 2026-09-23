@@ -188,7 +188,7 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("bloom_insert", "bloom_insert", "bloom insert (T1)"),
         on!("bloom_may_contain", "bloom_may_contain", "bloom probe — no false negatives (T1/T4)"),
         on!("fold_range", "fold_range", "fold Storage range consistency (F169)"),
-        // --- distributed (world nodes) ---
+        // --- montanha (world nodes) ---
         on!("vote", "vote", "raft vote handling (F15)"),
         on!("ae_entry", "ae_entry", "append-entries entry validation (F16)"),
         on!("ae_f16_gate", "ae_f16_gate", "append-entries F16 safety gate (F16)"),

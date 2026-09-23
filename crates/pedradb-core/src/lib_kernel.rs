@@ -1,5 +1,10 @@
 //! PedraDB core — LSM-tree storage engine in Rust.
 //!
+//! The embed handle is [`ConcurrentDb`]. One writer pays one atomic on the
+//! in-flight counter (`active`) and then the lone commit — the same WAL
+//! `fdatasync`-before-Ok as the engine. [`db::Db`] is that engine, not a
+//! second database to open from outside this crate.
+//!
 //! This crate implements RocksDB-style storage concepts (WAL, MemTable,
 //! SSTable, flush, compaction) from scratch in idiomatic Rust. The real
 //! RocksDB (C++) is used only as an external test oracle via the
@@ -37,6 +42,7 @@ pub mod concurrent;
 #[path = "corrupt_kernel.rs"]
 pub mod corrupt;
 pub mod d1_modelo_kernel;
+#[doc(hidden)]
 #[path = "db_kernel.rs"]
 pub mod db;
 pub mod durability_spine_kernel;
@@ -139,7 +145,7 @@ pub use changelog_kernel::{
 pub use concurrent::ConcurrentDb;
 pub use db::{
     copy_db_directory, escape_inline_value, read_checkpoint_meta, BatchOp, BlobGcCandidate,
-    CheckpointMeta, CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport,
+    CheckpointMeta, CompactOptions, DbStats, FenceClass, FenceRecovery, FenceReport,
     HistoryHorizon, HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport,
     ScanProjection, Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions, WritePhaseStats,
     CHECKPOINT_META_FILE, DEFAULT_SST_PAYLOAD_BUDGET_BYTES, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL,
@@ -177,7 +183,6 @@ pub use sst::{
     write_sst_entries_on, write_sst_on, SstTable,
 };
 pub use time::{Clock, ManualClock, SystemClock};
-pub use tx::Transaction;
 pub use verified::{
     profile_report, ring_model_admitted, ring_model_admitted_as_is, ring_twin_admitted,
     ring_twin_admitted_as_is, verified_admits_ring, verified_admits_ring_as_is,

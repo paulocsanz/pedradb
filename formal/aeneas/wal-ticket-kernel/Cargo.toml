@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-wal-ticket-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Shim exposing production wal_ticket_kernel.rs (+ write_admission) to Charon"
+
+[lib]
+path = "src/lib.rs"

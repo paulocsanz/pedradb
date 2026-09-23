@@ -278,6 +278,14 @@ impl BulkLatch {
             .get(family)
             .cloned()
             .unwrap_or(FamilyState::Probing { streak: 0 });
+        // RFC-0248: Dead is permanent. The old Ineligible arm rewrote Dead
+        // back to Probing, and `ratchet` allocated `family.to_owned()` on
+        // every put — zipf overwrite (A4 `c/` after an ascending seed)
+        // paid that malloc under the Db write lock after the first descent.
+        if matches!(state, FamilyState::Dead) {
+            self.ladder_batches += 1;
+            return FamilyRoute::Ladder;
+        }
         let verdict = self.judge(family, &state, ops, spanning, family_max_in_db);
         // Ratchet over every observed key regardless of the verdict.
         for (_, key) in ops {
@@ -312,7 +320,9 @@ impl BulkLatch {
                 // Deletes / spanning ranges / mixed: ladder this batch.
                 // A probing family restarts its streak; a latched family
                 // stays latched (a delete does not break append-above).
-                if !was_latched {
+                // Dead never reaches here (RFC-0248 early return). Do not
+                // rewrite it to Probing — that re-armed bulk after a kill.
+                if !was_latched && !matches!(state, FamilyState::Dead) {
                     self.state
                         .insert(family.to_owned(), FamilyState::Probing { streak: 0 });
                 }
@@ -532,6 +542,13 @@ mod tests {
         // Dead is permanent even for a later above-water key.
         let routes = latch.classify_batch(&[put("data", b"k6")], &no_db_max);
         assert_eq!(route_of(&routes, "data"), FamilyRoute::Ladder);
+        // A second above-water key must not re-latch. The Ineligible arm
+        // used to rewrite Dead back to Probing, so this put would bulk.
+        let routes = latch.classify_batch(&[put("data", b"k7")], &|fam| {
+            panic!("dead family {fam} must not consult db max");
+        });
+        assert_eq!(route_of(&routes, "data"), FamilyRoute::Ladder);
+        assert!(!latch.is_latched("data"));
     }
 
     #[test]

@@ -92,7 +92,7 @@ pub fn oversubscription_spin_policy_as_is(writers: usize, ncpu: usize) -> SpinDe
 /// bypass (own write lock — the Rocks shape)?
 ///
 /// Client-axis rule, from the 2026-09-11 attribution meter on the 4-vCPU
-/// board box (`findings/2026-09-11-p201-meter-atribuicao/`):
+/// cartaz box (`findings/2026-09-11-p201-meter-atribuicao/`):
 /// `kvrocks_set_mc50` (50 writers, 12.5× oversubscribed) — bypass 0.96×,
 /// merge **1.52× min-of-3 / 2.10× median** vs Rocks `sync=false`; the
 /// fair handoff is the actual 0.33–0.38× collapse. The 0044 default-off
@@ -201,7 +201,7 @@ mod tests {
     }
 
     /// RFC-0201 P0.2 tooth: the 0189 spin never parks by policy — the
-    /// blindness this cut names.
+    /// blindness the cut names.
     #[test]
     fn rfc0201_spin_policy_as_is_always_spins() {
         assert_eq!(
@@ -222,7 +222,7 @@ mod tests {
         assert!(async_merge_policy(51, 50, None), "writers > ncpu: merge");
         assert!(
             async_merge_policy(50, 4, None),
-            "mc50 on the 4-vCPU board box"
+            "mc50 on the 4-vCPU cartaz box"
         );
         assert!(
             !async_merge_policy(1, 1, None),

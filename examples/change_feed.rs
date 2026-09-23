@@ -11,7 +11,7 @@
 //!
 //! Next: `crash_reopen` — kill the process after Ok; reopen; the keys remain.
 
-use pedradb_core::{ChangeKind, Db};
+use pedradb_core::{ChangeKind, ConcurrentDb};
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now()
@@ -25,7 +25,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 fn run() -> pedradb_core::Result<()> {
     let dir = scratch("feed");
-    let mut db = Db::open(&dir)?;
+    let mut db = ConcurrentDb::open(&dir)?;
 
     let cursor = db.last_sequence();
     db.put(b"user/ada", b"active")?;

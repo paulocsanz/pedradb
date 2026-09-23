@@ -1,7 +1,7 @@
 //! Pure changelog SST-rebuild gate (RFC-0002 P22 / F53).
 //!
 //! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). No twin-copy.
+//! proves (`cfg(verus_keep_ghost)`). No twin copy.
 //!
 //!   ./scripts/verus_changelog_rebuild.sh
 //!

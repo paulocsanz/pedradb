@@ -1,145 +1,399 @@
-name = "pedra_kernel"
-defaultTargets = ["Bloom"]
+name = "vote_kernel"
+defaultTargets = ["Vote"]
 
-# Optional sibling checkout of Aeneas (see formal/aeneas/PINS.md).
+# Sibling checkout: /Users/paulo/software/aeneas (rev in ../PINS.md).
 [[require]]
 name = "aeneas"
 path = "../../../../aeneas/backends/lean"
 
 [[lean_lib]]
-name = "AutoFlushDueDerived"
+name = "VoteKernel"
 
 [[lean_lib]]
-name = "Batch"
+name = "Vote"
 
 [[lean_lib]]
-name = "BatchKernel"
+name = "IsolatedKernel"
+
+[[lean_lib]]
+name = "Isolated"
+[[lean_lib]]
+name = "BloomKernel"
 
 [[lean_lib]]
 name = "Bloom"
 
 [[lean_lib]]
-name = "BloomBridges"
+name = "AeKernel"
 
 [[lean_lib]]
-name = "BloomKernel"
+name = "Ae"
 
 [[lean_lib]]
-name = "BloomMayContainDerived"
+name = "CommitKernel"
 
 [[lean_lib]]
-name = "Cf"
+name = "Commit"
 
 [[lean_lib]]
-name = "CfKernel"
+name = "ReopenKernel"
 
 [[lean_lib]]
-name = "Changelog"
+name = "Reopen"
 
 [[lean_lib]]
-name = "ChangelogKernel"
+name = "ApplyKernel"
 
 [[lean_lib]]
-name = "Compact"
+name = "Apply"
 
 [[lean_lib]]
-name = "CompactKernel"
+name = "WalRecoverKernel"
 
 [[lean_lib]]
-name = "ComposeConcurrent"
-
-[[lean_lib]]
-name = "ComposeDurabilitySpine"
-
-[[lean_lib]]
-name = "ComposeIterMerge"
-
-[[lean_lib]]
-name = "ComposeProductCrown"
-
-[[lean_lib]]
-name = "ComposeScanCrc"
-
-[[lean_lib]]
-name = "ComposeStorageWrite"
-
-[[lean_lib]]
-name = "CountDerived"
-
-[[lean_lib]]
-name = "Cqe"
-
-[[lean_lib]]
-name = "CqeKernel"
-
-[[lean_lib]]
-name = "Crc"
-
-[[lean_lib]]
-name = "CrcKernel"
-
-[[lean_lib]]
-name = "D1Modelo"
-
-[[lean_lib]]
-name = "D1ModeloKernel"
-
-[[lean_lib]]
-name = "DiskPressure"
-
-[[lean_lib]]
-name = "DiskPressureKernel"
-
-[[lean_lib]]
-name = "EnvCrash"
-
-[[lean_lib]]
-name = "EnvCrashKernel"
-
-[[lean_lib]]
-name = "Flush"
-
-[[lean_lib]]
-name = "FlushAmortBridges"
-
-[[lean_lib]]
-name = "FlushKernel"
-
-[[lean_lib]]
-name = "GroupCommit"
+name = "WalRecover"
 
 [[lean_lib]]
 name = "GroupCommitKernel"
 
 [[lean_lib]]
-name = "Iter"
+name = "GroupCommit"
 
 [[lean_lib]]
-name = "IterKernel"
+name = "ProbeOrderKernel"
 
 [[lean_lib]]
-name = "Key"
+name = "ProbeOrder"
 
 [[lean_lib]]
-name = "KeyKernel"
+name = "PrefixKernel"
 
 [[lean_lib]]
-name = "Leveling"
+name = "Prefix"
 
 [[lean_lib]]
-name = "LevelingKernel"
+name = "WriteAdmissionKernel"
 
 [[lean_lib]]
-name = "Locktab"
+name = "WriteAdmission"
 
 [[lean_lib]]
-name = "LocktabKernel"
+name = "FlushKernel"
+
+[[lean_lib]]
+name = "Flush"
+
+[[lean_lib]]
+name = "LookupKernel"
 
 [[lean_lib]]
 name = "Lookup"
 
 [[lean_lib]]
-name = "LookupKernel"
+name = "RpcModeKernel"
+
+[[lean_lib]]
+name = "RpcMode"
+
+[[lean_lib]]
+name = "StoreCompactKernel"
+
+[[lean_lib]]
+name = "StoreCompact"
+
+[[lean_lib]]
+name = "SnapshotKernel"
+
+[[lean_lib]]
+name = "Snapshot"
+
+[[lean_lib]]
+name = "SiKernel"
+
+[[lean_lib]]
+name = "Si"
+
+[[lean_lib]]
+name = "IndexValKernel"
+
+[[lean_lib]]
+name = "IndexVal"
+
+[[lean_lib]]
+name = "ChangelogKernel"
+
+[[lean_lib]]
+name = "Changelog"
+
+[[lean_lib]]
+name = "CursorKernel"
+
+[[lean_lib]]
+name = "Cursor"
+
+[[lean_lib]]
+name = "ClKernel"
+
+[[lean_lib]]
+name = "Cl"
+
+[[lean_lib]]
+name = "ChildrenKernel"
+
+[[lean_lib]]
+name = "Children"
+
+[[lean_lib]]
+name = "PinKernel"
+
+[[lean_lib]]
+name = "Pin"
+
+[[lean_lib]]
+name = "PackKernel"
+
+[[lean_lib]]
+name = "Pack"
+
+[[lean_lib]]
+name = "ShipKernel"
+
+[[lean_lib]]
+name = "Ship"
+
+[[lean_lib]]
+name = "FoldKernel"
+
+[[lean_lib]]
+name = "Fold"
+
+[[lean_lib]]
+name = "ManifestKernel"
+
+[[lean_lib]]
+name = "Manifest"
+
+[[lean_lib]]
+name = "CompactKernel"
+
+[[lean_lib]]
+name = "Compact"
+
+[[lean_lib]]
+name = "VlogGcKernel"
+
+[[lean_lib]]
+name = "VlogGc"
+
+[[lean_lib]]
+name = "TxGlueKernel"
+
+[[lean_lib]]
+name = "TxGlue"
+
+[[lean_lib]]
+name = "L28Kernel"
+
+[[lean_lib]]
+name = "L28"
+
+[[lean_lib]]
+name = "TcgKernel"
+
+[[lean_lib]]
+name = "Tcg"
+
+[[lean_lib]]
+name = "CqeKernel"
+
+[[lean_lib]]
+name = "Cqe"
+
+[[lean_lib]]
+name = "IterKernel"
+
+[[lean_lib]]
+name = "Iter"
+
+[[lean_lib]]
+name = "PropertiesKernel"
+
+[[lean_lib]]
+name = "Properties"
+
+[[lean_lib]]
+name = "ScaleKernel"
+
+[[lean_lib]]
+name = "Scale"
+
+[[lean_lib]]
+name = "DiskPressureKernel"
+
+[[lean_lib]]
+name = "DiskPressure"
+
+[[lean_lib]]
+name = "CrcKernel"
+
+[[lean_lib]]
+name = "Crc"
+
+[[lean_lib]]
+name = "EnvCrashKernel"
+
+[[lean_lib]]
+name = "EnvCrash"
+
+[[lean_lib]]
+name = "WalStateKernel"
+
+[[lean_lib]]
+name = "WalState"
+
+[[lean_lib]]
+name = "D1ModeloKernel"
+
+[[lean_lib]]
+name = "D1Modelo"
+
+[[lean_lib]]
+name = "WriteAckKernel"
+
+[[lean_lib]]
+name = "WriteAck"
+
+[[lean_lib]]
+name = "DcsApplyKernel"
+
+[[lean_lib]]
+name = "DcsApply"
+
+[[lean_lib]]
+name = "StoreApplyKernel"
+
+[[lean_lib]]
+name = "StoreApply"
+
+[[lean_lib]]
+name = "StoreCommitKernel"
+
+[[lean_lib]]
+name = "StoreCommit"
+
+[[lean_lib]]
+name = "StoreTxnKernel"
+
+[[lean_lib]]
+name = "StoreTxn"
+
+[[lean_lib]]
+name = "StoreAeAckKernel"
+
+[[lean_lib]]
+name = "StoreAeAck"
+
+[[lean_lib]]
+name = "StoreVoteKernel"
+
+[[lean_lib]]
+name = "StoreVote"
+
+[[lean_lib]]
+name = "KeyKernel"
+
+[[lean_lib]]
+name = "Key"
+
+[[lean_lib]]
+name = "LeaseKernel"
+
+[[lean_lib]]
+name = "Lease"
+
+[[lean_lib]]
+name = "TxnKernel"
+
+[[lean_lib]]
+name = "Txn"
+
+[[lean_lib]]
+name = "T1ModeloKernel"
+
+[[lean_lib]]
+name = "T1Modelo"
+
+[[lean_lib]]
+name = "MembershipKernel"
+
+[[lean_lib]]
+name = "Membership"
+
+[[lean_lib]]
+name = "StoreMembershipKernel"
+
+[[lean_lib]]
+name = "StoreMembership"
+
+[[lean_lib]]
+name = "C1ModeloKernel"
+
+[[lean_lib]]
+name = "C1Modelo"
+
+[[lean_lib]]
+name = "CapiHandlesKernel"
+
+[[lean_lib]]
+name = "CapiHandles"
+
+[[lean_lib]]
+name = "BatchKernel"
+
+[[lean_lib]]
+name = "Batch"
+
+[[lean_lib]]
+name = "MergeKernel"
+
+[[lean_lib]]
+name = "Merge"
+
+[[lean_lib]]
+name = "FailClosedKernel"
+
+[[lean_lib]]
+name = "FailClosed"
+
+[[lean_lib]]
+name = "LocktabKernel"
+
+[[lean_lib]]
+name = "Locktab"
+
+[[lean_lib]]
+name = "ScanKernel"
+
+[[lean_lib]]
+name = "Scan"
+
+[[lean_lib]]
+name = "CfKernel"
+
+[[lean_lib]]
+name = "Cf"
+
+[[lean_lib]]
+name = "FieldsKernel"
+
+[[lean_lib]]
+name = "Fields"
+
+[[lean_lib]]
+name = "LsmR1Kernel"
+
+[[lean_lib]]
+name = "LsmR1"
 
 [[lean_lib]]
 name = "LsmCompactBridges"
@@ -148,76 +402,22 @@ name = "LsmCompactBridges"
 name = "LsmCompactDerived"
 
 [[lean_lib]]
-name = "LsmR1"
-
-[[lean_lib]]
-name = "LsmR1Kernel"
-
-[[lean_lib]]
-name = "Magic"
-
-[[lean_lib]]
-name = "MagicKernel"
-
-[[lean_lib]]
-name = "Manifest"
-
-[[lean_lib]]
-name = "ManifestKernel"
-
-[[lean_lib]]
-name = "Merge"
-
-[[lean_lib]]
-name = "MergeKernel"
-
-[[lean_lib]]
-name = "Posix"
-
-[[lean_lib]]
-name = "PosixKernel"
-
-[[lean_lib]]
-name = "Prefix"
-
-[[lean_lib]]
-name = "PrefixKernel"
-
-[[lean_lib]]
 name = "ProbeLadderBridges"
-
-[[lean_lib]]
-name = "ProbeOrder"
 
 [[lean_lib]]
 name = "ProbeOrderCoveringDerived"
 
 [[lean_lib]]
-name = "ProbeOrderKernel"
-
-[[lean_lib]]
-name = "Properties"
-
-[[lean_lib]]
-name = "PropertiesKernel"
-
-[[lean_lib]]
-name = "Reopen"
-
-[[lean_lib]]
-name = "ReopenKernel"
-
-[[lean_lib]]
-name = "Scale"
-
-[[lean_lib]]
-name = "ScaleKernel"
-
-[[lean_lib]]
 name = "ScalePredictDerived"
 
 [[lean_lib]]
-name = "Scan"
+name = "WorkIo"
+
+[[lean_lib]]
+name = "FlushAmortBridges"
+
+[[lean_lib]]
+name = "AutoFlushDueDerived"
 
 [[lean_lib]]
 name = "ScanDecisionBridges"
@@ -226,37 +426,172 @@ name = "ScanDecisionBridges"
 name = "ScanGuardDerived"
 
 [[lean_lib]]
-name = "ScanKernel"
+name = "CountDerived"
 
 [[lean_lib]]
-name = "VlogGc"
+name = "BloomBridges"
 
 [[lean_lib]]
-name = "VlogGcKernel"
+name = "BloomMayContainDerived"
 
 [[lean_lib]]
-name = "WalRecover"
+name = "LevelingKernel"
 
 [[lean_lib]]
-name = "WalRecoverKernel"
+name = "Leveling"
 
 [[lean_lib]]
-name = "WalState"
+name = "PosixKernel"
 
 [[lean_lib]]
-name = "WalStateKernel"
+name = "Posix"
 
 [[lean_lib]]
-name = "WorkIo"
+name = "FormKernel"
 
 [[lean_lib]]
-name = "WriteAck"
+name = "Form"
 
 [[lean_lib]]
-name = "WriteAckKernel"
+name = "AuthKernel"
 
 [[lean_lib]]
-name = "WriteAdmission"
+name = "Auth"
 
 [[lean_lib]]
-name = "WriteAdmissionKernel"
+name = "PathKernel"
+
+[[lean_lib]]
+name = "Path"
+
+[[lean_lib]]
+name = "WorldKernel"
+
+[[lean_lib]]
+name = "World"
+
+[[lean_lib]]
+name = "ComposeIterMerge"
+
+[[lean_lib]]
+name = "ComposeMembershipClone"
+
+[[lean_lib]]
+name = "ComposeScanCrc"
+
+[[lean_lib]]
+name = "ComposeC1Membership"
+
+[[lean_lib]]
+name = "ComposeConcurrent"
+
+[[lean_lib]]
+name = "ComposeStoreRaft"
+
+[[lean_lib]]
+name = "ComposeStoreFinish"
+
+[[lean_lib]]
+name = "ComposeStorageWrite"
+
+[[lean_lib]]
+name = "ComposeL28"
+
+[[lean_lib]]
+name = "ComposeDurabilitySpine"
+
+[[lean_lib]]
+name = "ComposeProductCrown"
+
+[[lean_lib]]
+name = "ComposeWriter"
+
+[[lean_lib]]
+name = "ComposeRecovery"
+
+[[lean_lib]]
+name = "ComposeDefining"
+
+[[lean_lib]]
+name = "ComposeProduct"
+
+[[lean_lib]]
+name = "ComposePutRecover"
+
+[[lean_lib]]
+name = "ComposeM2"
+
+[[lean_lib]]
+name = "MagicKernel"
+
+[[lean_lib]]
+name = "Magic"
+
+[[lean_lib]]
+name = "ClientAxisKernel"
+
+[[lean_lib]]
+name = "ClientAxis"
+
+[[lean_lib]]
+name = "GroupWindowKernel"
+
+[[lean_lib]]
+name = "GroupWindow"
+
+[[lean_lib]]
+name = "WalTicketKernel"
+
+[[lean_lib]]
+name = "WalTicket"
+
+[[lean_lib]]
+name = "LeftoverPageKernel"
+
+[[lean_lib]]
+name = "LeftoverPage"
+
+[[lean_lib]]
+name = "ScanReadaheadKernel"
+
+[[lean_lib]]
+name = "ScanReadahead"
+
+[[lean_lib]]
+name = "WriteCycleKernel"
+
+[[lean_lib]]
+name = "WriteCycle"
+
+[[lean_lib]]
+name = "DurabilitySpineKernel"
+
+[[lean_lib]]
+name = "DurabilitySpine"
+
+[[lean_lib]]
+name = "ProductCrownKernel"
+
+[[lean_lib]]
+name = "ProductCrown"
+
+[[lean_lib]]
+name = "RatioCurveKernel"
+
+[[lean_lib]]
+name = "RatioCurve"
+
+[[lean_lib]]
+name = "CrcClass"
+
+[[lean_lib]]
+name = "WorkloadClassKernel"
+
+[[lean_lib]]
+name = "WorkloadClass"
+
+[[lean_lib]]
+name = "FilterPartitionKernel"
+
+[[lean_lib]]
+name = "FilterPartition"

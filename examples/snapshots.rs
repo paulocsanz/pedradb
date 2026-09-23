@@ -11,7 +11,7 @@
 //!
 //! Next: `change_feed` — the same sequences, as a stream of puts and deletes.
 
-use pedradb_core::{Db, Snapshot};
+use pedradb_core::{ConcurrentDb, Snapshot};
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now()
@@ -25,7 +25,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 fn run() -> pedradb_core::Result<()> {
     let dir = scratch("snap");
-    let mut db = Db::open(&dir)?;
+    let mut db = ConcurrentDb::open(&dir)?;
 
     db.put(b"doc", b"v1")?;
     let seq_v1 = db.last_sequence();

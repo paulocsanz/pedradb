@@ -24,7 +24,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use pedradb_core::concurrent::ConcurrentDb;
 use pedradb_core::env::{Env, EnvFile};
-use pedradb_core::{Db, OpenOptions, WriteOptions, WAL_FILE_NAME};
+use pedradb_core::{db::Db, OpenOptions, WriteOptions, WAL_FILE_NAME};
 
 /// Counts `write` / `sync_data` syscalls on the WAL file (Env seam, not
 /// engine telemetry).

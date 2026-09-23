@@ -8,7 +8,7 @@
 //! cargo run -p pedradb-examples --example large_values
 //! ```
 
-use pedradb_core::{CompactOptions, Db, OpenOptions};
+use pedradb_core::{CompactOptions, ConcurrentDb, OpenOptions};
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now()
@@ -22,7 +22,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 fn run() -> pedradb_core::Result<()> {
     let dir = scratch("vlog");
-    let mut db = Db::open_with(
+    let mut db = ConcurrentDb::open_with(
         &dir,
         OpenOptions {
             large_value_threshold: Some(1024),

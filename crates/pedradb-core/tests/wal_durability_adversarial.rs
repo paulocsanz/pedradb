@@ -44,7 +44,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pedradb_core::concurrent::ConcurrentDb;
-use pedradb_core::{CoreError, Db, OpenOptions, WalRecovery, WriteOptions, WAL_FILE_NAME};
+use pedradb_core::{CoreError, db::Db, OpenOptions, WalRecovery, WriteOptions, WAL_FILE_NAME};
 
 /// Env-seam observation of everything the engine does to the WAL file.
 #[derive(Default)]

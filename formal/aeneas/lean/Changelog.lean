@@ -10,10 +10,10 @@ theorem changelog_should_store_due :
   have hgt : (3#u64 > 0#u64) = true := by native_decide
   have hge : (5#u64 ≥ 3#u64) = true := by native_decide
   simp [hgt, hge]
-/-- RFC-0218 P0.3 1/6 (atom `catalog:changelog`): a decisão de
+/-- RFC-0218 P0.3 1/6 (átomo `catalog:changelog`): a decisão de
     rebuild é EXATAMENTE a janela citada — feed vazio com seq > 0
     precisa de rebuild; feed vivo nunca (o feed é a verdade). O AS-IS
-    devolve sempre false (rebuild cego — tooth plantado no modelo
+    devolve sempre false (rebuild cego — dente plantado no modelo
     Stateright do fn real). -/
 theorem changelog_needs_sst_rebuild_fate_iff :
     ∀ (feed_empty : Bool) (last_sequence : U64) (v : Bool),
@@ -42,11 +42,11 @@ theorem changelog_needs_sst_rebuild_fate_iff :
       · exact absurd h1.1 (fun h => Bool.noConfusion h)
       · subst hv
         rfl
-/-- RFC-0218 P0.3 2/6 (atom `catalog:changelog_should_store`): o
+/-- RFC-0218 P0.3 2/6 (átomo `catalog:changelog_should_store`): o
     debounce é EXATAMENTE o portão citado — intervalo 0 nunca
     armazena na via do commit; intervalo positivo armazena quando os
     commits desde a última atingem o intervalo. O AS-IS armazena a
-    cada commit (ignora o intervalo — tooth plantado). -/
+    cada commit (ignora o intervalo — dente plantado). -/
 theorem changelog_should_store_fate_iff :
     ∀ (commits_since : U64) (interval : U64) (v : Bool),
       (changelog_should_store commits_since interval = ok v) ↔
@@ -71,10 +71,10 @@ theorem changelog_should_store_fate_iff :
       rw [if_neg hg]
       subst hv
       rfl
-/-- RFC-0218 P0.3 3/6 (atom `catalog:changelog_budget`): o
+/-- RFC-0218 P0.3 3/6 (átomo `catalog:changelog_budget`): o
     orçamento de rebuild é EXATAMENTE a comparação citada —
     materializar cabe no orçamento sse live_entries ≤ budget_entries.
-    O AS-IS devolve sempre true (materialização sem freio — tooth
+    O AS-IS devolve sempre true (materialização sem freio — dente
     plantado). -/
 theorem changelog_rebuild_within_budget_fate_iff :
     ∀ (live_entries : U64) (budget_entries : U64) (v : Bool),
@@ -88,12 +88,12 @@ theorem changelog_rebuild_within_budget_fate_iff :
   · rintro hv
     subst hv
     rfl
-/-- RFC-0219 P0.1 (atom `catalog:changelog_durable_commit`): o destino
+/-- RFC-0219 P0.1 (átomo `catalog:changelog_durable_commit`): o destino
     do debounce de CHANGELOG num commit terminado é EXATAMENTE a resolução
     de sync — conta sse o cliente pediu sync ou, sem flag do cliente, o
     default do DB sincroniza; todo o resto pula (o cache atrasa e o
     reopen reconstrói o feed do WAL — RFC-0019). O AS-IS nunca conta:
-    todo crash paga o replay integral do WAL (tooth plantado no kernel). -/
+    todo crash paga o replay integral do WAL (dente plantado no kernel). -/
 theorem changelog_durable_commit_fate_fate_iff :
     ∀ (client_set : Bool) (client_sync : Bool) (db_sync : Bool)
       (v : ChangelogCommitFate),
@@ -154,12 +154,12 @@ theorem changelog_durable_commit_fate_fate_iff :
         · exact absurd h3.2.1 (by simp [*])
         · subst hv
           rfl
-/-- RFC-0219 P0.2 (atom `catalog:wal_archive_delete`): o destino da
+/-- RFC-0219 P0.2 (átomo `catalog:wal_archive_delete`): o destino da
     cadeia arquivada é EXATAMENTE a comparação citada — enquanto o
     publish do MANIFEST atrasa os arquivos (segmentos acima de
     manifest_published_seq são a única cópia durável da janela), guarda;
     publish cobrindo a cadeia, libera o delete. O AS-IS deleta a janela
-    não-publicada (tooth plantado no kernel). -/
+    não-publicada (dente plantado no kernel). -/
 theorem wal_archive_delete_plan_fate_iff :
     ∀ (manifest_published_seq : U64) (wal_archive_max_seq : U64)
       (v : WalArchiveDelete),
@@ -189,12 +189,12 @@ theorem wal_archive_delete_plan_fate_iff :
       · subst hv
         rfl
 
-/-- RFC-0219 P1.4 (atom `catalog:changelog_store_plan`): o store point
+/-- RFC-0219 P1.4 (átomo `catalog:changelog_store_plan`): o store point
     síncrono grava o feed EXATAMENTE quando o publish durable do
     MANIFEST cobriu a janela arquivada; publish falhado segura o store
     — os segmentos arquivados são a única cópia durable da janela. O
     AS-IS grava com publish falhado (o store apaga segmentos que
-    nenhum MANIFEST publicado cobre — tooth plantado). -/
+    nenhum MANIFEST publicado cobre — dente plantado). -/
 theorem changelog_store_plan_fate_iff :
     ∀ (publish_ok : Bool) (plan : ChangelogStorePlan),
       (changelog_store_plan publish_ok = ok plan) ↔
