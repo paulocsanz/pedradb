@@ -208,6 +208,49 @@ fn probe_percentiles(label: &str, mut op: impl FnMut(usize)) {
     );
 }
 
+/// `SLIPSTREAM_BENCH_CELLS=probe_miss,get_loop` runs those one-shot cells
+/// and skips the criterion groups.
+fn cell_on(name: &str) -> bool {
+    match std::env::var("SLIPSTREAM_BENCH_CELLS") {
+        Ok(raw) if !raw.trim().is_empty() => raw.split(',').any(|s| s.trim() == name),
+        _ => true,
+    }
+}
+
+fn quick_cells_only() -> bool {
+    matches!(
+        std::env::var("SLIPSTREAM_BENCH_CELLS"),
+        Ok(raw) if !raw.trim().is_empty()
+    )
+}
+
+/// Median of 100 batches of 100 point gets, after 20 warmup batches.
+/// Same batch width as `lookup_100/*_get_loop`.
+fn median_get_loop(label: &str, n: usize, mut get: impl FnMut(&str)) {
+    let mut state = 0xFACE_FEEDu64;
+    let mut once = |state: &mut u64| {
+        let t = std::time::Instant::now();
+        for _ in 0..100 {
+            let i = (next_rand(state) % n as u64) as usize;
+            let k = key(i);
+            get(&k);
+        }
+        t.elapsed()
+    };
+    for _ in 0..20 {
+        let _ = once(&mut state);
+    }
+    let mut lat = Vec::with_capacity(100);
+    for _ in 0..100 {
+        lat.push(once(&mut state));
+    }
+    lat.sort();
+    eprintln!(
+        "{label}: median {:.3?} (100 batches × 100 gets)",
+        lat[lat.len() / 2]
+    );
+}
+
 fn cache_bytes() -> Option<u64> {
     std::env::var("SLIPSTREAM_BENCH_CACHE_BYTES")
         .ok()
@@ -297,6 +340,9 @@ fn maybe_settle(name: &str, dir: &Path, settle: impl FnOnce() -> Result<(), Stri
 }
 
 fn bench_apply_hydrate(c: &mut Criterion) {
+    if quick_cells_only() {
+        return;
+    }
     let n = entries();
     let vlen = value_bytes();
     let pool = value_pool();
@@ -391,6 +437,14 @@ fn bench_one_backend_reads(
             probe_percentiles(&format!("probe_hit/{name}"), |i| {
                 let _ = black_box(store.get(&key(i)).expect("get"));
             });
+            if cell_on("probe_miss") {
+                probe_percentiles(&format!("probe_miss/{name}"), |i| {
+                    let _ = black_box(store.get(&miss_key(i)).expect("get"));
+                });
+            }
+            if quick_cells_only() {
+                return;
+            }
             bench_probe_miss(c, name, n, |i| store.get(&miss_key(i)).expect("get"));
             bench_get_hit(c, name, n, |i| store.get(&key(i)).expect("get"));
             bench_prefix_scan(c, name, n, |prefix, f| {
@@ -409,6 +463,19 @@ fn bench_one_backend_reads(
             probe_percentiles(&format!("probe_hit/{name}"), |i| {
                 let _ = black_box(store.get(&key(i)).expect("get"));
             });
+            if cell_on("probe_miss") {
+                probe_percentiles(&format!("probe_miss/{name}"), |i| {
+                    let _ = black_box(store.get(&miss_key(i)).expect("get"));
+                });
+            }
+            if cell_on("get_loop") && quick_cells_only() {
+                median_get_loop(&format!("get_loop/{name}"), n, |k| {
+                    let _ = black_box(reader.get(k).expect("get"));
+                });
+            }
+            if quick_cells_only() {
+                return;
+            }
             bench_probe_miss(c, name, n, |i| store.get(&miss_key(i)).expect("get"));
             bench_get_hit(c, name, n, |i| store.get(&key(i)).expect("get"));
             bench_prefix_scan(c, name, n, |prefix, f| {
@@ -428,6 +495,19 @@ fn bench_one_backend_reads(
             probe_percentiles(&format!("probe_hit/{name}"), |i| {
                 let _ = black_box(store.get(&key(i)).expect("get"));
             });
+            if cell_on("probe_miss") {
+                probe_percentiles(&format!("probe_miss/{name}"), |i| {
+                    let _ = black_box(store.get(&miss_key(i)).expect("get"));
+                });
+            }
+            if cell_on("get_loop") && quick_cells_only() {
+                median_get_loop(&format!("get_loop/{name}"), n, |k| {
+                    let _ = black_box(reader.get(k).expect("get"));
+                });
+            }
+            if quick_cells_only() {
+                return;
+            }
             bench_probe_miss(c, name, n, |i| store.get(&miss_key(i)).expect("get"));
             bench_get_hit(c, name, n, |i| store.get(&key(i)).expect("get"));
             bench_prefix_scan(c, name, n, |prefix, f| {
