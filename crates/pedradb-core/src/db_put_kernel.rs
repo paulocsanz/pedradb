@@ -268,7 +268,7 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn changes_after(&self, from_seq: SequenceNumber) -> Vec<ChangeEntry> {
         let from = from_seq.min(self.last_sequence());
-        let entries = if self.feed_is_lazy() {
+        let mut entries = if self.feed_is_lazy() {
             match self.lazy_feed_entries() {
                 Ok(e) => e,
                 Err(e) => fail_stop_corrupt_value("changes_after feed rebuild", &e),
@@ -279,6 +279,7 @@ impl<E: Env> Db<E> {
         } else {
             self.change_log.changes_after(from)
         };
+        entries.extend(self.bulk_change_entries().into_iter().filter(|e| e.sequence > from));
         match self.resolve_feed_entries(entries) {
             Ok(e) => e,
             // F1 contract (doc above): never serve the raw pointer; fail-stop.
@@ -307,6 +308,35 @@ impl<E: Env> Db<E> {
     /// `changelog_interval == 0`: do not grow an in-memory ChangeEntry vec on
     /// every write (RFC-0039 P0.3 / RFC-0041 P1.1). Watchers rebuild last-per-key
     /// from mem+SST; flush/close still persist.
+    fn bulk_change_entries(&self) -> Vec<ChangeEntry> {
+        let mut out = Vec::new();
+        let mut push = |run: &crate::bulk_run::BulkRun| {
+            for i in 0..run.len() {
+                let kind = ChangeKind::from_value_type(run.kinds()[i]);
+                out.push(ChangeEntry {
+                    sequence: run.seqs()[i],
+                    key: run.keys()[i].clone(),
+                    kind,
+                    value: if kind == ChangeKind::Put {
+                        run.vals()[i].clone()
+                    } else {
+                        Bytes::new()
+                    },
+                });
+            }
+        };
+        for run in self.bulk_runs.values() {
+            push(run);
+        }
+        for (_, run) in &self.parked_bulk {
+            push(run);
+        }
+        if let Some((_, run)) = &self.bulk_encoding {
+            push(run);
+        }
+        out
+    }
+
     fn feed_is_lazy(&self) -> bool {
         self.changelog_interval == 0
     }

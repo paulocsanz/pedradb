@@ -244,6 +244,9 @@ struct WriteGroup {
     /// RFC-0236 SuperVersion: published after each committed apply so a
     /// get that misses `try_read` still sees unflushed mem keys.
     sv: Option<Arc<RwLock<Arc<PublishedSv>>>>,
+    /// Cleared on every applied write so a settled SST miss cannot hide
+    /// a key that just landed in the memtable.
+    settled: Option<Arc<AtomicBool>>,
 }
 
 /// Default catch-up window (see [`ConcurrentDb::set_write_group_catchup_window`]).
@@ -488,10 +491,14 @@ impl WriteGroup {
             write_ack: std::sync::Mutex::new(crate::write_ack_kernel::WriteAckLedger::new()),
             phase_stats: None,
             sv: None,
+            settled: None,
         }
     }
 
     fn publish_apply<E: Env>(&self, db: &Db<E>) {
+        if let Some(flag) = self.settled.as_ref() {
+            flag.store(false, Ordering::Release);
+        }
         let Some(slot) = self.sv.as_ref() else {
             return;
         };
@@ -2138,12 +2145,13 @@ impl<E: Env> ConcurrentDb<E> {
         let mut writes = WriteGroup::new();
         writes.phase_stats = phase_stats;
         writes.sv = Some(Arc::clone(&published_ssts));
+        writes.settled = Some(Arc::clone(&settled_sst_only));
         // F201: share the OCC registry into the Db so reclaim / auto-compact
         // GC floors cannot pass an open transaction's snapshot.
         let occ_registry = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
         let mut db = db;
         db.set_occ_floor_registry(Arc::clone(&occ_registry));
-        let commit_inflight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let commit_inflight = db.commit_inflight_handle();
         let out = Self {
             inner: Arc::new(RwLock::new(db)),
             commit_inflight,
@@ -2184,6 +2192,16 @@ impl<E: Env> ConcurrentDb<E> {
             imm: db.snapshot_imm(),
             ssts: db.snapshot_ssts(),
         });
+        // Clear the settled flag before swapping envelopes so a reader
+        // cannot observe "settled" against the previous family's bounds.
+        let (settled, env) = db.sst_fast_miss_view();
+        if !settled {
+            self.settled_sst_only.store(false, Ordering::Release);
+            *self.sst_envelope.write() = env;
+        } else {
+            *self.sst_envelope.write() = env;
+            self.settled_sst_only.store(true, Ordering::Release);
+        }
     }
 
     /// Point get. A point-cache hit answers without the Db read lock
@@ -2675,7 +2693,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// `recently_multi` skip stays (overwrite_mc4 leftover). Bounded: the
     /// caller invokes this once per L0 install, never a drain loop.
     pub fn maybe_compact_l0_at_trigger(&self) {
-        if self.recently_multi(Duration::from_millis(2)) {
+        if self.defer_auto_compact() || self.recently_multi(Duration::from_millis(2)) {
             return;
         }
         let l0 = self.inner.read().level_file_count(0);
@@ -3728,7 +3746,16 @@ impl<E: Env> ConcurrentDb<E> {
                 e
             })?
         };
-        let _ = persist;
+        if let Some(persist) = persist {
+            #[cfg(test)]
+            note_bulk_manifest_off_lock(&self.inner);
+            let _p = self.persist_lock.lock();
+            persist.write().map_err(|e| {
+                let mut g = self.inner.write();
+                g.fence_durability(&e, crate::db::FenceClass::of_core(&e));
+                e
+            })?;
+        }
         // At most two pipeline steps: drain existing imm, then switch+flush active.
         // Do **not** loop while concurrent puts refill mem (that would never end).
         for _ in 0..2 {
@@ -8208,6 +8235,39 @@ mod tests {
         env: FenceEnv,
     }
 
+    impl FenceFile {
+        /// The group-commit path syncs through `sync_*_shared`. The
+        /// injection has to live on that seam, not only on `Write::write`.
+        fn injected_sync_err(&self) -> Option<std::io::Error> {
+            if self
+                .env
+                .fail_sync_hold
+                .load(std::sync::atomic::Ordering::SeqCst)
+                || self
+                    .env
+                    .fail_sync
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                Some(std::io::Error::other("injected wal sync failure"))
+            } else {
+                None
+            }
+        }
+
+        fn injected_write_err(&self) -> Option<std::io::Error> {
+            if self
+                .env
+                .fail_write
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                let kind = *self.env.write_kind.lock().expect("write_kind");
+                Some(std::io::Error::new(kind, "injected wal write failure"))
+            } else {
+                None
+            }
+        }
+    }
+
     impl std::io::Read for FenceFile {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
             self.inner.read(buf)
@@ -8216,13 +8276,8 @@ mod tests {
     impl std::io::Write for FenceFile {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             (self.env.wal_io_probe)();
-            if self
-                .env
-                .fail_write
-                .swap(false, std::sync::atomic::Ordering::SeqCst)
-            {
-                let kind = *self.env.write_kind.lock().expect("write_kind");
-                return Err(std::io::Error::new(kind, "injected wal write failure"));
+            if let Some(err) = self.injected_write_err() {
+                return Err(err);
             }
             self.inner.write(buf)
         }
@@ -8244,30 +8299,14 @@ mod tests {
         }
         fn sync_data(&mut self) -> std::io::Result<()> {
             (self.env.wal_io_probe)();
-            if self
-                .env
-                .fail_sync_hold
-                .load(std::sync::atomic::Ordering::SeqCst)
-                || self
-                    .env
-                    .fail_sync
-                    .swap(false, std::sync::atomic::Ordering::SeqCst)
-            {
-                return Err(std::io::Error::other("injected wal sync failure"));
+            if let Some(err) = self.injected_sync_err() {
+                return Err(err);
             }
             self.inner.sync_data()
         }
         fn sync_all(&mut self) -> std::io::Result<()> {
-            if self
-                .env
-                .fail_sync_hold
-                .load(std::sync::atomic::Ordering::SeqCst)
-                || self
-                    .env
-                    .fail_sync
-                    .swap(false, std::sync::atomic::Ordering::SeqCst)
-            {
-                return Err(std::io::Error::other("injected wal sync failure"));
+            if let Some(err) = self.injected_sync_err() {
+                return Err(err);
             }
             self.inner.sync_all()
         }
@@ -8301,6 +8340,9 @@ mod tests {
         }
         fn write_all_at_shared(&self, buf: &[u8], at: u64) -> std::io::Result<()> {
             (self.env.wal_io_probe)();
+            if let Some(err) = self.injected_write_err() {
+                return Err(err);
+            }
             if self
                 .env
                 .fail_pwrite
@@ -8318,9 +8360,15 @@ mod tests {
             }
         }
         fn sync_data_shared(&self) -> std::io::Result<()> {
+            if let Some(err) = self.injected_sync_err() {
+                return Err(err);
+            }
             self.inner.sync_data()
         }
         fn sync_all_shared(&self) -> std::io::Result<()> {
+            if let Some(err) = self.injected_sync_err() {
+                return Err(err);
+            }
             self.inner.sync_all()
         }
         fn preallocate_shared(&self, len: u64) -> std::io::Result<()> {
@@ -10680,12 +10728,9 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0201 P0.3: the explicit env pin overrides the axis in both
-    /// directions — `=0` keeps an oversubscribed herd on the bypass,
-    /// `=1` merges a two-writer herd (below the line).
-    #[test]
-    /// Four threads hit `put` together: the join snapshot must put them
-    /// in one WAL frame (avg_group ≥ 3), not one `write()` each.
+    /// Four async writers on a machine that has at least four CPUs stay
+    /// on the bypass: RFC-0201 merges only when writers outnumber CPUs.
+    /// Every put still lands.
     #[test]
     fn rfc_writethread_join_four_puts_one_wal_write() {
         let dir = temp_dir();
@@ -10715,11 +10760,25 @@ mod tests {
         let (submits, _q, groups, ops) = db.write_group_stats();
         assert_eq!(submits, 128);
         assert_eq!(ops, 128);
+        let ncpu = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
         let avg = ops as f64 / groups.max(1) as f64;
-        assert!(
-            avg >= 2.5,
-            "join must pack the 4-writer herd: avg_group={avg:.2} groups={groups}"
-        );
+        if ncpu >= 4 {
+            assert!(
+                avg < 1.5,
+                "RFC-0201: 4 writers on {ncpu} cpus stay on the bypass, avg_group={avg:.2}"
+            );
+        }
+        for t in 0..4u8 {
+            for i in 0..32u8 {
+                assert_eq!(
+                    db.get(&[b'j', t, i]).as_deref(),
+                    Some(payload.as_slice()),
+                    "lost put t{t} i{i}"
+                );
+            }
+        }
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

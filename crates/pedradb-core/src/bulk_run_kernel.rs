@@ -17,6 +17,7 @@ pub(crate) struct BulkRun {
     keys: Vec<Bytes>,
     vals: Vec<Bytes>,
     seqs: Vec<SequenceNumber>,
+    kinds: Vec<crate::key::ValueType>,
     bytes: usize,
 }
 
@@ -25,6 +26,7 @@ impl BulkRun {
         self.keys.reserve(n);
         self.vals.reserve(n);
         self.seqs.reserve(n);
+        self.kinds.reserve(n);
     }
 
     pub(crate) fn push(&mut self, key: Bytes, val: Bytes, seq: SequenceNumber) {
@@ -36,6 +38,38 @@ impl BulkRun {
         self.keys.push(key);
         self.vals.push(val);
         self.seqs.push(seq);
+        self.kinds.push(crate::key::ValueType::Value);
+    }
+
+    /// Insert or replace `key`, keeping the newest sequence. Used when a
+    /// memtable family (including a probing delete) is absorbed into the run.
+    pub(crate) fn upsert(
+        &mut self,
+        key: Bytes,
+        val: Bytes,
+        seq: SequenceNumber,
+        kind: crate::key::ValueType,
+    ) {
+        match self.keys.binary_search_by(|k| k.as_ref().cmp(key.as_ref())) {
+            Ok(i) => {
+                if seq >= self.seqs[i] {
+                    self.vals[i] = val;
+                    self.seqs[i] = seq;
+                    self.kinds[i] = kind;
+                }
+            }
+            Err(i) => {
+                self.bytes = self
+                    .bytes
+                    .saturating_add(key.len())
+                    .saturating_add(val.len())
+                    .saturating_add(8);
+                self.keys.insert(i, key);
+                self.vals.insert(i, val);
+                self.seqs.insert(i, seq);
+                self.kinds.insert(i, kind);
+            }
+        }
     }
 
     #[must_use]
@@ -54,14 +88,30 @@ impl BulkRun {
     }
 
     #[must_use]
-    pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
+    pub(crate) fn lookup_entry(
+        &self,
+        key: &[u8],
+        snapshot: SequenceNumber,
+    ) -> Option<(SequenceNumber, Lookup)> {
         let Ok(i) = self.keys.binary_search_by(|k| k.as_ref().cmp(key)) else {
-            return Lookup::NotFound;
+            return None;
         };
         if self.seqs[i] > snapshot {
-            return Lookup::NotFound;
+            return None;
         }
-        Lookup::Found(self.vals[i].clone())
+        let look = match self.kinds[i] {
+            crate::key::ValueType::Value => Lookup::Found(self.vals[i].clone()),
+            crate::key::ValueType::Deletion | crate::key::ValueType::RangeDeletion => {
+                Lookup::Deleted
+            }
+        };
+        Some((self.seqs[i], look))
+    }
+
+    pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
+        self.lookup_entry(key, snapshot)
+            .map(|(_, look)| look)
+            .unwrap_or(Lookup::NotFound)
     }
 
     #[must_use]
@@ -77,6 +127,10 @@ impl BulkRun {
     #[must_use]
     pub(crate) fn seqs(&self) -> &[SequenceNumber] {
         &self.seqs
+    }
+
+    pub(crate) fn kinds(&self) -> &[crate::key::ValueType] {
+        &self.kinds
     }
 }
 
