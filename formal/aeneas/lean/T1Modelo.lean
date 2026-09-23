@@ -15,8 +15,8 @@ theorem t1_modelo_empty :
   unfold t1_modelo_kernel.t1_holds_of
   rfl
 
-/-- AS-IS tooth: mid-apply partial visibility is not recovered. -/
-theorem t1_modelo_as_is_tooth :
+/-- AS-IS dente: mid-apply partial visibility is not recovered. -/
+theorem t1_modelo_as_is_dente :
     t1_modelo_kernel.t1_modelo_as_is
       { staged := 2#u64, visible := 1#u64, committed := false,
         aborted := false, fenced := false } = ok false := by
@@ -27,7 +27,7 @@ theorem t1_modelo_as_is_tooth :
   unfold t1_modelo_kernel.t1_holds_of
   rfl
 
-/-! ## RFC-0215 P0.2 — crown de produto no degrau atom (modelo ×4) -/
+/-! ## RFC-0215 P0.2 — coroa de produto no degrau átomo (modelo ×4) -/
 
 /-- Any ok-valued Result bind forces the bound term to be ok
 (Cf.lean's `bind_ok_inv`, restated for this module). -/
@@ -60,7 +60,7 @@ def t1m_violates (s : t1_modelo_kernel.TxState) : Prop :=
 o desfecho da máquina T1 é exatamente a decisão que o spec nomeia —
 `ok true` quando a tx recuperada passa `t1_holds_of`, `ok false`
 quando a quebra. O mutante AS-IS (`t1_modelo_as_is`) recupera com
-`tx_recover_as_is`/`leftover_*_as_is`; planta três-teeth recusa. -/
+`tx_recover_as_is`/`leftover_*_as_is`; planta três-dentes recusa. -/
 theorem t1_modelo_fate_iff :
     ∀ (s : t1_modelo_kernel.TxState) (v : Bool),
       (t1_modelo_kernel.t1_modelo s = ok v) ↔
@@ -90,13 +90,13 @@ theorem t1_modelo_fate_iff :
         simp only [Aeneas.Std.bind_tc_ok]
         exact hviol
 
-/-- RFC-0218 P1.3 10/11 (atom `catalog:tx_abort`, entrada
+/-- RFC-0218 P1.3 10/11 (átomo `catalog:tx_abort`, entrada
     `tx_abort`): abortar é EXATAMENTE a cadeia citada — tx já
     committed devolve o próprio estado; senão o commit-action tem que
     ser Revert (massert), o revert NÃO pode limpar o status (massert),
     e o abort devolve visible zerado, aborted e CERCOADO. O AS-IS
     devolve o mesmo estado sem o cerca (commit replay materializa a
-    tx abortada — tooth plantado). -/
+    tx abortada — dente plantado). -/
 theorem tx_abort_fate_iff :
     ∀ (s r : t1_modelo_kernel.TxState),
       (t1_modelo_kernel.tx_abort s = ok r) ↔
@@ -138,12 +138,12 @@ theorem tx_abort_fate_iff :
       exact bind_intro a hact (bind_intro b heq (bind_intro () hm
         (bind_intro b1 hrc (bind_intro () hm2 rfl))))
 
-/-- RFC-0218 P1.3 11/11 (atom `catalog:tx_recover`, entrada
+/-- RFC-0218 P1.3 11/11 (átomo `catalog:tx_recover`, entrada
     `tx_recover`): recuperar é EXATAMENTE a decisão citada
     `leftover_fate` — sobrou tx (não committed) vira aborto cercado
     com visible zerado; tx committed fica como está. O AS-IS deixa o
     leftover vivo (visibilidade parcial do mid-apply sobrevive —
-    tooth plantado). -/
+    dente plantado). -/
 theorem tx_recover_fate_iff :
     ∀ (s r : t1_modelo_kernel.TxState),
       (t1_modelo_kernel.tx_recover s = ok r) ↔

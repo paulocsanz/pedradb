@@ -9,7 +9,7 @@ theorem keep_body_without_cl_true :
   unfold keep_body_without_cl
   rfl
 
-theorem keep_body_without_cl_as_is_tooth :
+theorem keep_body_without_cl_as_is_dente :
     keep_body_without_cl_as_is = ok false := by
   unfold keep_body_without_cl_as_is
   rfl

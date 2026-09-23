@@ -25,7 +25,7 @@ use crate::write_cycle_kernel::{qps_hat_error_permille, WritePhaseNs};
 pub struct ScaleAnchor {
     /// Dataset records of the cell.
     pub records: u64,
-    /// Measured Pedra ops/s (labeled DIAG or board by the caller).
+    /// Measured Pedra ops/s (labeled DIAG or cartaz by the caller).
     pub pedra_qps: u64,
     /// Measured RocksDB-default (`sync=false`) ops/s on the same leg.
     pub rocks_qps: u64,
@@ -33,7 +33,7 @@ pub struct ScaleAnchor {
 
 /// Write-family ladder, `deps_cache_overwrite_mc4`, 4 clients, payload 100.
 /// 100k/2M/15M are Darwin DIAG (otimizar mapa, floor-cut/leftover findings);
-/// 25M is the Linux board min-of-3 r3 (2026-09-10,
+/// 25M is the Linux cartaz min-of-3 r3 (2026-09-10,
 /// `findings/2026-09-10-take-all-reversal-takecell.md`). Cross-box mix is
 /// declared: P1.2 re-fits same-box when the gate opens.
 pub const WRITE_FAMILY_ANCHORS_2026_09_10: [ScaleAnchor; 4] = [
@@ -74,7 +74,7 @@ pub struct GetSideAnchor {
     pub records: u64,
     /// `rocks_ns / pedra_ns` in permille (rounded).
     pub ratio_permille: u64,
-    /// Dated provenance + grade (board / DIAG / contrast).
+    /// Dated provenance + grade (cartaz / DIAG / contrast).
     pub label: &'static str,
 }
 
@@ -82,7 +82,7 @@ pub struct GetSideAnchor {
 /// of the 5 write-family scales (100M) on 2 boxes: on the 4 GiB box the
 /// point-gets are paid (1484–1576‰, 3-run min-of-3 medians of the
 /// `win-probe-prefix` guest harness, vlen=200, DIAG) while the sequential
-/// scan is the 700‰ board; the 1050‰ row is the RAM-fits contrast that
+/// scan is the 700‰ cartaz; the 1050‰ row is the RAM-fits contrast that
 /// attributes that deficit to I/O, not compute (RFC-0195). 10k/2M/15M/25M
 /// GET legs are unmeasured same-class — named deferral, re-anchored by the
 /// P1.2/P1.3 meters when the gate opens.
@@ -91,7 +91,7 @@ pub const GET_SIDE_ANCHORS_2026_09_10: [GetSideAnchor; 6] = [
         leg: "prefix_scan",
         records: 100_000_000,
         ratio_permille: 700,
-        label: "board 2026-09-10 (rocks-parity-compare, payload 100, 4 GiB)",
+        label: "cartaz 2026-09-10 (rocks-parity-compare, payload 100, 4 GiB)",
     },
     GetSideAnchor {
         leg: "prefix_scan",
@@ -306,7 +306,7 @@ pub struct RatioPoint {
 }
 
 /// Static Linux-quiet forecast for `overwrite_mc4` (RFC-0197 curve +
-/// RFC-0192 `qps_from_cycle_ns`). Integer, no I/O. Hat, never board.
+/// RFC-0192 `qps_from_cycle_ns`). Integer, no I/O. Hat, never cartaz.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LinuxWriteQpsHat {
     /// Dataset records.
@@ -365,11 +365,11 @@ pub fn linux_overwrite_mc4_hat(keys: u64, ram: u64, clients: u64) -> LinuxWriteQ
 }
 
 impl LinuxWriteQpsHat {
-    /// CLI dump. Never labeled board.
+    /// CLI dump. Never labeled cartaz.
     #[must_use]
     pub fn render(self) -> String {
         format!(
-            "host=linux-quiet shape=overwrite_mc4 hat=1 (not board)\n\
+            "host=linux-quiet shape=overwrite_mc4 hat=1 (not cartaz)\n\
              keys={} ram={} clients={} store={} cold_permille={}\n\
              cycle_hat_ns={} qps_hat={} rocks_qps_hat={}\n\
              ratio_hat_permille={} cut={} g_hat={}",
@@ -396,7 +396,7 @@ pub fn linux_get_hit_qps_hat(keys: u64, ram: u64) -> u64 {
 }
 
 /// Static Linux prefix_scan ratio permille at 100M: 700 if bounded
-/// (4 GiB board), 1050 if the store fits (big-guest contrast). Other
+/// (4 GiB cartaz), 1050 if the store fits (big-guest contrast). Other
 /// scales are unmodeled (0).
 #[must_use]
 pub fn linux_prefix_scan_ratio_hat_permille(keys: u64, ram: u64) -> u64 {
@@ -662,7 +662,7 @@ impl RatioCurveTable {
             }
         }
         out.push_str(&format!(
-            "as_is_ratio_permille={} (flat; the blindness of the smoke 15/15)\n",
+            "as_is_ratio_permille={} (flat; the smoke 15/15 cannot see this)\n",
             self.as_is_ratio_permille
         ));
         out
@@ -674,7 +674,7 @@ impl RatioCurveTable {
 /// hiding the missing scales behind silence.
 #[must_use]
 pub fn render_get_side_anchors(anchors: &[GetSideAnchor]) -> String {
-    let mut out = String::from("get-side anchors (RFC-0197 P2.1; ladder 100M on 2 hosts — 10k/2M/15M/25M with no dated measurement)\n");
+    let mut out = String::from("get-side anchors (RFC-0197 P2.1; 100M ladder on 2 hosts — 10k/2M/15M/25M have no dated measurement)\n");
     for a in anchors {
         out.push_str(&format!(
             "get_anchor leg={} records={} ratio_permille={} label={}\n",
@@ -811,7 +811,7 @@ mod tests {
 
     #[test]
     fn rfc0197_p21_get_side_anchors_pin_dated_numbers() {
-        // Primary sources: the board row is the rocks-parity-compare prefix
+        // Primary sources: the cartaz row is the rocks-parity-compare prefix
         // cell; the DIAG rows are the 3-run min-of-3 medians recomputed from
         // findings/2026-09-04-win-probe-prefix/serial.win9{,.rerun2,.rerun3}.log
         // (100M, vlen=200, 4 GiB guest): e.g. get_hit 2765.7/1749.8 = 1581,
@@ -841,7 +841,7 @@ mod tests {
         // deferral is structural, not an omission.
         assert_eq!(covered, vec![100_000_000]);
         let render = render_get_side_anchors(&GET_SIDE_ANCHORS_2026_09_10);
-        assert!(render.contains("10k/2M/15M/25M with no dated measurement"));
+        assert!(render.contains("10k/2M/15M/25M have no dated measurement"));
         assert!(render.contains("get_anchor leg=prefix_scan records=100000000 ratio_permille=700"));
         assert!(render.contains("ratio_permille=1050"));
         assert!(render.contains("ratio_permille=1576"));
@@ -851,7 +851,7 @@ mod tests {
     fn rfc0197_p21_point_gets_paid_scan_hole_is_disk_pattern() {
         // The 100M GET story in one assertion set: point paths are paid
         // (>= 1400‰ on every DIAG leg) while the sequential scan at the same
-        // scale is the 700‰ board — and the RAM-fits contrast (1050‰)
+        // scale is the 700‰ cartaz — and the RAM-fits contrast (1050‰)
         // attributes that hole to the bounded-cache I/O pattern, not compute.
         // 0195's landed WILLNEED window is the named owner of the gap.
         let point: Vec<u64> = GET_SIDE_ANCHORS_2026_09_10
@@ -861,15 +861,15 @@ mod tests {
             .collect();
         assert!(point.iter().all(|&r| r >= 1400));
         assert!(point.iter().all(|&r| r <= 1600));
-        let board = GET_SIDE_ANCHORS_2026_09_10[0].ratio_permille;
+        let cartaz = GET_SIDE_ANCHORS_2026_09_10[0].ratio_permille;
         let big_guest = GET_SIDE_ANCHORS_2026_09_10[1].ratio_permille;
-        assert_eq!((board, big_guest), (700, 1050));
-        assert!(board < big_guest && big_guest >= 1000);
+        assert_eq!((cartaz, big_guest), (700, 1050));
+        assert!(cartaz < big_guest && big_guest >= 1000);
     }
 
     #[test]
-    fn linux_overwrite_mc4_hat_25m_4g_near_board() {
-        // Board 25M @ 4 GiB: 142_959 / 256_780 ≈ 557‰. The static hat
+    fn linux_overwrite_mc4_hat_25m_4g_near_cartaz() {
+        // Cartaz 25M @ 4 GiB: 142_959 / 256_780 ≈ 557‰. The static hat
         // is the 0197 curve, not a new formula — residual < 100‰.
         let h = linux_overwrite_mc4_hat(25_000_000, 4 * (1 << 30), 4);
         assert_eq!(h.cut.as_str(), "mem_guard");
@@ -884,12 +884,12 @@ mod tests {
         let err = err.expect("anchor qps");
         assert!(
             err.abs() < 100,
-            "qps_hat={} vs board 142959 err={err}‰",
+            "qps_hat={} vs cartaz 142959 err={err}‰",
             h.qps_hat
         );
         let r = h.render();
         assert!(r.contains("host=linux-quiet"));
-        assert!(r.contains("hat=1 (not board)"));
+        assert!(r.contains("hat=1 (not cartaz)"));
         assert!(r.contains("shape=overwrite_mc4"));
     }
 

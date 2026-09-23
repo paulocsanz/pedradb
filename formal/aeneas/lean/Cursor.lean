@@ -10,10 +10,10 @@ theorem next_seq_from_zero :
   have h : core.num.U64.saturating_add 0#u64 1#u64 = 1#u64 := by native_decide
   simp [h]
 
-/-- RFC-0218 P2.1 5/12 (atom `catalog:stream_next_seq`, entrada
+/-- RFC-0218 P2.1 5/12 (átomo `catalog:stream_next_seq`, entrada
     `next_seq`): a próxima sequência é EXATAMENTE o lift citado
     `saturating_add last_acked 1` — o ack anda uma casa sem overflow.
-    O AS-IS devolve o próprio last_acked (ack não avança — tooth
+    O AS-IS devolve o próprio last_acked (ack não avança — dente
     plantado). -/
 theorem next_seq_fate_iff :
     ∀ (last_acked : U64) (r : U64),
@@ -43,12 +43,12 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P2.1 6/12 (atom `catalog:stream_cursor`, entrada
+/-- RFC-0218 P2.1 6/12 (átomo `catalog:stream_cursor`, entrada
     `ack_in_order`): ack em ordem é EXATAMENTE a cadeia citada — o
     cursor esperado é `next_seq last_acked` (gate), e o ack conta só
     quando a sequência é exatamente a esperada E está à frente do
     último ack. O AS-IS aceita qualquer sequência à frente (pula
-    buracos — tooth plantado). -/
+    buracos — dente plantado). -/
 theorem ack_in_order_fate_iff :
     ∀ (last_acked : U64) (seq : U64) (v : Bool),
       (ack_in_order last_acked seq = ok v) ↔

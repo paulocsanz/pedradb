@@ -14,7 +14,7 @@ theorem filter_partition_collapses_iff :
   unfold filter_partition
   simp [h]
 
-/-- AS-IS tooth: every key still partition 0. -/
+/-- AS-IS dente: every key still partition 0. -/
 theorem filter_partition_as_is_always_zero :
     ∀ (h1 : U64) (nparts : U32),
       filter_partition_as_is h1 nparts = ok 0#u32 := by

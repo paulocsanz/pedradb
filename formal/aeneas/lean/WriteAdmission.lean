@@ -17,8 +17,8 @@ theorem write_admission_idle_mem_stall_refuses :
   unfold write_admission_idle
   rfl
 
-/-- AS-IS tooth: stall knobs are ignored (always idle). -/
-theorem write_admission_idle_as_is_tooth :
+/-- AS-IS dente: stall knobs are ignored (always idle). -/
+theorem write_admission_idle_as_is_dente :
     write_admission_idle_as_is true true true = ok true := by
   unfold write_admission_idle_as_is
   rfl
@@ -31,8 +31,8 @@ theorem write_admit_mem_over_stalls :
   have h : (100#u64 ≥ 50#u64) = true := by native_decide
   simp [h]
 
-/-- AS-IS tooth: mem over still admits. -/
-theorem write_admit_as_is_tooth :
+/-- AS-IS dente: mem over still admits. -/
+theorem write_admit_as_is_dente :
     write_admit_as_is 100#u64 true 50#u64 8#u64 true 4#u64
       = ok WriteAdmit.Ok := by
   unfold write_admit_as_is
@@ -80,8 +80,8 @@ theorem wal_commit_plan_fence_via_fence_on_sync_fail :
     unfold fence_on_sync_fail
     rfl
 
-/-- AS-IS tooth: Apply/Ok even after a failed required sync. -/
-theorem wal_commit_plan_as_is_tooth :
+/-- AS-IS dente: Apply/Ok even after a failed required sync. -/
+theorem wal_commit_plan_as_is_dente :
     wal_commit_plan_as_is true true = ok WalCommitPlan.AppendSyncApplyOk := by
   unfold wal_commit_plan_as_is
   rfl
@@ -115,8 +115,8 @@ theorem cas_absent_put_live_refuses :
   unfold cas_absent_put
   rfl
 
-/-- AS-IS tooth: live key still puts. -/
-theorem cas_absent_put_as_is_tooth :
+/-- AS-IS dente: live key still puts. -/
+theorem cas_absent_put_as_is_dente :
     cas_absent_put_as_is true = ok true := by
   unfold cas_absent_put_as_is
   rfl
@@ -218,8 +218,8 @@ theorem cas_eq_put_mismatch_refuses :
   unfold cas_eq_put
   rfl
 
-/-- AS-IS tooth: mismatch still puts. -/
-theorem cas_eq_put_as_is_tooth :
+/-- AS-IS dente: mismatch still puts. -/
+theorem cas_eq_put_as_is_dente :
     cas_eq_put_as_is false = ok true := by
   unfold cas_eq_put_as_is
   rfl
@@ -363,11 +363,11 @@ theorem pit_resync_rewrite_fate_iff :
   unfold pit_resync_needs_rewrite
   cases is_resync <;> cases v <;> simp
 
-/-- RFC-0219 P1.1 (atom `catalog:dir_sync_plan`): o dir-fsync pós-rename
+/-- RFC-0219 P1.1 (átomo `catalog:dir_sync_plan`): o dir-fsync pós-rename
     (SST `.tmp`, chunk fundido, portão dir do DB) é pago EXATAMENTE em
     modo sync — o dentry do rename é durável antes de voltar; async
     pula (recuperação tolera dentry de nome-tmp sumiu). O AS-IS nunca
-    paga (dentry some pós-crash mesmo em sync — tooth plantado). -/
+    paga (dentry some pós-crash mesmo em sync — dente plantado). -/
 theorem dir_sync_plan_fate_iff :
     ∀ (sync : Bool) (plan : DirSyncPlan),
       (dir_sync_plan sync = ok plan) ↔
@@ -377,10 +377,10 @@ theorem dir_sync_plan_fate_iff :
   unfold dir_sync_plan dir_sync_required
   cases sync <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.2 (atom `catalog:fence_admission`): um Db com fence de
+/-- RFC-0219 P1.2 (átomo `catalog:fence_admission`): um Db com fence de
     durabilidade recusa cada nova operação EXATAMENTE quando o fence
     está armado — fail-closed; sem fence admite. O AS-IS admite sempre
-    (barreira falhada segue servindo escrita como se durável — tooth
+    (barreira falhada segue servindo escrita como se durável — dente
     plantado). -/
 theorem fence_admission_plan_fate_iff :
     ∀ (fenced : Bool) (plan : FenceAdmission),
@@ -391,10 +391,10 @@ theorem fence_admission_plan_fate_iff :
   unfold fence_admission_plan
   cases fenced <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.2 (atom `catalog:fence_record`): só o PRIMEIRO fence
+/-- RFC-0219 P1.2 (átomo `catalog:fence_record`): só o PRIMEIRO fence
     registra o relatório da janela incerta — fence posterior mantém o
     primeiro (o mais largo, o honesto). O AS-IS re-registra (encolhe a
-    janela que o client sabe estar não-provada — tooth plantado). -/
+    janela que o client sabe estar não-provada — dente plantado). -/
 theorem fence_record_plan_fate_iff :
     ∀ (has_report : Bool) (plan : FenceRecordPlan),
       (fence_record_plan has_report = ok plan) ↔
@@ -404,10 +404,10 @@ theorem fence_record_plan_fate_iff :
   unfold fence_record_plan
   cases has_report <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.2 (atom `catalog:group_batch_sync`): um batch com flag
+/-- RFC-0219 P1.2 (átomo `catalog:group_batch_sync`): um batch com flag
     de sync EXATAMENTE força a barreira única do grupo (one fsync
     compartilhado); batch async apenas viaja no agregado. O AS-IS deixa
-    tudo viajar (client que pediu sync é ackado sem barreira — tooth
+    tudo viajar (client que pediu sync é ackado sem barreira — dente
     plantado). -/
 theorem group_batch_sync_plan_fate_iff :
     ∀ (client_sync : Bool) (plan : GroupSyncPlan),
@@ -418,11 +418,11 @@ theorem group_batch_sync_plan_fate_iff :
   unfold group_batch_sync_plan
   cases client_sync <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.4 (atom `catalog:pit_resync_rewrite`): o open reescreve
+/-- RFC-0219 P1.4 (átomo `catalog:pit_resync_rewrite`): o open reescreve
     o WAL a partir do prefixo recuperado EXATAMENTE quando o relatório
     de recuperação é um resync; sem resync o prefixo fica no disco
     como-is. O AS-IS nunca reescreve (o dano mid-log sobrevive ao
-    próximo open fail-closed — tooth plantado). -/
+    próximo open fail-closed — dente plantado). -/
 theorem pit_resync_rewrite_plan_fate_iff :
     ∀ (is_resync : Bool) (plan : PitResyncRewritePlan),
       (pit_resync_rewrite_plan is_resync = ok plan) ↔
@@ -434,10 +434,10 @@ theorem pit_resync_rewrite_plan_fate_iff :
   unfold pit_resync_rewrite_plan pit_resync_needs_rewrite
   cases is_resync <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P2.1 (atom `catalog:parked_pop_plan`): o pop da fila
+/-- RFC-0219 P2.1 (átomo `catalog:parked_pop_plan`): o pop da fila
     estacionada acontece EXATAMENTE quando a fila está não-vazia; fila
     vazia não entrega nada ao fold. O AS-IS popa da fila vazia (índice
-    de frente no nada — tooth plantado). -/
+    de frente no nada — dente plantado). -/
 theorem parked_pop_plan_fate_iff :
     ∀ (parked_len : U64) (plan : ParkedPopPlan),
       (parked_pop_plan parked_len = ok plan) ↔

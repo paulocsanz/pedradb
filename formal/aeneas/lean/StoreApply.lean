@@ -10,8 +10,8 @@ theorem apply_advance_hole_stops :
   unfold apply_advance
   rfl
 
-/-- AS-IS tooth: a hole still applies. -/
-theorem apply_advance_as_is_tooth :
+/-- AS-IS dente: a hole still applies. -/
+theorem apply_advance_as_is_dente :
     apply_advance_as_is_skip_holes (1#u64) (2#u64) false = ok ApplyAction.Apply := by
   unfold apply_advance_as_is_skip_holes
   rfl
@@ -41,9 +41,9 @@ theorem apply_put_plan_hist_iff_live_and_gen_positive :
       exact absurd hf (by simp)
     · rfl
 
-/-- AS-IS tooth: the stomp puts applied data even on reserved keys and
+/-- AS-IS dente: the stomp puts applied data even on reserved keys and
     the gen-0 floor. -/
-theorem apply_put_plan_as_is_tooth :
+theorem apply_put_plan_as_is_dente :
     apply_put_plan_as_is true 0#u64 = ok ApplyPutFate.ApplyAndHist := by
   unfold apply_put_plan_as_is
   rfl

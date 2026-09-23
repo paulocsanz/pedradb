@@ -201,7 +201,7 @@ pub fn column_a_one_round(
     verdict_from_mins(&mins, collapsed_anomalies(&[peer_overwrite_mc4_qps]))
 }
 
-/// RFC-0185 board: min of exactly 3 rounds > 1.0 on every G_A shape.
+/// RFC-0185 cartaz: min of exactly 3 rounds > 1.0 on every G_A shape.
 /// Median-hiding (1.002 / 0.816 / 1.032) fails.
 #[must_use]
 pub fn column_a_three_round_min(

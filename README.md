@@ -21,7 +21,7 @@ That commit is one WAL record, fsynced before `Ok` returns.
 It is built for people who put a database, a state machine, or a replicated
 log on top of a key-value store, and who would rather not rebuild
 consistency above the engine. The API is
-`open → begin → get / put / delete → commit`.
+`open → begin_occ → get / put / delete → commit`.
 
 ## Why PedraDB
 
@@ -67,11 +67,11 @@ pedradb-core = { git = "https://github.com/paulocsanz/pedradb" }
 ```
 
 ```rust
-use pedradb_core::Db;
+use pedradb_core::ConcurrentDb;
 
-let mut db = Db::open("/tmp/pedra")?;
+let mut db = ConcurrentDb::open("/tmp/pedra")?;
 
-let mut tx = db.begin();
+let mut tx = db.begin_occ();
 tx.put(b"user/42", br#"{"name":"ada"}"#)?;   // the row
 tx.put(b"idx/name/ada", b"42")?;             // its secondary index
 tx.commit()?;                                 // one WAL record, fsynced before Ok

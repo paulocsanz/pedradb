@@ -105,7 +105,7 @@ fn parse_anchor_table(tsv: &str) -> Result<Vec<AnchorRow>, String> {
             "deferred" => {
                 if r.valor_ns != "-" {
                     return Err(format!(
-                        "{where_}deferred row must carry ns_value `-` (dated debt, no measurement): {:?}",
+                        "{where_}deferred row must carry valor_ns `-` (dated debt, no measurement): {:?}",
                         r.valor_ns
                     ));
                 }
@@ -118,7 +118,7 @@ fn parse_anchor_table(tsv: &str) -> Result<Vec<AnchorRow>, String> {
             return Err(format!("{where_}data must be YYYY-MM-DD: {:?}", r.data));
         }
         if r.fonte.split_whitespace().next().unwrap_or_default().is_empty() {
-            return Err(format!("{where_}source missing — every row cites a finding"));
+            return Err(format!("{where_}fonte missing — every row cites a finding"));
         }
         if !r.supersessao.is_empty() {
             let parts: Vec<&str> = r.supersessao.split_whitespace().collect();
@@ -169,7 +169,7 @@ fn parse_anchor_table(tsv: &str) -> Result<Vec<AnchorRow>, String> {
                 r.ancora, r.classe, succ.classe
             ));
         }
-        if succ.rotulo == "deferido" {
+        if succ.rotulo == "deferred" {
             return Err(format!(
                 "row {:?} is superseded by {succ_id:?}, which is a deferral — a deferral never replaces a measurement",
                 r.ancora
@@ -207,7 +207,7 @@ fn parse_anchor_table(tsv: &str) -> Result<Vec<AnchorRow>, String> {
     for class in REQUIRED_CLASSES {
         let live = rows
             .iter()
-            .filter(|r| r.classe == class && r.supersessao.is_empty() && r.rotulo != "deferido")
+            .filter(|r| r.classe == class && r.supersessao.is_empty() && r.rotulo != "deferred")
             .count();
         if live != 1 {
             return Err(format!(
@@ -252,7 +252,7 @@ fn supersession_semantics_are_enforced() {
 
     // superseded by a deferral
     let defer = "linux_fdatasync\tLX_PIN\tenc=1;wr=2\t2026-09-10\tlinux-p149b\tquiet\tf.md\tLX_DEF 2026-09-11\n\
-                 linux_fdatasync\tLX_DEF\t-\t2026-09-11\tlinux\tdeferido\tf.md\t\n";
+                 linux_fdatasync\tLX_DEF\t-\t2026-09-11\tlinux\tdeferred\tf.md\t\n";
     assert!(parse_anchor_table(defer).is_err(), "a deferral must never supersede a measurement");
 
     // cycle: A -> B -> A
@@ -267,15 +267,15 @@ fn supersession_semantics_are_enforced() {
 
     // deferral with a value
     let def_val = "darwin_fdatasync\tFD_DIAG\t500\t2026-09-11\tm\tDIAG\tf.md\t\n\
-                   darwin_fullfsync\tFF_DEF\t123\t2026-09-11\tm\tdeferido\tf.md\t\n\
+                   darwin_fullfsync\tFF_DEF\t123\t2026-09-11\tm\tdeferred\tf.md\t\n\
                    linux_fdatasync\tLX\t1\t2026-09-11\tm\tquiet\tf.md\t\n";
-    assert!(parse_anchor_table(def_val).is_err(), "deferido with a measured value must be RED");
+    assert!(parse_anchor_table(def_val).is_err(), "deferred with a measured value must be RED");
 
     // deferral as tracked debt is fine (live measured row still unique)
     let def_ok = "darwin_fdatasync\tFD_DIAG\t500\t2026-09-11\tm\tDIAG\tf.md\t\n\
                   darwin_fullfsync\tFF_OK\t1000\t2026-09-11\tm\tDIAG\tf.md\t\n\
                   linux_fdatasync\tLX_PIN\tenc=1;wr=2\t2026-09-10\tlinux\tquiet\tf.md\t\n\
-                  linux_fdatasync\tLX_DEF\t-\t2026-09-11\tlinux\tdeferido\tf.md\t\n";
+                  linux_fdatasync\tLX_DEF\t-\t2026-09-11\tlinux\tdeferred\tf.md\t\n";
     assert!(parse_anchor_table(def_ok).is_ok(), "a dated deferral row must be GREEN next to the live anchor");
 
     // missing live row for a required class

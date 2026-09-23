@@ -239,7 +239,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut db = crate::Db::open_with(
+        let mut db = crate::db::Db::open_with(
             &dir,
             crate::OpenOptions {
                 exclusive: true,

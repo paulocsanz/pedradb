@@ -14,8 +14,8 @@ theorem on_append_grows_written :
   unfold wal.wal_state_kernel.wal_append
   rfl
 
-/-- AS-IS tooth: ack without a barrier (acked past synced). -/
-theorem write_ack_ledger_as_is_tooth :
+/-- AS-IS dente: ack without a barrier (acked past synced). -/
+theorem write_ack_ledger_as_is_dente :
     write_ack_kernel.write_ack_ledger_as_is
       { state := { acked := 0#u64, synced := 0#u64, written := 0#u64 } }
       (96#u64) =
@@ -43,7 +43,7 @@ theorem on_barrier_honest_promotes :
 
 /-- Other possibility of the same caller: empty ledger, Honest promote is a no-op.
     Production `on_barrier` hardcodes Honest; there is no Lying/`on_barrier_as_is`.
-    The as-is ledger path that skips the barrier is `write_ack_ledger_as_is_tooth`. -/
+    The as-is ledger path that skips the barrier is `write_ack_ledger_as_is_dente`. -/
 theorem on_barrier_empty_is_id :
     write_ack_kernel.WriteAckLedger.on_barrier
       { state := { acked := 0#u64, synced := 0#u64, written := 0#u64 } }
@@ -126,7 +126,7 @@ theorem d1_holds_cut_in_window :
   simp [core.cmp.Ord.min.trait_default, core.cmp.Ord.min.default,
     core.cmp.Ord.min_body, core.cmp.impls.PartialOrdU64.lt]
 
-/-- AS-IS tooth: a cut below the barrier is treated as legal and the corollary fails. -/
+/-- AS-IS dente: a cut below the barrier is treated as legal and the corollary fails. -/
 theorem d1_holds_as_is_cut_below_barrier :
     d1_modelo_kernel.d1_modelo_as_is
       { acked := 4#u64, synced := 4#u64, written := 10#u64 }
@@ -138,10 +138,10 @@ theorem d1_holds_as_is_cut_below_barrier :
   simp [core.cmp.Ord.min.trait_default, core.cmp.Ord.min.default,
     core.cmp.Ord.min_body, core.cmp.impls.PartialOrdU64.lt]
 
-/-! ## RFC-0214 P1.1 — costura WriteAck no degrau atom (fate ∀) -/
+/-! ## RFC-0214 P1.1 — costura WriteAck no degrau átomo (fate ∀) -/
 
 /-- RFC-0214 P1.1 (atom `catalog:write_ack_append`): o passo append
-do ledger é o atom `wal_append` — `written` cresce por `bytes`,
+do ledger é o átomo `wal_append` — `written` cresce por `bytes`,
 `acked`/`synced` intocados (o append nunca fabrica barreira nem
 ack). Fate forall sobre o corpo extraído. O mutante AS-IS
 (`write_ack_ledger_as_is`) acka sem barreira — a planta DST
@@ -176,7 +176,7 @@ theorem on_append_fate_iff :
     simp only [bind_tc_ok]
 
 /-- RFC-0214 P1.1 (atom `catalog:write_ack_barrier`): o passo barrier
-do ledger é o atom `wal_sync` Honest — o Ok é EXATAMENTE o estado
+do ledger é o átomo `wal_sync` Honest — o Ok é EXATAMENTE o estado
 promovido (`synced := written` via `fsync_promotes_pending`; o min de
 `CrashModel.of` é sobrescrito pelo ramo Honest): não existe Ok que
 deixe `synced` atrás de `written`. Fate forall sobre o corpo extraído.
@@ -213,7 +213,7 @@ theorem on_barrier_fate_iff :
     split <;> simp only [bind_tc_ok]
 
 /-- RFC-0214 P1.1 (atom `catalog:write_ack_ack`): o passo ack do
-ledger é o atom `wal_ack` sobre o gap synced−acked — o Ok existe
+ledger é o átomo `wal_ack` sobre o gap synced−acked — o Ok existe
 iff `acked ≤ synced` (o passo exige a invariante) e é EXATAMENTE o
 estado com `acked := synced`: o gap vira acknowledged, nada além
 (o saturado do corpo promove só até a barreira). Fora da
@@ -357,8 +357,8 @@ theorem on_ack_fate_iff :
         rw [hsub] at hzf
         cases hzf
 
-/-! ## RFC-0215 P1.2 — iff gêmea do atom `catalog:d1_modelo` sobre
-a cópia do d1_modelo neste extrato (perna da crown composta). -/
+/-! ## RFC-0215 P1.2 — iff gêmea do átomo `catalog:d1_modelo` sobre
+a cópia do d1_modelo neste extrato (perna da coroa composta). -/
 
 /-- Any ok-valued Result bind forces the bound term to be ok
 (Cf.lean's `bind_ok_inv`, restated for this module). -/
@@ -389,12 +389,12 @@ def wa_d1m_loses (s : wal.wal_state_kernel.WalState)
         ∃ b1, env_crash_kernel.crash_legal cm cut = ok b1 ∧
           b1 = true ∧ cut < rec_end
 
-/-- RFC-0215 P1.2 perna: a iff do atom `catalog:d1_modelo`
+/-- RFC-0215 P1.2 perna: a iff do átomo `catalog:d1_modelo`
 (`d1_modelo_fate_iff`, D1Modelo.lean) reprovada com a mesma técnica
 sobre a CÓPIA do `d1_modelo` que vive neste extrato — os dois
 ambientes não importam juntos (nomes gerados na raiz colidem), e a
-crown composta (`ComposeProductCrown.lean`) cita ESTA gêmea sobre o
-ledger da spine. Mesma sentença, corpo extraído não reaberto. -/
+coroa composta (`ComposeProductCrown.lean`) cita ESTA gêmea sobre o
+ledger da espinha. Mesma sentença, corpo extraído não reaberto. -/
 theorem wa_d1_modelo_fate_iff :
     ∀ (s : wal.wal_state_kernel.WalState) (rec_end cut : U64) (v : Bool),
       (d1_modelo_kernel.d1_modelo s rec_end cut = ok v) ↔

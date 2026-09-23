@@ -2,7 +2,7 @@
 //!
 //! **Single artifact (pair `probe_order`):** this file is what `rustc` links
 //! *and* what Verus proves (`cfg(verus_keep_ghost)`). Slice covering walk
-//! stays rustc. No twin-copy.
+//! stays rustc. No twin copy.
 //!
 //!   ./scripts/verus_probe_order.sh
 //!

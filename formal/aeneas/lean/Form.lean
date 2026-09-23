@@ -12,8 +12,8 @@ theorem form_plus_byte_plus :
   unfold form_plus_byte
   rfl
 
-/-- AS-IS tooth: `+` stays `+`. -/
-theorem form_plus_byte_as_is_tooth :
+/-- AS-IS dente: `+` stays `+`. -/
+theorem form_plus_byte_as_is_dente :
     form_plus_byte_as_is (43#u8) = ok (43#u8) := by
   unfold form_plus_byte_as_is
   rfl
@@ -30,8 +30,8 @@ theorem query_u64_conflict_diff :
   unfold query_u64_conflict
   rfl
 
-/-- AS-IS tooth: last/first wins, never reject. -/
-theorem query_u64_conflict_as_is_tooth :
+/-- AS-IS dente: last/first wins, never reject. -/
+theorem query_u64_conflict_as_is_dente :
     query_u64_conflict_as_is (1#u64) (0#u64) = ok false := by
   unfold query_u64_conflict_as_is
   rfl
@@ -216,7 +216,7 @@ theorem from_hex_fate_iff :
       rw [if_neg hn48, if_neg hn97, if_neg hn65]
       rw [hr]
 
-/-! ### RFC-0216 P1.1 4/4 — `form_decode` (atom `catalog:form_plus`)
+/-! ### RFC-0216 P1.1 4/4 — `form_decode` (átomo `catalog:form_plus`)
 
 O fate do decode como cadeia: combustível = bytes restantes; cada passo
 `cont` é exatamente um passo do corpo extraído com índice estritamente
@@ -525,7 +525,7 @@ private theorem form_decode_loop_fate (b : Slice U8) :
         · exact absurd (hbody.symm.trans hB) (by simp)
         · exact absurd ((body_at_end b out i hlen).symm.trans hB) (by simp)
 
-/-- RFC-0216 P1.1 4/4 (atom `catalog:form_plus`, entrada
+/-- RFC-0216 P1.1 4/4 (átomo `catalog:form_plus`, entrada
 `form_decode`): o output inteiro do decoder é exatamente a cadeia
 citada dos passos do corpo extraído — cada byte consumido passa por
 `plus_before_percent`/`43→32`/`37→from_hex×2`, o `+3` só ocorre com
@@ -551,9 +551,9 @@ theorem form_decode_fate_iff :
     (Nat.sub_le _ _) v
 
 
-/-! ### RFC-0216 P1.2 — query ×3 atom -/
+/-! ### RFC-0216 P1.2 — query ×3 átomo -/
 
-/-- RFC-0216 P1.2 1/3 (atom `catalog:query_u64_conflict`): o conflito
+/-- RFC-0216 P1.2 1/3 (átomo `catalog:query_u64_conflict`): o conflito
 u64 é exatamente a desigualdade decidida dos dois lados; o AS-IS
 sempre responde "sem conflito". -/
 theorem query_u64_conflict_fate_iff :
@@ -568,7 +568,7 @@ theorem query_u64_conflict_fate_iff :
     unfold query_u64_conflict
     rw [hr]
 
-/-- RFC-0216 P1.2 2/3 (atom `catalog:query_part_is_bare_name`): o
+/-- RFC-0216 P1.2 2/3 (átomo `catalog:query_part_is_bare_name`): o
 veredito "parte é nome puro" é exatamente a cadeia citada — parte
 vazia ⇒ falso, parte com `=` ⇒ falso, senão o decode da parte
 comparado byte a byte com a chave via o eq extraído. -/
@@ -810,7 +810,7 @@ private theorem values_loop_fate (values : Slice Str) (first : Str) :
         · exact absurd (hbody.symm.trans hB) (by simp)
         · exact absurd (hdone.symm.trans hB) (by simp)
 
-/-- RFC-0216 P1.2 3/3 (atom `catalog:query_values_conflict`, entrada
+/-- RFC-0216 P1.2 3/3 (átomo `catalog:query_values_conflict`, entrada
 `query_values_conflict`): o conflito de valores repetidos é exatamente
 a cadeia citada — menos de 2 valores ⇒ falso; senão o primeiro valor
 é fixado pelo index e o scan decide: cada igual avança um, o primeiro

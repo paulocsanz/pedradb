@@ -444,7 +444,7 @@ mod tests {
         );
         assert!(
             seal_async_first_drain(4, 4, false, 0, 1),
-            "writers == ncpu on the 4-vCPU board, singleton"
+            "writers == ncpu on the 4-vCPU cartaz, singleton"
         );
         assert!(
             seal_async_first_drain(2, 12, false, 0, 1),

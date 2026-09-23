@@ -23,8 +23,8 @@ theorem trajectory_violation_applied :
   unfold trajectory_violation sample
   simp
 
-/-- AS-IS tooth: applied regression is blessed. -/
-theorem trajectory_violation_as_is_tooth :
+/-- AS-IS dente: applied regression is blessed. -/
+theorem trajectory_violation_as_is_dente :
     trajectory_violation_as_is (sample (1#u64) (4#u64) (7#u64))
       (sample (1#u64) (4#u64) (3#u64)) =
       ok none := by

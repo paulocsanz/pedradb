@@ -14,7 +14,7 @@
 //!
 //! Load-insensitive by design (byte accounting, not qps).
 
-use pedradb_core::{Db, HistoryHorizon, HistoryOptions, OpenOptions};
+use pedradb_core::{db::Db, HistoryHorizon, HistoryOptions, OpenOptions};
 use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;

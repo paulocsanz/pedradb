@@ -1,0 +1,2 @@
+[build]
+rustflags = ["--cfg", "pedra_aeneas"]

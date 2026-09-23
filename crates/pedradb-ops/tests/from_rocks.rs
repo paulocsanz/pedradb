@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pedradb_core::{encode_cf_key, Db};
+use pedradb_core::{encode_cf_key, db::Db};
 use pedradb_ops::{classify_dir, inspect_format, migrate_from_rocks, DirKind};
 
 fn temp(name: &str) -> std::path::PathBuf {
@@ -101,7 +101,7 @@ fn migrate_from_rocks_default_cf_visible_snapshot_is_pedra_v5() {
         inspect.sst_versions
     );
 
-    let dest = pedradb_core::Db::open(&dst).unwrap();
+    let dest = pedradb_core::db::Db::open(&dst).unwrap();
     assert_eq!(dest.get(b"keep").as_deref(), Some(b"v2".as_ref()));
     assert!(dest.get(b"gone").is_none(), "deleted key must stay gone");
     dest.verify_checksums().unwrap();

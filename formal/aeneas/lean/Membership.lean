@@ -13,8 +13,8 @@ theorem joint_election_ok_needs_both :
   unfold majority_of
   rfl
 
-/-- AS-IS tooth: C-old majority elects during joint add. -/
-theorem joint_election_ok_as_is_tooth :
+/-- AS-IS dente: C-old majority elects during joint add. -/
+theorem joint_election_ok_as_is_dente :
     joint_election_ok_as_is (2#u64) (3#u64) (some (2#u64, 4#u64)) = ok true := by
   unfold joint_election_ok_as_is
   unfold majority_of
@@ -74,8 +74,8 @@ theorem elect_claim_banner_bounded :
   unfold liveness_admitted
   simp
 
-/-- AS-IS tooth: banner is live without naming ES. -/
-theorem elect_claim_banner_as_is_tooth :
+/-- AS-IS dente: banner is live without naming ES. -/
+theorem elect_claim_banner_as_is_dente :
     elect_claim_banner_as_is false false false = ok (toStr "live") := by
   unfold elect_claim_banner_as_is
   simp
@@ -137,7 +137,7 @@ theorem majority_of_closed (n : U64) :
 
 /-- C1 (RFC-0191 P1.4, close): para todas as contagens de votos e todo o
 `Option` do joint, a eleição conjunta devolve `ok true` exatamente quando
-C-old tem maioria E (não há joint pentooth OU C-new também tem maioria).
+C-old tem maioria E (não há joint pendente OU C-new também tem maioria).
 Não é o corpo do kernel re-afirmado: o lado direito é a especificação
 fechada sobre a maioria pura `maj`. -/
 theorem c1_joint_election :
@@ -164,7 +164,7 @@ theorem c1_joint_election :
       rfl
 
 /-- RFC-0191 P1.4, corolário: maioria de C-old sozinha NÃO elege
-enquanto o joint está pentooth — falta a maioria de C-new, ∀ contagens. -/
+enquanto o joint está pendente — falta a maioria de C-new, ∀ contagens. -/
 theorem c1_old_majority_alone_refuses :
     ∀ (old_yes old_n yes n : U64),
       ¬ (old_yes < maj old_n) → (yes < maj n) →
@@ -791,7 +791,7 @@ theorem c1_replica_served :
   unfold replica_served_ok
   rfl
 
-theorem replica_served_ok_as_is_tooth :
+theorem replica_served_ok_as_is_dente :
     replica_served_ok_as_is false 0#u64 0#u64 none 9#u64 0#u64 true = ok true := by
   unfold replica_served_ok_as_is
   rfl

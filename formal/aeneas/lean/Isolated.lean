@@ -283,11 +283,11 @@ theorem as_is_leaks_sibling :
   | fail _ => simp [spec, theta, hfm] at hf
   | div => simp [spec, theta, hfm] at hf
 
-/-- RFC-0218 P2.1 7/12 (atom `catalog:isolated_child`, entrada
+/-- RFC-0218 P2.1 7/12 (átomo `catalog:isolated_child`, entrada
     `isolated_child_byte`): depois de um id exato, o byte de
     continuação é filho EXATAMENTE quando é a barra citada
     ISOLATED_CHILD_SEP. O AS-IS aceita qualquer byte (irmão vira
-    filho — tooth plantado). -/
+    filho — dente plantado). -/
 theorem isolated_child_byte_fate_iff :
     ∀ (next : U8) (v : Bool),
       (isolated_child_byte next = ok v) ↔
@@ -302,13 +302,13 @@ theorem isolated_child_byte_fate_iff :
     subst hv
     rfl
 
-/-- RFC-0218 P2.1 8/12 (atom `catalog:isolated`, entrada
+/-- RFC-0218 P2.1 8/12 (átomo `catalog:isolated`, entrada
     `isolated_id_matches`): o id isolado casa EXATAMENTE na guarda
     citada de tamanho — chave menor que o id nunca casa (false);
     com tamanho suficiente, a decisão é o loop citado
     `isolated_id_matches_loop` (byte a byte, fronteira em
     ISOLATED_CHILD_SEP — corpo do loop não reaberto neste degrau).
-    O AS-IS casa por prefixo (irmão vira filho — tooth plantado). -/
+    O AS-IS casa por prefixo (irmão vira filho — dente plantado). -/
 theorem isolated_id_matches_fate_iff :
     ∀ (key id : Slice U8) (v : Bool),
       (isolated_id_matches key id = ok v) ↔

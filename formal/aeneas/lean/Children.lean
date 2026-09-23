@@ -10,8 +10,8 @@ theorem packed_child_end_byte :
   unfold PACKED_CHILD_END
   rfl
 
-/-- AS-IS F59 tooth: exclusive end is `0xff`. -/
-theorem packed_child_end_as_is_tooth :
+/-- AS-IS F59 dente: exclusive end is `0xff`. -/
+theorem packed_child_end_as_is_dente :
     PACKED_CHILD_END_AS_IS = 255#u8 := by
   unfold PACKED_CHILD_END_AS_IS
   rfl

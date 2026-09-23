@@ -20,13 +20,13 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P0.4 9/9 (atom `catalog:sst_magic`, entrada
+/-- RFC-0218 P0.4 9/9 (átomo `catalog:sst_magic`, entrada
     `sst_magic_is_pedra`): a admissão de mágica é EXATAMENTE a cadeia
     citada — sem os 8 bytes de prefixo (len do header < len da
     mágica) recusa (false); com prefixo possível, admite sse o
     slice-eq do prefixo contra PEDRSST\\0 casa (o compare final
     decide). O AS-IS admite qualquer header (a mentira drop-in em
-    disco — tooth plantado). -/
+    disco — dente plantado). -/
 theorem sst_magic_is_pedra_fate_iff :
     ∀ (header : Slice U8) (v : Bool),
       (magic_kernel.sst_magic_is_pedra header = ok v) ↔

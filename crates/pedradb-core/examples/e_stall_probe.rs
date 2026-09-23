@@ -8,7 +8,7 @@
 use std::ops::Bound;
 use std::time::Instant;
 
-use pedradb_core::Db;
+use pedradb_core::db::Db;
 
 fn ykey(i: usize) -> Vec<u8> {
     format!("ycsb/{i:06}").into_bytes()

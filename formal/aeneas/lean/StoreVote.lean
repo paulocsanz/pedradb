@@ -18,8 +18,8 @@ theorem vote_decision_stale_term :
   unfold vote_decision
   rfl
 
-/-- AS-IS tooth: same-term grant ignores log and prior vote. -/
-theorem vote_decision_as_is_tooth :
+/-- AS-IS dente: same-term grant ignores log and prior vote. -/
+theorem vote_decision_as_is_dente :
     vote_decision_as_is_ignore_log_and_vote
       { current_term := 1#u64
         voted_for := some (3#u64)

@@ -35,11 +35,11 @@ theorem sst_recover_action_refuse_iff_corrupt_or_inventory_missing :
   · rintro (hc | ⟨hinv, i, hi⟩)
     · rw [hc]
     · rw [hinv, hi]
-/-- RFC-0218 P0.3 5/6 (atom `catalog:first_install`): a primeira
+/-- RFC-0218 P0.3 5/6 (átomo `catalog:first_install`): a primeira
     instalação é EXATAMENTE a tabela citada — manifest commitado
     (com ou sem sync) prossegue; falha recusa abrir (F196: o FALIDO
     nunca vira banco). O AS-IS prossegue sempre (abre sobre
-    instalação falida — tooth plantado). -/
+    instalação falida — dente plantado). -/
 theorem first_install_action_fate_iff :
     ∀ (out : FirstInstallOutcome) (act : FirstInstallAction),
       (first_install_action out = ok act) ↔
@@ -85,12 +85,12 @@ theorem first_install_action_fate_iff :
       · subst hv
         rfl
 
-/-- RFC-0219 P0.3 (atom `catalog:bulk_manifest_persist`): o bulk
+/-- RFC-0219 P0.3 (átomo `catalog:bulk_manifest_persist`): o bulk
     install paga o publish do MANIFEST inline EXATAMENTE quando o
     default de sync do DB pede dir-sync — sync persiste agora (janela
     de publish fechada sob a barreira do caller, dívida zerada);
     async amortiza por dívida. O AS-IS amortiza sempre (janela de
-    publish aberta em modo sync — tooth plantado). -/
+    publish aberta em modo sync — dente plantado). -/
 theorem bulk_manifest_persist_fate_fate_iff :
     ∀ (sync : Bool) (fate : BulkManifestFate),
       (bulk_manifest_persist_fate sync = ok fate) ↔

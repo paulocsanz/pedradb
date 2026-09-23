@@ -241,7 +241,7 @@ def bytes.bytes.Bytes.Insts.CoreCmpEq : core.cmp.Eq bytes.bytes.Bytes := {
 }
 
 /-- [pedra_aeneas_locktab_kernel::wait_for_deadlock]: loop body 0:
-    Source: '../../../crates/rocksdb-compat/src/locktab_kernel.rs', lines 1:0-140:1 -/
+    Source: '../../../crates/rocksdb-compat/src/locktab.rs', lines 1:0-140:1 -/
 @[rust_loop_body]
 def wait_for_deadlock_loop.body
   (owned : std.collections.hash.map.HashMap bytes.bytes.Bytes Std.U64
@@ -285,7 +285,7 @@ def wait_for_deadlock_loop.body
   else ok (done true)
 
 /-- [pedra_aeneas_locktab_kernel::wait_for_deadlock]: loop 0:
-    Source: '../../../crates/rocksdb-compat/src/locktab_kernel.rs', lines 1:0-140:1 -/
+    Source: '../../../crates/rocksdb-compat/src/locktab.rs', lines 1:0-140:1 -/
 @[rust_loop]
 def wait_for_deadlock_loop
   (owned : std.collections.hash.map.HashMap bytes.bytes.Bytes Std.U64
@@ -302,7 +302,7 @@ def wait_for_deadlock_loop
     (owner, seen)
 
 /-- [pedra_aeneas_locktab_kernel::wait_for_deadlock]:
-    Source: '../../../crates/rocksdb-compat/src/locktab_kernel.rs', lines 120:0-140:1 -/
+    Source: '../../../crates/rocksdb-compat/src/locktab.rs', lines 120:0-140:1 -/
 def wait_for_deadlock
   (owned : std.collections.hash.map.HashMap bytes.bytes.Bytes Std.U64
   std.hash.random.RandomState Global)
@@ -314,7 +314,7 @@ def wait_for_deadlock
   wait_for_deadlock_loop owned waiting waiter owner seen
 
 /-- [pedra_aeneas_locktab_kernel::wait_for_deadlock_as_is]:
-    Source: '../../../crates/rocksdb-compat/src/locktab_kernel.rs', lines 144:0-151:1 -/
+    Source: '../../../crates/rocksdb-compat/src/locktab.rs', lines 144:0-151:1 -/
 def wait_for_deadlock_as_is
   (_owned : std.collections.hash.map.HashMap bytes.bytes.Bytes Std.U64
   std.hash.random.RandomState Global)

@@ -24,17 +24,17 @@ theorem allow_direct_rpc_queued_always_admitted :
   unfold allow_direct_rpc
   rfl
 
-/-- AS-IS 0067 tooth: the pin does not stick — Direct always admitted. -/
-theorem allow_direct_rpc_as_is_tooth :
+/-- AS-IS 0067 dente: the pin does not stick — Direct always admitted. -/
+theorem allow_direct_rpc_as_is_dente :
     allow_direct_rpc_as_is true true = ok true := by
   unfold allow_direct_rpc_as_is
   rfl
 
-/-- RFC-0218 P1.3 4/11 (atom `catalog:rpc_mode`, entrada
+/-- RFC-0218 P1.3 4/11 (átomo `catalog:rpc_mode`, entrada
     `allow_direct_rpc`): o RPC direto é EXATAMENTE o despacho citado
     — sem pedido direto, sempre true; com pedido direto, só se o pin
     de destino não for liderado. O AS-IS não olha dst_pin (RPC direto
-    contra o líder — tooth plantado). -/
+    contra o líder — dente plantado). -/
 theorem allow_direct_rpc_fate_iff :
     ∀ (dst_pin : Bool) (want_direct : Bool) (v : Bool),
       (allow_direct_rpc dst_pin want_direct = ok v) ↔

@@ -10,6 +10,9 @@ rust-version.workspace = true
 rocksdb-compat = { path = "../rocksdb-compat" }
 pedradb-core = { path = "../pedradb-core" }
 pedradb-io-uring = { path = "../pedradb-io-uring" }
+# RFC-0250: musl malloc serializes the key copy on the 4-vCPU guest.
+# The C++ Rocks engine does not use this allocator.
+mimalloc = { version = "0.1.48", default-features = false }
 rocksdb = { version = "0.22", optional = true, default-features = false }
 fjall = { version = "3.1.10", optional = true }
 

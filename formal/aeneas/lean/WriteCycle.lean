@@ -21,7 +21,7 @@ theorem serial_cs_ns_fate_iff :
   unfold serial_cs_ns
   rfl
 
-/-- AS-IS tooth: CS is a constant 2200 ns. -/
+/-- AS-IS dente: CS is a constant 2200 ns. -/
 theorem serial_cs_ns_as_is_constant :
     ∀ (p : WritePhaseNs),
       serial_cs_ns_as_is p = ok 2200#u64 := by

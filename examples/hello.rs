@@ -10,7 +10,7 @@
 //!
 //! Next: `transactions` — several keys in one atomic commit.
 
-use pedradb_core::Db;
+use pedradb_core::ConcurrentDb;
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now()
@@ -26,14 +26,14 @@ fn run() -> pedradb_core::Result<()> {
     let dir = scratch("hello");
 
     {
-        let mut db = Db::open(&dir)?;
+        let mut db = ConcurrentDb::open(&dir)?;
         db.put(b"hello", b"world")?;
         assert_eq!(db.get(b"hello").as_deref(), Some(b"world".as_ref()));
         db.close()?;
     }
 
     // Process "exited". Reopen the same directory — WAL replay restores the key.
-    let db = Db::open(&dir)?;
+    let db = ConcurrentDb::open(&dir)?;
     assert_eq!(db.get(b"hello").as_deref(), Some(b"world".as_ref()));
     println!("hello: reopen saw hello=world (seq={})", db.last_sequence());
     db.close()?;

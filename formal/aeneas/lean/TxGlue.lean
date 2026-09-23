@@ -24,9 +24,9 @@ theorem tx_range_keep_committed :
   unfold tx_range_action
   rfl
 
-/-- AS-IS tooth: a committed failed TX only reverts locally — the
+/-- AS-IS dente: a committed failed TX only reverts locally — the
     majority keeps the poisoned entry. -/
-theorem tx_range_as_is_local_only_tooth :
+theorem tx_range_as_is_local_only_dente :
     tx_range_action_as_is_local_only true true = ok TxRangeAction.LocalRevert := by
   unfold tx_range_action_as_is_local_only
   rfl

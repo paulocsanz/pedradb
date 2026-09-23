@@ -12,8 +12,8 @@ theorem parse_error_writes_status_true :
   unfold parse_error_writes_status
   rfl
 
-/-- AS-IS tooth: parse error drops the socket mute. -/
-theorem parse_error_writes_status_as_is_tooth :
+/-- AS-IS dente: parse error drops the socket mute. -/
+theorem parse_error_writes_status_as_is_dente :
     parse_error_writes_status_as_is = ok false := by
   unfold parse_error_writes_status_as_is
   rfl
@@ -35,8 +35,8 @@ theorem reject_transfer_encoding_true :
   unfold reject_transfer_encoding
   rfl
 
-/-- AS-IS tooth: TE is ignored. -/
-theorem reject_transfer_encoding_as_is_tooth :
+/-- AS-IS dente: TE is ignored. -/
+theorem reject_transfer_encoding_as_is_dente :
     reject_transfer_encoding_as_is = ok false := by
   unfold reject_transfer_encoding_as_is
   rfl
@@ -47,20 +47,20 @@ theorem present_bad_int_is_error_true :
   unfold present_bad_int_is_error
   rfl
 
-/-- AS-IS tooth: bad int becomes the default. -/
-theorem present_bad_int_is_error_as_is_tooth :
+/-- AS-IS dente: bad int becomes the default. -/
+theorem present_bad_int_is_error_as_is_dente :
     present_bad_int_is_error_as_is = ok false := by
   unfold present_bad_int_is_error_as_is
   rfl
 
-/-- AS-IS tooth: last Host wins (never conflicts). -/
-theorem host_values_conflict_as_is_tooth (a b) :
+/-- AS-IS dente: last Host wins (never conflicts). -/
+theorem host_values_conflict_as_is_dente (a b) :
     host_values_conflict_as_is a b = ok false := by
   unfold host_values_conflict_as_is
   rfl
 
-/-- AS-IS tooth: empty Host counted as present. -/
-theorem host_value_ok_as_is_tooth (v) :
+/-- AS-IS dente: empty Host counted as present. -/
+theorem host_value_ok_as_is_dente (v) :
     host_value_ok_as_is v = ok true := by
   unfold host_value_ok_as_is
   rfl
@@ -77,20 +77,20 @@ theorem expectation_failed_status_417 :
   unfold expectation_failed_status
   rfl
 
-/-- AS-IS tooth: never send 100-continue. -/
-theorem expects_100_continue_as_is_tooth (v) :
+/-- AS-IS dente: never send 100-continue. -/
+theorem expects_100_continue_as_is_dente (v) :
     expects_100_continue_as_is v = ok false := by
   unfold expects_100_continue_as_is
   rfl
 
-/-- AS-IS tooth: unknown Expect is ignored. -/
-theorem expect_field_ok_as_is_tooth (v) :
+/-- AS-IS dente: unknown Expect is ignored. -/
+theorem expect_field_ok_as_is_dente (v) :
     expect_field_ok_as_is v = ok true := by
   unfold expect_field_ok_as_is
   rfl
 
-/-- AS-IS tooth: never require Host. -/
-theorem http_version_requires_host_as_is_tooth (v) :
+/-- AS-IS dente: never require Host. -/
+theorem http_version_requires_host_as_is_dente (v) :
     http_version_requires_host_as_is v = ok false := by
   unfold http_version_requires_host_as_is
   rfl

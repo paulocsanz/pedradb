@@ -26,7 +26,7 @@ theorem ascii_upper_is_extract (b) :
   unfold ascii_upper
   rfl
 
-/-- AS-IS tooth: only the two literal scheme tokens. -/
+/-- AS-IS dente: only the two literal scheme tokens. -/
 theorem is_bearer_scheme_as_is_is_or (s) :
     is_bearer_scheme_as_is s = (do
       let b ← Str.Insts.CoreCmpPartialEqStr.eq s (toStr "Bearer")
@@ -150,7 +150,7 @@ theorem bearer_token_from_value_fate_iff :
           · unfold bearer_token_from_value
             simp [hw, he, hsp, hbr, hnb, ht]
 
-/- RFC-0215 P2.1 1/6 (atom `catalog:ascii_eq_ignore_case`, entrada
+/- RFC-0215 P2.1 1/6 (átomo `catalog:ascii_eq_ignore_case`, entrada
 `is_bearer_scheme`): o gate do scheme Bearer decide exatamente na
 comparação case-fold ASCII contra o token `bearer` (RFC 9110) — o
 corpo é a chamada única, citada não reaberta. O mutante AS-IS
@@ -164,7 +164,7 @@ theorem is_bearer_scheme_fate_iff :
   unfold is_bearer_scheme
   rfl
 
-/- RFC-0215 P2.1 2/6 (atom `catalog:ascii_eq_ignore_case`, entrada
+/- RFC-0215 P2.1 2/6 (átomo `catalog:ascii_eq_ignore_case`, entrada
 `is_non_bearer_auth_scheme`): o gate dos outros auth-schemes decide
 exatamente na cadeia de comparações case-fold (basic → digest →
 negotiate → ntlm) — verdadeiro no primeiro que casa, senão o
@@ -245,7 +245,7 @@ theorem is_non_bearer_auth_scheme_fate_iff :
       rw [hb2f, if_neg (by simp)]
       exact hnt
 
-/- RFC-0215 P2.1 3/6 (atom `catalog:ascii_upper`, entrada
+/- RFC-0215 P2.1 3/6 (átomo `catalog:ascii_upper`, entrada
 `normalize_http_method`): o token do método HTTP normaliza
 exatamente na dobra ASCII-upcase do extrato (RFC 9110 compara o
 método em caixa alta) — o corpo é a chamada única, citada não
@@ -259,7 +259,7 @@ theorem normalize_http_method_fate_iff :
   unfold normalize_http_method
   rfl
 
-/- RFC-0215 P2.1 4/6 (atom `catalog:ascii_lower`, entrada
+/- RFC-0215 P2.1 4/6 (átomo `catalog:ascii_lower`, entrada
 `ascii_lower`): a dobra de byte para caixa baixa decide exatamente
 no teste `is_ascii_uppercase` — byte maiúsculo vira o veredito da
 dobra `to_ascii_lowercase`, qualquer outro é ele mesmo; cada ramo
@@ -293,7 +293,7 @@ theorem ascii_lower_fate_iff :
       simp only [Aeneas.Std.bind_tc_ok]
       rw [hbf, if_neg (by simp), hcb]
 
-/- RFC-0215 P2.1 5/6 (atom `catalog:ascii_upper`, entrada
+/- RFC-0215 P2.1 5/6 (átomo `catalog:ascii_upper`, entrada
 `ascii_upper`): a dobra de byte para caixa alta decide exatamente
 no teste `is_ascii_lowercase` — byte minúsculo vira o veredito da
 dobra `to_ascii_uppercase`, qualquer outro é ele mesmo; cada ramo
@@ -899,7 +899,7 @@ private theorem auth_loop_fate {K : Type} {V : Type}
             (body_of_scan_step iK iV headers expected saw x i i2 saw2 x2 hj hstep2 hAdd2))
             (by simp)
 
-/-- RFC-0215 P2.1 6/6 (atom `catalog:x_pedra_is_fallback_only`,
+/-- RFC-0215 P2.1 6/6 (átomo `catalog:x_pedra_is_fallback_only`,
 entrada `authorization_matches`): o veredito do cabeçalho é exatamente
 a cadeia citada do scan — hit Bearer no primeiro Authorization com
 token que casa; um reject trava o fallback; senão o primeiro

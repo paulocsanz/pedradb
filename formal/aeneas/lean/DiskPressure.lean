@@ -10,8 +10,8 @@ theorem disk_pressure_unknown_admits :
   unfold disk_pressure_admit
   rfl
 
-/-- AS-IS tooth: zero free still admits. -/
-theorem disk_pressure_admit_as_is_tooth :
+/-- AS-IS dente: zero free still admits. -/
+theorem disk_pressure_admit_as_is_dente :
     disk_pressure_admit_as_is (some 0#u64) = ok DiskPressureAdmit.Ok := by
   unfold disk_pressure_admit_as_is
   rfl
@@ -28,7 +28,7 @@ theorem disk_pressure_reclaim_plan_and_compact_allowed :
   · unfold disk_pressure_reclaim_plan
     rfl
 
-/-- AS-IS tooth: SST compact only — no WAL recycle, no vlog GC. -/
+/-- AS-IS dente: SST compact only — no WAL recycle, no vlog GC. -/
 theorem disk_pressure_reclaim_plan_as_is_sst_only :
     disk_pressure_reclaim_plan_as_is true =
       ok { compact_sst := true, rotate_wal := false, compact_vlog := false } := by
@@ -41,7 +41,7 @@ theorem disk_probe_or_unknown_err_is_none :
   unfold disk_probe_or_unknown
   rfl
 
-/-- AS-IS tooth: probe Err is 0 free (false-refuse). -/
+/-- AS-IS dente: probe Err is 0 free (false-refuse). -/
 theorem disk_probe_or_unknown_as_is_err_is_zero :
     disk_probe_or_unknown_as_is false none = ok (some 0#u64) := by
   unfold disk_probe_or_unknown_as_is
@@ -68,8 +68,8 @@ theorem compact_refuse_unfolds_disk_pressure_admit :
   · unfold disk_pressure_admit
     rfl
 
-/-- AS-IS tooth: compact/flush proceeds at zero free. -/
-theorem compact_refuse_as_is_tooth :
+/-- AS-IS dente: compact/flush proceeds at zero free. -/
+theorem compact_refuse_as_is_dente :
     compact_refuse_as_is (some 0#u64) = ok none := by
   unfold compact_refuse_as_is
   rfl
@@ -81,8 +81,8 @@ theorem external_write_admitted_unfolds_disk_pressure_admit :
   unfold external_write_admitted disk_pressure_admit
   rfl
 
-/-- AS-IS tooth: dest copy/append proceeds at zero free. -/
-theorem external_write_admitted_as_is_tooth :
+/-- AS-IS dente: dest copy/append proceeds at zero free. -/
+theorem external_write_admitted_as_is_dente :
     external_write_admitted_as_is (some 0#u64) = ok true := by
   unfold external_write_admitted_as_is
   rfl

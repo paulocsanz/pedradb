@@ -19,7 +19,7 @@ theorem txn_commit_action_commit_materialises :
   unfold txn_commit_action
   rfl
 
-/-- AS-IS F47 tooth: abort still materialises (heal installs the aborted TX). -/
+/-- AS-IS F47 dente: abort still materialises (heal installs the aborted TX). -/
 theorem txn_commit_action_as_is_abort_materialises :
     txn_commit_action_as_is true = ok TxnCommitAction.Materialise := by
   unfold txn_commit_action_as_is
@@ -37,7 +37,7 @@ theorem revert_clears_status_commit_clears :
   unfold revert_clears_status
   rfl
 
-/-- AS-IS F47 tooth: the fence evaporates on abort. -/
+/-- AS-IS F47 dente: the fence evaporates on abort. -/
 theorem revert_clears_status_as_is_drops_fence :
     revert_clears_status_as_is true true = ok true := by
   unfold revert_clears_status_as_is
@@ -59,7 +59,7 @@ theorem discard_cut_keeps_higher_from :
   simp [h, lift, core.cmp.Ord.max.default,
     core.cmp.Ord.max_body, core.cmp.impls.PartialOrdU64.lt]
 
-/-- AS-IS F47 tooth: the cut can land on a committed index. -/
+/-- AS-IS F47 dente: the cut can land on a committed index. -/
 theorem discard_cut_as_is_cuts_committed :
     discard_cut_as_is (3#u64) (5#u64) = ok 3#u64 := by
   unfold discard_cut_as_is
@@ -83,7 +83,7 @@ theorem revert_user_action_value_restores_value :
   unfold revert_user_action
   rfl
 
-/-- AS-IS F34 tooth: always blind-deletes. -/
+/-- AS-IS F34 dente: always blind-deletes. -/
 theorem revert_user_action_as_is_blind_deletes :
     revert_user_action_as_is false false = ok RevertUserAction.RestoreAbsent := by
   unfold revert_user_action_as_is
@@ -96,7 +96,7 @@ theorem should_repair_si_hist_only_restored_unreserved :
   unfold should_repair_si_hist
   simp
 
-/-- AS-IS F52 tooth: hist never repaired. -/
+/-- AS-IS F52 dente: hist never repaired. -/
 theorem should_repair_si_hist_as_is_never :
     should_repair_si_hist_as_is true false = ok false := by
   unfold should_repair_si_hist_as_is
@@ -108,7 +108,7 @@ theorem leftover_txn_is_aborted_true :
   unfold leftover_txn_is_aborted leftover_fate
   rfl
 
-/-- AS-IS F35 tooth: intents stay live (immortal Conflict). -/
+/-- AS-IS F35 dente: intents stay live (immortal Conflict). -/
 theorem leftover_txn_is_aborted_as_is_false :
     leftover_txn_is_aborted_as_is = ok false := by
   unfold leftover_txn_is_aborted_as_is leftover_fate_as_is
@@ -135,7 +135,7 @@ theorem recover_si_generation_survives :
     recover_si_generation (9#u64) = ok 9#u64 := by
   rfl
 
-/-- AS-IS F36 tooth: generation evaporates on reopen. -/
+/-- AS-IS F36 dente: generation evaporates on reopen. -/
 theorem recover_si_generation_as_is_evaporates :
     recover_si_generation_as_is (9#u64) = ok 0#u64 := by
   unfold recover_si_generation_as_is
@@ -147,7 +147,7 @@ theorem prepare_error_aborts_earlier_true :
   unfold prepare_error_aborts_earlier
   rfl
 
-/-- AS-IS F50 tooth: `?` on NotLeader leaves intents live. -/
+/-- AS-IS F50 dente: `?` on NotLeader leaves intents live. -/
 theorem prepare_error_aborts_earlier_as_is_false :
     prepare_error_aborts_earlier_as_is = ok false := by
   unfold prepare_error_aborts_earlier_as_is
@@ -160,7 +160,7 @@ theorem reserve_si_gen_advances_and_differs :
   have h : core.num.U64.saturating_add 3#u64 1#u64 = 4#u64 := by native_decide
   simp [h, lift]
 
-/-- AS-IS F49 tooth: counter unmoved, next reserve collides. -/
+/-- AS-IS F49 dente: counter unmoved, next reserve collides. -/
 theorem reserve_si_gen_as_is_collides :
     reserve_si_gen_as_is (3#u64) = ok { next_current := 3#u64, reserved := 4#u64 } := by
   unfold reserve_si_gen_as_is
@@ -316,10 +316,10 @@ theorem unreserve_si_gen_fate_iff :
   · simp [hgt]
     exact eq_comm
 
-/-- RFC-0218 P1.3 3/11 (atom `catalog:recover_si_generation`, entrada
+/-- RFC-0218 P1.3 3/11 (átomo `catalog:recover_si_generation`, entrada
     `recover_si_generation`): a geração SI sobrevive ao restart como
     o lift citado `loaded_max` (identidade). O AS-IS zera (geração
-    reinicia — tooth plantado). -/
+    reinicia — dente plantado). -/
 theorem recover_si_generation_fate_iff :
     ∀ (loaded_max : U64) (r : U64),
       (recover_si_generation loaded_max = ok r) ↔ (r = loaded_max) := by
@@ -333,10 +333,10 @@ theorem recover_si_generation_fate_iff :
     subst hv
     rfl
 
-/-- RFC-0218 P1.3 7/11 (atom `catalog:should_repair_si_hist`, entrada
+/-- RFC-0218 P1.3 7/11 (átomo `catalog:should_repair_si_hist`, entrada
     `should_repair_si_hist`): reparar o hist SI EXATAMENTE quando a
     chave foi restaurada E não é reservada — senão nunca. O AS-IS é
-    a constante false (hist nunca reparado — tooth plantado). -/
+    a constante false (hist nunca reparado — dente plantado). -/
 theorem should_repair_si_hist_fate_iff :
     ∀ (restored : Bool) (is_reserved : Bool) (v : Bool),
       (should_repair_si_hist restored is_reserved = ok v) ↔

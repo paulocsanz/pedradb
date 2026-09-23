@@ -19,7 +19,7 @@ theorem leftover_page_advice_fate_iff :
   unfold leftover_page_advice
   rfl
 
-/-- AS-IS tooth: never drop leftover pages. -/
+/-- AS-IS dente: never drop leftover pages. -/
 theorem leftover_page_advice_as_is_always_keep :
     ∀ (budget bytes cap : U64) (covered : Bool),
       leftover_page_advice_as_is budget bytes cap covered =

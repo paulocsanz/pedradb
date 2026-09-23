@@ -25,8 +25,8 @@ theorem lease_live_zero :
   unfold lease_live
   rfl
 
-/-- AS-IS tooth: a past deadline still lives. -/
-theorem lease_live_as_is_tooth :
+/-- AS-IS dente: a past deadline still lives. -/
+theorem lease_live_as_is_dente :
     lease_live_as_is (9#u64) (100#u64) = ok true := by
   unfold lease_live_as_is
   rfl
@@ -54,7 +54,7 @@ theorem lease_live_iff_zero_or_now_below :
       · rfl
       · simp [hlt]
 
-/-- Catalog entry (RFC-0218 P2.2, atom `lease_next_id`): the next
+/-- Catalog entry (RFC-0218 P2.2, átomo `lease_next_id`): the next
     lease id is exactly the cited chain — saturating_add max_seen 1,
     then clamped below by 1 (Ord.max with the lt instance); ids never
     restart at 1 while a higher id was seen on disk (F7/F56). -/
@@ -75,7 +75,7 @@ theorem next_lease_id_after_fate_iff :
     unfold next_lease_id_after
     exact bind_intro i hi h
 
-/-- Catalog entry (RFC-0218 P2.2, atom `lease_table`): the table
+/-- Catalog entry (RFC-0218 P2.2, átomo `lease_table`): the table
     verdict is exactly the cited unwrap_or true — a missing entry is
     NOT an expired lease (fail-open only for absence, never for a live
     hit); the AS-IS default flips unknown to false and kills the table

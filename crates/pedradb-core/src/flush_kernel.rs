@@ -1,11 +1,11 @@
 //! Pure flush-pipeline decisions (RFC-0056 P0.2 / RFC-0174 P0.3).
 //!
 //! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). No twin-copy.
+//! proves (`cfg(verus_keep_ghost)`). No twin copy.
 //!
 //!   ./scripts/verus_flush_decision.sh
 //!
-//! Production [`crate::Db::flush`] and [`crate::Db::try_rotate_wal`] route
+//! Production [`crate::db::Db::flush`] and [`crate::db::Db::try_rotate_wal`] route
 //! their decisions through this kernel. Data-fate: the WAL may only be
 //! rotated once every copy of acked keys lives in an installed SST.
 //!

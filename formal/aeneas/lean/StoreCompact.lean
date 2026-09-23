@@ -17,7 +17,7 @@ theorem peer_counts_participating_counts :
     peer_counts_for_compact true = ok true := by
   rfl
 
-/-- AS-IS F28 tooth: only live peers — compact past offline applied. -/
+/-- AS-IS F28 dente: only live peers — compact past offline applied. -/
 theorem peer_counts_as_is_skips_offline :
     peer_counts_for_compact_as_is false = ok false := by
   rfl
@@ -58,7 +58,7 @@ theorem may_compact_through_snapshot_covered_refuses :
   unfold may_compact_through
   rfl
 
-/-- AS-IS F27 tooth: compacts even when the entry is missing. -/
+/-- AS-IS F27 dente: compacts even when the entry is missing. -/
 theorem may_compact_through_as_is_missing_term_allows :
     may_compact_through_as_is 0#u64 5#u64 0#u64 = ok true := by
   unfold may_compact_through_as_is
@@ -116,7 +116,7 @@ theorem compact_through_unleft_zero_joint_no_cap :
   unfold compact_through_unleft
   simp
 
-/-- AS-IS tooth: compact past the un-left joint (the 0096/0100 hole). -/
+/-- AS-IS dente: compact past the un-left joint (the 0096/0100 hole). -/
 theorem compact_through_unleft_as_is_past_joint :
     compact_through_unleft_as_is (5#u64) (some 3#u64) = ok 5#u64 := by
   rfl
@@ -154,12 +154,12 @@ theorem compact_through_unleft_fate_iff :
     · simp [hpos]
       scalar_tac
 
-/-- RFC-0218 P1.1 1/10 (atom `catalog:compact`, entrada
+/-- RFC-0218 P1.1 1/10 (átomo `catalog:compact`, entrada
     `may_compact_through`): a permissão de compactar através de um
     índice é EXATAMENTE a árvore citada — recusa through zero, recusa
     coberto pelo snapshot, recusa term zero; autoriza só com os três
     gates abertos. O AS-IS nem olha o term (compacta através de líder
-    de term zero — tooth plantado). -/
+    de term zero — dente plantado). -/
 theorem may_compact_through_fate_iff :
     ∀ (snapshot_index : U64) (through : U64) (term_at_through : U64)
       (v : Bool),
@@ -206,11 +206,11 @@ theorem may_compact_through_fate_iff :
       unfold may_compact_through
       rw [if_neg h1, if_neg h2, if_neg h3]
 
-/-- RFC-0218 P1.1 2/10 (atom `catalog:compact_floor`, entrada
+/-- RFC-0218 P1.1 2/10 (átomo `catalog:compact_floor`, entrada
     `compact_index_floor`): o piso pós-compactação é EXATAMENTE a
     soma saturada citada — through + 1 sem nunca envolver para zero
     (o AS-IS devolve through e re-requisita o índice já compactado —
-    tooth plantado). -/
+    dente plantado). -/
 theorem compact_index_floor_fate_iff :
     ∀ (through : U64) (r : U64),
       (compact_index_floor through = ok r) ↔
@@ -224,11 +224,11 @@ theorem compact_index_floor_fate_iff :
     unfold compact_index_floor
     rw [hv]
 
-/-- RFC-0218 P1.1 3/10 (atom `catalog:compact_peer_counts`, entrada
+/-- RFC-0218 P1.1 3/10 (átomo `catalog:compact_peer_counts`, entrada
     `peer_counts_for_compact`): a contagem de pares para o watermark
     de compactação é EXATAMENTE a constante citada true — um par
     offline ainda conta (o quorum não encolhe com queda). O AS-IS
-    conta só quem participa (watermark congelável — tooth plantado). -/
+    conta só quem participa (watermark congelável — dente plantado). -/
 theorem peer_counts_for_compact_fate_iff :
     ∀ (is_participating : Bool) (v : Bool),
       (peer_counts_for_compact is_participating = ok v) ↔ (v = true) := by
@@ -242,10 +242,10 @@ theorem peer_counts_for_compact_fate_iff :
     subst hv
     rfl
 
-/-- RFC-0218 P1.1 4/10 (atom `catalog:compact_ready`, entrada
+/-- RFC-0218 P1.1 4/10 (átomo `catalog:compact_ready`, entrada
     `compact_ready`): pronto-para-compactar é EXATAMENTE o lift citado
     `min_applied > 0` (decide) — zero aplicado não compacta nada.
-    O AS-IS é a constante true (compacta com zero — tooth plantado). -/
+    O AS-IS é a constante true (compacta com zero — dente plantado). -/
 theorem compact_ready_fate_iff :
     ∀ (m : U64) (v : Bool),
       (compact_ready m = ok v) ↔ (v = decide (m > 0#u64)) := by

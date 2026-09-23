@@ -18,12 +18,12 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P2.1 9/12 (atom `catalog:fold_range`, entrada
+/-- RFC-0218 P2.1 9/12 (átomo `catalog:fold_range`, entrada
     `fold_event_hides_key`): o fold esconde a chave EXATAMENTE como
     citado — evento de range esconde `key >= start` E `key < end`
     (gates citados em cascata); evento pontual esconde só a
     igualdade `key = start`. O AS-IS mostra tudo (segredo vaza no
-    fold — tooth plantado). -/
+    fold — dente plantado). -/
 theorem fold_event_hides_key_fate_iff :
     ∀ (is_range : Bool) (start : Slice U8) (end1 : Slice U8)
       (key : Slice U8) (v : Bool),

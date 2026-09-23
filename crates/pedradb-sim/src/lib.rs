@@ -10,7 +10,7 @@
 //! # Disk fault classes (Env seam — RBS `FailingMedia` pattern)
 //! [`FailingEnv`] implements [`pedradb_core::Env`] and injects `io::Error` on the
 //! Nth op (`fail_after` / `arm` / `arm_with_kind` / `from_seed`). Open the DB with
-//! [`Db::open_with_env`](pedradb_core::Db::open_with_env).
+//! [`Db::open_with_env`](pedradb_core::db::Db::open_with_env).
 //!
 //! # Recording / lying / short-write (RFC-0011 P2)
 //! [`RecordingEnv`] buffers writes until honest sync; [`SyncPolicy::Lying`] lies on
@@ -25,7 +25,7 @@
 //! `determinismo/`; this crate only supplies media models + trait re-exports.
 //!
 //! This is not a full FoundationDB-scale clock/disk simulator; it is a small,
-//! reproducible injection surface over the real [`pedradb_core::Db`] recovery path.
+//! reproducible injection surface over the real [`pedradb_core::db::Db`] recovery path.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -51,7 +51,7 @@ pub use pedradb_core::{
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 
-use pedradb_core::{BatchOp, Db, OpenOptions as DbOpen, Result, WAL_FILE_NAME};
+use pedradb_core::{BatchOp, db::Db, OpenOptions as DbOpen, Result, WAL_FILE_NAME};
 
 /// Working directory for one fault experiment.
 #[derive(Debug)]
@@ -250,7 +250,7 @@ pub fn scenario_truncated_tail_loses_unsynced_suffix(parent: impl AsRef<Path>) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pedradb_core::{Db, DetHost, Host, OpenOptions};
+    use pedradb_core::{db::Db, DetHost, Host, OpenOptions};
 
     fn parent() -> PathBuf {
         std::env::temp_dir()
@@ -1031,7 +1031,7 @@ mod tests {
     /// fail_after schedule: acked prefix survives; no wrong recovered values for known acks.
     #[test]
     fn fail_after_schedule_no_silent_wrong_on_acked_prefix() {
-        use pedradb_core::{Db, OpenOptions};
+        use pedradb_core::{db::Db, OpenOptions};
         use std::collections::BTreeMap;
 
         let dir = parent().join(format!(
@@ -1110,7 +1110,7 @@ mod tests {
 
     #[test]
     fn failing_env_fail_after_trips_and_open_errors() {
-        use pedradb_core::{Db, OpenOptions};
+        use pedradb_core::{db::Db, OpenOptions};
 
         let dir = parent().join(format!(
             "pedradb-fail-{}",
@@ -1147,7 +1147,7 @@ mod tests {
 
     #[test]
     fn failing_env_nth_put_then_reopen_recovers_prefix() {
-        use pedradb_core::{Db, OpenOptions};
+        use pedradb_core::{db::Db, OpenOptions};
 
         let dir = parent().join(format!(
             "pedradb-fail-n-{}",
@@ -1217,7 +1217,7 @@ mod tests {
     /// blocks open while acked WAL data is still present.
     #[test]
     fn failed_flush_does_not_block_reopen_with_acked_wal() {
-        use pedradb_core::{Db, Env, OpenOptions, StdEnv};
+        use pedradb_core::{db::Db, Env, OpenOptions, StdEnv};
 
         let dir = parent().join(format!(
             "pedradb-f1-{}",
@@ -1301,7 +1301,7 @@ mod tests {
 
     #[test]
     fn seed_fail_after_open_may_fail_or_succeed_consistently() {
-        use pedradb_core::{Db, OpenOptions};
+        use pedradb_core::{db::Db, OpenOptions};
         let seed = 7u64;
         let n = FailingEnv::seed_to_fail_after(seed);
         let dir = parent().join(format!(
@@ -1336,7 +1336,7 @@ mod tests {
 
     #[test]
     fn failing_env_storage_full_kind() {
-        use pedradb_core::{Db, OpenOptions};
+        use pedradb_core::{db::Db, OpenOptions};
 
         let dir = parent().join(format!(
             "pedradb-enospc-{}",
@@ -1375,7 +1375,7 @@ mod tests {
 
     #[test]
     fn failing_env_compact_then_reopen_keeps_data() {
-        use pedradb_core::{Db, OpenOptions};
+        use pedradb_core::{db::Db, OpenOptions};
 
         let dir = parent().join(format!(
             "pedradb-compact-fault-{}",
@@ -1443,7 +1443,7 @@ mod tests {
     /// F18: after a durable put, auto-flush I/O failure must not make `put` return Err.
     #[test]
     fn auto_flush_fault_does_not_fail_acked_put() {
-        use pedradb_core::{Db, OpenOptions};
+        use pedradb_core::{db::Db, OpenOptions};
 
         let opts = OpenOptions {
             wal_full_fsync: true,
@@ -1505,7 +1505,7 @@ mod tests {
     /// if the op path fails, heal and reopen — previously acked keys must remain.
     #[test]
     fn failing_env_nth_op_sweep_put_flush_no_silent_loss() {
-        use pedradb_core::{Db, OpenOptions};
+        use pedradb_core::{db::Db, OpenOptions};
 
         let opts = OpenOptions {
             wal_full_fsync: true,
@@ -1690,7 +1690,7 @@ mod tests {
     /// RFC-0015 P0.1/P0.3: required WAL sync fail → fence; further puts refuse; reopen consistent.
     #[test]
     fn sync_fail_after_append_fences_until_reopen() {
-        use pedradb_core::{CoreError, Db, OpenOptions};
+        use pedradb_core::{CoreError, db::Db, OpenOptions};
 
         let dir = parent().join(format!(
             "pedradb-fence-{}",
@@ -1820,7 +1820,7 @@ mod tests {
     /// RFC-0015 P0.2/P0.3: sync_dir failure under sync=true fails flush/MANIFEST path.
     #[test]
     fn sync_dir_fail_propagates_on_flush() {
-        use pedradb_core::{Db, Env, EnvFile, OpenOptions, Result as CoreResult, StdEnv};
+        use pedradb_core::{db::Db, Env, EnvFile, OpenOptions, Result as CoreResult, StdEnv};
         use std::cell::Cell;
         use std::io::{self, Read, Seek, SeekFrom, Write};
         use std::path::Path;
@@ -1979,7 +1979,7 @@ mod tests {
     /// RFC-0015 P1.1: Db close/drop releases LOCK via Env (remove_file counted).
     #[test]
     fn dir_lock_release_via_env_on_close() {
-        use pedradb_core::{Db, Env, EnvFile, OpenOptions, StdEnv, LOCK_FILE};
+        use pedradb_core::{db::Db, Env, EnvFile, OpenOptions, StdEnv, LOCK_FILE};
         use std::cell::Cell;
         use std::io::{self, Read, Seek, SeekFrom, Write};
         use std::path::Path;
@@ -2122,7 +2122,7 @@ mod tests {
     /// RFC-0050 P0.3: ENOSPC during SST flush fences Transient; acked prefix survives.
     #[test]
     fn enospc_mid_flush_fences_transient() {
-        use pedradb_core::{Db, FenceClass};
+        use pedradb_core::{db::Db, FenceClass};
 
         let dir = sim_dir("enospc-flush");
         let env = FailingEnv::passing();
@@ -2148,7 +2148,7 @@ mod tests {
     /// RFC-0050 P0.3: EIO during compact fails closed; live L0 unchanged.
     #[test]
     fn eio_mid_compact_fail_closed() {
-        use pedradb_core::Db;
+        use pedradb_core::db::Db;
 
         let dir = sim_dir("eio-compact");
         let env = FailingEnv::passing();
@@ -2175,7 +2175,7 @@ mod tests {
     /// RFC-0050 P0.3: ENOSPC on MANIFEST/CURRENT rename rolls back; CURRENT stays valid.
     #[test]
     fn enospc_mid_manifest_rename() {
-        use pedradb_core::{Db, CURRENT_FILE};
+        use pedradb_core::{db::Db, CURRENT_FILE};
 
         let dir = sim_dir("enospc-manifest");
         let env = FailingEnv::passing();
@@ -2216,7 +2216,7 @@ mod tests {
     /// RFC-0050 P0.3: range-delete + compact loop terminates; L0 stall bounds files.
     #[test]
     fn range_delete_compact_terminates() {
-        use pedradb_core::Db;
+        use pedradb_core::db::Db;
 
         let dir = sim_dir("range-compact");
         let mut db = Db::open_with_env(&dir, opts(), FailingEnv::passing()).unwrap();
@@ -2330,7 +2330,7 @@ mod tests {
     /// puts refused, reopen heals with the acked prefix only.
     #[test]
     fn verified_sync_fail_fences_fail_closed() {
-        use pedradb_core::{CoreError, Db, OpenOptions};
+        use pedradb_core::{CoreError, db::Db, OpenOptions};
         let dir = vrf_dir("fence");
         let _ = fs::remove_dir_all(&dir);
         let env = FailingEnv::passing();

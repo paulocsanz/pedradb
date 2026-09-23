@@ -28,7 +28,7 @@ theorem joint_election_ok_clones_single_cfg :
   unfold pedra_aeneas_store_membership_kernel.majority_of
   rfl
 
-/-- AS-IS tooth: both clones elect on C-old majority during joint add. -/
+/-- AS-IS dente: both clones elect on C-old majority during joint add. -/
 theorem joint_election_ok_as_is_clones_agree :
     pedra_aeneas_membership_kernel.joint_election_ok_as_is
       (2#u64) (3#u64) (some (2#u64, 4#u64))

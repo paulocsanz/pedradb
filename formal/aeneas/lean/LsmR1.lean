@@ -30,7 +30,7 @@ theorem lsm_state_of_is_def : True := by
   have _ := @lsm_write
   trivial
 
-/-! ## RFC-0215 P0.2 — crown de produto no degrau atom (modelo ×4) -/
+/-! ## RFC-0215 P0.2 — coroa de produto no degrau átomo (modelo ×4) -/
 
 /-- Any ok-valued Result bind forces the bound term to be ok
 (Cf.lean's `bind_ok_inv`, restated for this module). -/
@@ -67,7 +67,7 @@ o desfecho da máquina R1 é exatamente a decisão que o spec nomeia —
 passa), `ok false` quando discordam. O mutante AS-IS
 (`r1_modelo_as_is`) sonda com `lsm_probe_as_is` (a ressurreição do
 delete de findings/2026-09-04-reopen-delete-resurrected); planta
-três-teeth recusa. -/
+três-dentes recusa. -/
 theorem r1_modelo_fate_iff :
     ∀ (s : LsmState) (key : U64) (v : Bool),
       (r1_modelo s key = ok v) ↔
@@ -120,12 +120,12 @@ theorem r1_modelo_fate_iff :
         simp only [Aeneas.Std.bind_tc_ok]
         exact heq
 
-/-- RFC-0218 P1.1 8/10 (atom `catalog:lsm_compact`, entrada
+/-- RFC-0218 P1.1 8/10 (átomo `catalog:lsm_compact`, entrada
     `lsm_compact`): despacho de compactação R1 é EXATAMENTE o
     encaminhamento citado — nível 0 não compacta (ok none), nível
     dentro de MAX_LEVELS entra no loop citado com drop_all_tombs
     false, nível além de MAX_LEVELS não compacta. O AS-IS passa
-    drop_all_tombs true (derruba túmulos vivos — tooth plantado). -/
+    drop_all_tombs true (derruba túmulos vivos — dente plantado). -/
 theorem lsm_compact_fate_iff :
     ∀ (s : LsmState) (depth : Usize) (r : Option LsmState),
       (lsm_compact s depth = ok r) ↔
@@ -156,10 +156,10 @@ theorem lsm_compact_fate_iff :
     · unfold lsm_compact
       rw [if_neg hz, if_neg hm, hv]
 
-/-- RFC-0218 P1.1 9/10 (atom `catalog:lsm_probe`, entrada
+/-- RFC-0218 P1.1 9/10 (átomo `catalog:lsm_probe`, entrada
     `lsm_probe`): provar R1 é EXATAMENTE um passo do loop citado —
     o corpo no nível 0 ou termina (done o) ou desce um nível
-    (cont i', resto citado). O AS-IS ignora o nível (tooth
+    (cont i', resto citado). O AS-IS ignora o nível (dente
     plantado). -/
 theorem lsm_probe_fate_iff :
     ∀ (s : LsmState) (key : U64) (o : Option LsmEntry),
@@ -195,10 +195,10 @@ theorem lsm_probe_fate_iff :
       rw [hb, hcont]
       exact hloop
 
-/-- RFC-0218 P1.1 10/10 (atom `catalog:lsm_reopen`, entrada
+/-- RFC-0218 P1.1 10/10 (átomo `catalog:lsm_reopen`, entrada
     `lsm_reopen`): reabrir R1 é EXATAMENTE a identidade citada — o
     estado sai intacto (`r = s`). O AS-IS reabre pelo loop que
-    esvazia níveis (tooth plantado). -/
+    esvazia níveis (dente plantado). -/
 theorem lsm_reopen_fate_iff :
     ∀ (s : LsmState) (r : LsmState),
       (lsm_reopen s = ok r) ↔ (r = s) := by

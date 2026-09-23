@@ -9,7 +9,7 @@ theorem pack_cut_tag_identity :
   unfold pack_cut_tag
   rfl
 
-theorem pack_cut_tag_as_is_tooth :
+theorem pack_cut_tag_as_is_dente :
     pack_cut_tag_as_is 7#u32 = ok (0#u32) := by
   unfold pack_cut_tag_as_is
   rfl

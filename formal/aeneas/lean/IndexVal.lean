@@ -19,22 +19,22 @@ theorem value_len_tag_always_the_length :
   rfl
 
 /-- AS-IS F80: length tag dropped. -/
-theorem value_len_tag_as_is_tooth :
+theorem value_len_tag_as_is_dente :
     value_len_tag_as_is 4#u32 = ok (0#u32) := by
   unfold value_len_tag_as_is
   rfl
 
-/-- AS-IS F80 tooth, general: every length maps to the same tag 0 —
+/-- AS-IS F80 dente, general: every length maps to the same tag 0 —
     `red` and `red\0foo` collide in the child range. -/
 theorem value_len_tag_as_is_always_zero :
     ∀ len : Std.U32, value_len_tag_as_is len = ok 0#u32 := by
   intro len
   rfl
 
-/-- RFC-0218 P1.2 1/11 (atom `catalog:len_tag`, entrada
+/-- RFC-0218 P1.2 1/11 (átomo `catalog:len_tag`, entrada
     `value_len_tag`): a etiqueta de comprimento é EXATAMENTE o lift
     citado `len` (identidade — por isso injetiva em len). O AS-IS é
-    a constante 0 (etiqueta colapsada — tooth plantado). -/
+    a constante 0 (etiqueta colapsada — dente plantado). -/
 theorem value_len_tag_fate_iff :
     ∀ (len : U32) (r : U32),
       (value_len_tag len = ok r) ↔ (r = len) := by
@@ -61,10 +61,10 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P1.2 5/11 (atom `catalog:exact_children`, entrada
+/-- RFC-0218 P1.2 5/11 (átomo `catalog:exact_children`, entrada
     `exact_value_children`): os filhos exatos são EXATAMENTE a cadeia
     citada — o prefixo vira Vec, empurra 0#u8 (início) e 1#u8 (fim).
-    O AS-IS re-usa o len-pref e vaza irmão NUL (tooth plantado). -/
+    O AS-IS re-usa o len-pref e vaza irmão NUL (dente plantado). -/
 theorem exact_value_children_fate_iff :
     ∀ (prefix1 : Slice U8) (r : (alloc.vec.Vec U8) × (alloc.vec.Vec U8)),
       (exact_value_children prefix1 = ok r) ↔
@@ -86,11 +86,11 @@ theorem exact_value_children_fate_iff :
     unfold exact_value_children
     exact bind_intro st hst (bind_intro s1 hs1 (bind_intro e he rfl))
 
-/-- RFC-0218 P1.2 10/11 (atom `catalog:index_val`, entrada
+/-- RFC-0218 P1.2 10/11 (átomo `catalog:index_val`, entrada
     `len_pref_value`): o valor com prefixo de comprimento é
     EXATAMENTE a cadeia citada — aloca len+4, converte o len a u32
     (expect), serializa be_bytes, copia o prefixo e o valor. O AS-IS
-    copia só o valor (prefixo ausente — tooth plantado). -/
+    copia só o valor (prefixo ausente — dente plantado). -/
 theorem len_pref_value_fate_iff :
     ∀ (val : Slice U8) (r : alloc.vec.Vec U8),
       (len_pref_value val = ok r) ↔

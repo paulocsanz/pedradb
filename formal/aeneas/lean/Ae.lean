@@ -124,11 +124,11 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P2.2 (atom `catalog:ae_f16_gate`, entrada `ae_f16_safe`):
+/-- RFC-0218 P2.2 (átomo `catalog:ae_f16_gate`, entrada `ae_f16_safe`):
     o gate F16 é exatamente a árvore citada — truncar só passa acima do
     commit; append só na ponta esperada (saturating_add) com slot vazio;
     conflito decide pelo match do Refuse, nunca reescreve slot commitado.
-    O AS-IS reescreve slot commitado (tooth plantado). -/
+    O AS-IS reescreve slot commitado (dente plantado). -/
 
 private theorem ae_refuse_match_ok (action : AeEntryAction) :
     ∃ br : Bool,

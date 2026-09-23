@@ -12,7 +12,7 @@
 //! cache lags.
 
 use bytes::Bytes;
-use pedradb_core::{ConcurrentDb, Db};
+use pedradb_core::{ConcurrentDb, db::Db};
 use std::collections::HashSet;
 
 fn scratch(name: &str) -> std::path::PathBuf {

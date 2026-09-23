@@ -99,11 +99,11 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P1.1 5/10 (atom `catalog:compact_split`, entrada
+/-- RFC-0218 P1.1 5/10 (átomo `catalog:compact_split`, entrada
     `compact_should_split`): dividir é EXATAMENTE comparar contra o
     alvo citado COMPACT_TARGET_FILE_BYTES (bind citado: o gate
     produz um índice e a comparação decide). O AS-IS nunca divide
-    (ok false — arquivo de saída sem borne; tooth plantado). -/
+    (ok false — arquivo de saída sem borne; dente plantado). -/
 theorem compact_should_split_fate_iff :
     ∀ (w : U64) (v : Bool),
       (compact_should_split w = ok v) ↔
@@ -118,10 +118,10 @@ theorem compact_should_split_fate_iff :
     unfold compact_should_split
     exact bind_intro i hT hs
 
-/-- RFC-0218 P1.1 6/10 (atom `catalog:compact_split_at`, entrada
+/-- RFC-0218 P1.1 6/10 (átomo `catalog:compact_split_at`, entrada
     `compact_should_split_at`): dividir-no-ponto é EXATAMENTE o lift
     citado `written_bytes >= target` (decide). O AS-IS é a constante
-    false (mutantes nunca dividem — tooth plantado). -/
+    false (mutantes nunca dividem — dente plantado). -/
 theorem compact_should_split_at_fate_iff :
     ∀ (w : U64) (t : U64) (v : Bool),
       (compact_should_split_at w t = ok v) ↔ (v = decide (w >= t)) := by
@@ -135,10 +135,10 @@ theorem compact_should_split_at_fate_iff :
     subst hv
     rfl
 
-/-- RFC-0218 P1.1 7/10 (atom `catalog:lone_tombstone`, entrada
+/-- RFC-0218 P1.1 7/10 (átomo `catalog:lone_tombstone`, entrada
     `lone_tombstone_fate`): o túmulo solitário cai SÓ no nível mais
     baixo — Drop exige bottommost E único-mais-novo; todo o resto
-    Keep. O AS-IS ignora bottommost (Drop fora do fundo — tooth
+    Keep. O AS-IS ignora bottommost (Drop fora do fundo — dente
     plantado). -/
 theorem lone_tombstone_fate_iff :
     ∀ (bottommost : Bool) (lone_newest : Bool) (r : VersionFate),

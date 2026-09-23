@@ -20,6 +20,12 @@
 
 #![forbid(unsafe_code)]
 
+// RFC-0250: the cartaz binary is statically linked musl. musl's malloc
+// lock sits on the key copy (`BatchOp::put`) outside the phase timers.
+// Rocks' C++ path does not use this allocator.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use rocksdb_parity_bench::{report_json, suites_enabled, Cfg, Engine, YcsbRunner};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -236,7 +242,7 @@ fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) 
         if !suites_enabled("ycsb") {
             r.seed(e);
         }
-        benches.extend(r.run_qs(e));
+        benches.extend(r.run_qs(e, std::env::var("ROCKS_PARITY_ONLY").ok().as_deref()));
     }
     if suites_enabled("kvrocks") {
         benches.extend(r.run_kvrocks(e));
@@ -308,7 +314,7 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
         if !suites_enabled("ycsb") {
             r.seed(e);
         }
-        benches.extend(r.run_qs(e));
+        benches.extend(r.run_qs(e, std::env::var("ROCKS_PARITY_ONLY").ok().as_deref()));
     }
     if suites_enabled("kvrocks") {
         benches.extend(r.run_kvrocks(e));

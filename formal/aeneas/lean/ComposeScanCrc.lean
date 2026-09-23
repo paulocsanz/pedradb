@@ -29,7 +29,7 @@ theorem sst_crc_fate_equal_via_crc_extract :
   · unfold pedra_aeneas_crc_kernel.crc_match_ok
     rfl
 
-/-- AS-IS tooth: mismatch still StripTrailer, and the crc as-is extract admits. -/
+/-- AS-IS dente: mismatch still StripTrailer, and the crc as-is extract admits. -/
 theorem sst_crc_fate_as_is_via_crc_as_is :
     pedra_aeneas_scan_kernel.scan_kernel.sst_crc_fate_as_is (1#u32) (2#u32)
       (32#usize)

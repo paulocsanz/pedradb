@@ -16,7 +16,7 @@ theorem pipeline_drain_cap_fate_iff :
   unfold pipeline_drain_cap
   rfl
 
-/-- AS-IS tooth: the pre-0201 cap-8 convoy. -/
+/-- AS-IS dente: the pre-0201 cap-8 convoy. -/
 theorem pipeline_drain_cap_as_is_caps_at_eight :
     ∀ (q : Usize),
       pipeline_drain_cap_as_is q =

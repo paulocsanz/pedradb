@@ -23,8 +23,8 @@ theorem flush_plan_imm_finishes_first :
   unfold flush_plan
   rfl
 
-/-- AS-IS tooth: lose-tail always rotates. -/
-theorem flush_plan_as_is_lose_tail_tooth :
+/-- AS-IS dente: lose-tail always rotates. -/
+theorem flush_plan_as_is_lose_tail_dente :
     flush_plan_as_is_lose_tail false false = ok FlushPlan.RotateOnly := by
   unfold flush_plan_as_is_lose_tail
   rfl
@@ -89,7 +89,7 @@ theorem wal_rotate_pin_live_keeps :
   unfold wal_rotate_decision
   rfl
 
-/-- AS-IS tooth: ignore-pin truncates while the pin is live. -/
+/-- AS-IS dente: ignore-pin truncates while the pin is live. -/
 theorem wal_rotate_as_is_ignores_pin :
     wal_rotate_decision_as_is_ignore_pin
       { mem_empty := true, imm_present := false, pin_live := true,
@@ -138,8 +138,8 @@ theorem occ_snap_published_and_rotate_keeps :
   · unfold occ_snap_uses_published; rfl
   · unfold wal_rotate_decision; rfl
 
-/-- AS-IS tooth: last_seq while inflight. -/
-theorem occ_snap_uses_published_as_is_tooth :
+/-- AS-IS dente: last_seq while inflight. -/
+theorem occ_snap_uses_published_as_is_dente :
     occ_snap_uses_published_as_is true = ok false := by
   unfold occ_snap_uses_published_as_is
   rfl
@@ -175,8 +175,8 @@ theorem occ_snap_lock_order_inflight_read :
     rfl
   · unfold occ_snap_uses_published; rfl
 
-/-- AS-IS tooth: last_seq even when the write lock is held. -/
-theorem occ_snap_lock_order_as_is_tooth :
+/-- AS-IS dente: last_seq even when the write lock is held. -/
+theorem occ_snap_lock_order_as_is_dente :
     occ_snap_lock_order_as_is false true = ok false := by
   unfold occ_snap_lock_order_as_is
   rfl
@@ -200,8 +200,8 @@ theorem wal_segment_is_empty_nonzero :
   unfold wal_segment_is_empty
   rfl
 
-/-- AS-IS tooth: never skip empty (idle poll would rewrite MANIFEST). -/
-theorem wal_segment_is_empty_as_is_tooth :
+/-- AS-IS dente: never skip empty (idle poll would rewrite MANIFEST). -/
+theorem wal_segment_is_empty_as_is_dente :
     wal_segment_is_empty_as_is 0#u64 = ok false := by
   unfold wal_segment_is_empty_as_is
   rfl
@@ -286,11 +286,11 @@ theorem try_rotate_step_rotates_iff_pins_clear_segment_live :
           (fun e => ok (!e))) = ok true
     rw [hr, if_neg (by simp)]
     exact bind_intro _ he rfl
-/-- RFC-0218 P0.3 4/6 (atom `catalog:flush_plan`): o plano de
+/-- RFC-0218 P0.3 4/6 (átomo `catalog:flush_plan`): o plano de
     flush é EXATAMENTE a árvore de dois ifs citada — imutável
     presente termina-a-e-flusha; sem imutável, memtable vazio só
     rotaciona; memtable vivo escreve SST antes de rotacionar. O AS-IS
-    perde a cauda (tooth plantado no domínio finito). -/
+    perde a cauda (dente plantado no domínio finito). -/
 theorem flush_plan_fate_iff :
     ∀ (mem_empty : Bool) (imm_present : Bool) (p : FlushPlan),
       (flush_plan mem_empty imm_present = ok p) ↔
@@ -330,11 +330,11 @@ theorem flush_plan_fate_iff :
       subst hv
       rfl
 
-/-- RFC-0219 P1.3 (atom `catalog:parked_pair`): a fila parked-unflushed
+/-- RFC-0219 P1.3 (átomo `catalog:parked_pair`): a fila parked-unflushed
     entrega o par mais velho para fold EXATAMENTE quando tem dois ou
     mais — fila curta espera (nada a foldar; F174 revalida no swap). O
     AS-IS entrega sempre (fila curta perde/mutila a tabela única —
-    tooth plantado). -/
+    dente plantado). -/
 theorem parked_pair_plan_fate_iff :
     ∀ (parked_len : U64) (plan : ParkedPairPlan),
       (parked_pair_plan parked_len = ok plan) ↔
@@ -360,10 +360,10 @@ theorem parked_pair_plan_fate_iff :
       · subst hv
         rfl
 
-/-- RFC-0219 P1.3 (atom `catalog:auto_flush_gate`): o scan de auto-flush
+/-- RFC-0219 P1.3 (átomo `catalog:auto_flush_gate`): o scan de auto-flush
     pula INTEIRO EXATAMENTE quando os dois eixos de mem estão sob seus
     limites — qualquer eixo acima, scana cada CF (o gate due por-CF
-    aplica). O AS-IS sempre scana (churn de flush com nada due — tooth
+    aplica). O AS-IS sempre scana (churn de flush com nada due — dente
     plantado). -/
 theorem auto_flush_gate_fate_iff :
     ∀ (global_under cf_under : Bool) (plan : AutoFlushGate),
@@ -376,10 +376,10 @@ theorem auto_flush_gate_fate_iff :
   unfold auto_flush_gate skip_auto_flush
   cases global_under <;> cases cf_under <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P1.3 (atom `catalog:mem_auto_flush`): o auto-flush de mem
+/-- RFC-0219 P1.3 (átomo `catalog:mem_auto_flush`): o auto-flush de mem
     dispara EXATAMENTE armado e no/acima do limite — desarmado ou abaixo
     segue acumulando. O AS-IS nunca dispara (limite armado ignorado, mem
-    cresce até o host travar — tooth plantado). -/
+    cresce até o host travar — dente plantado). -/
 theorem mem_auto_flush_plan_fate_iff :
     ∀ (mem_bytes limit : U64) (armed : Bool) (plan : MemAutoFlushPlan),
       (mem_auto_flush_plan mem_bytes armed limit = ok plan) ↔
@@ -421,10 +421,10 @@ theorem mem_auto_flush_plan_fate_iff :
         | false => exact Or.inr ⟨rfl, rfl⟩
       · simp [hplan]
 
-/-- RFC-0219 P1.4 (atom `catalog:manifest_publish_plan`): o MANIFEST e o
+/-- RFC-0219 P1.4 (átomo `catalog:manifest_publish_plan`): o MANIFEST e o
     CURRENT só publicam EXATAMENTE quando todo SST listado está durable;
     algum SST sem sync segura o publish fail-closed. O AS-IS publica com
-    SST unsynced (o CURRENT nomeia um arquivo tornado pós-crash — tooth
+    SST unsynced (o CURRENT nomeia um arquivo tornado pós-crash — dente
     plantado). -/
 theorem manifest_publish_plan_fate_iff :
     ∀ (sst_durable : Bool) (plan : ManifestPublishPlan),
@@ -437,10 +437,10 @@ theorem manifest_publish_plan_fate_iff :
   unfold manifest_publish_plan may_publish_manifest
   cases sst_durable <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P2.1 (atom `catalog:cf_flush_plan`): dentro do scan armado,
+/-- RFC-0219 P2.1 (átomo `catalog:cf_flush_plan`): dentro do scan armado,
     a família de colunas flusha AGORA EXATAMENTE quando está no/acima do
     seu limite; abaixo do limite pula para a próxima família. O AS-IS
-    pula toda família (CF armado sobre o limite só cresce — tooth
+    pula toda família (CF armado sobre o limite só cresce — dente
     plantado). -/
 theorem cf_flush_plan_fate_iff :
     ∀ (mem_bytes limit : U64) (plan : CfFlushPlan),
@@ -481,11 +481,11 @@ theorem cf_flush_plan_fate_iff :
         exact Or.inl ⟨by simpa using hnot, rfl⟩
       · simp [hplan]
 
-/-- RFC-0219 P2.2 (atom `catalog:flusher_gate_plan`): os regimes de
+/-- RFC-0219 P2.2 (átomo `catalog:flusher_gate_plan`): os regimes de
     submit/park/assist são decididos EXATAMENTE pela presença do worker
     de flush — sem worker nada dorme em drain que ninguém corre; com
     worker o park/retry é limitado pelo drain. O AS-IS diz WorkerDrains
-    sempre (writer workerless dorme para sempre — tooth plantado). -/
+    sempre (writer workerless dorme para sempre — dente plantado). -/
 theorem flusher_gate_plan_fate_iff :
     ∀ (attached : Bool) (plan : FlusherGate),
       (flusher_gate_plan attached = ok plan) ↔
@@ -497,16 +497,16 @@ theorem flusher_gate_plan_fate_iff :
   unfold flusher_gate_plan
   cases attached <;> simp_all <;> exact eq_comm
 
-/-- RFC-0219 P2.2 (atom `catalog:parked_debt_plan`): a dívida
+/-- RFC-0219 P2.2 (átomo `catalog:parked_debt_plan`): a dívida
     parked-unflushed é real EXATAMENTE quando alcança uma tabela
     inteira (cap) — o writer parqueia/assiste; abaixo do cap segue. O
     AS-IS nunca freia (a camada mem cresce sem limite — o OOM do
-    slipstream 25M — tooth plantado). -/
-/-- RFC-0234 P0.1 (atom `catalog:l0_compact_due`): compactar L0 é
+    slipstream 25M — dente plantado). -/
+/-- RFC-0234 P0.1 (átomo `catalog:l0_compact_due`): compactar L0 é
     devido EXATAMENTE quando o número de ficheiros vivos está no/acima
     do trigger — fate forall over the extracted body. O AS-IS nunca
     compacta (o park que deixou 54–773 L0 após um seed de 10M — o
-    tooth que a planta `l0_compact_due_on_live_at_trigger_is_not_ok`
+    dente que a planta `l0_compact_due_on_live_at_trigger_is_not_ok`
     recusa). -/
 theorem l0_compact_due_fate_iff :
     ∀ (l0_files trigger : U64) (v : Bool),

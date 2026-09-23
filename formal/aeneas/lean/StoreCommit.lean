@@ -10,8 +10,8 @@ theorem may_commit_at_current_majority :
   unfold may_commit_at
   rfl
 
-/-- AS-IS tooth: majority of a previous-term index still commits. -/
-theorem may_commit_at_as_is_tooth :
+/-- AS-IS dente: majority of a previous-term index still commits. -/
+theorem may_commit_at_as_is_dente :
     may_commit_at_as_is (1#u64) (2#u64) true = ok true := by
   unfold may_commit_at_as_is
   rfl

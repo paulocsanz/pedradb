@@ -15,7 +15,7 @@ theorem scan_readahead_window_hot_never :
   unfold scan_readahead_window
   rfl
 
-/-- AS-IS tooth: today's engine never reads ahead. -/
+/-- AS-IS dente: today's engine never reads ahead. -/
 theorem scan_readahead_window_as_is_always_none :
     ∀ (blocks : Slice (U64 × U64)) (at1 : Usize) (bounded : Bool),
       scan_readahead_window_as_is blocks at1 bounded =

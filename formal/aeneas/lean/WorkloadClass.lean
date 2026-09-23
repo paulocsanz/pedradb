@@ -19,7 +19,7 @@ theorem workload_class_short_range_iff :
     | intro h1 hw =>
       simp [h0, h1, hw]
 
-/-- AS-IS tooth: every mix is Mixed. -/
+/-- AS-IS dente: every mix is Mixed. -/
 theorem workload_class_as_is_always_mixed :
     ∀ (z0 z1 q w : U64),
       workload_class_as_is z0 z1 q w = ok WorkloadClass.Mixed := by

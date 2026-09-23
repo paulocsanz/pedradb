@@ -7,7 +7,7 @@
 //!
 //!   ./scripts/aeneas_reopen.sh --required
 //!
-//! Production [`crate::Db::open_with_env`] calls this kernel in every WAL
+//! Production [`crate::db::Db::open_with_env`] calls this kernel in every WAL
 //! damage arm: the outcome of a reopen under damage is decided **here**
 //! (refuse / serve decoded prefix + report), never ad hoc at the call site.
 //! Bytes on disk, journaling, escalation counters, and fsync are

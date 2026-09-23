@@ -1453,21 +1453,21 @@ mod tests {
     }
 
     /// RFC-0188 P0.2 / RFC-0187 P1.3 three-teeth for the heap-sift kernel.
-    /// Tooth 1: the full decision table (ORDER facts in, STRUCTURE out).
-    /// Tooth 2: `sift_step_as_is` diverges on EVERY repairing input.
-    /// Tooth 3 (on-live): 4 sorted streams registered in DESCENDING head
+    /// Dente 1: the full decision table (ORDER facts in, STRUCTURE out).
+    /// Dente 2: `sift_step_as_is` diverges on EVERY repairing input.
+    /// Dente 3 (on-live): 4 sorted streams registered in DESCENDING head
     /// order — heapify MUST repair, and a Stay-only mutant emits b35
     /// first while the heap invariant demands b05.
     #[test]
     fn merge_heap_sift_kernel_three_teeth() {
-        // Tooth 1 — decision table. (r_exists, r_lt_l, best_lt_hole).
+        // Dente 1 — decision table. (r_exists, r_lt_l, best_lt_hole).
         assert_eq!(sift_step(false, false, false), SiftStep::Stay);
         assert_eq!(sift_step(true, true, false), SiftStep::Stay);
         assert_eq!(sift_step(true, true, true), SiftStep::SwapRight);
         assert_eq!(sift_step(true, false, true), SiftStep::SwapLeft);
         assert_eq!(sift_step(false, false, true), SiftStep::SwapLeft);
 
-        // Tooth 2 — the as-is mutant never repairs: on every input where
+        // Dente 2 — the as-is mutant never repairs: on every input where
         // the best child beats the hole the kernel swaps, as-is stays.
         for (r_exists, r_lt_l) in [(true, true), (true, false), (false, false)] {
             let clean = sift_step(r_exists, r_lt_l, true);
@@ -1475,7 +1475,7 @@ mod tests {
             assert_eq!(sift_step_as_is(r_exists, r_lt_l, true), SiftStep::Stay);
         }
 
-        // Tooth 3 — on-live heap repair. Root decision on the initial
+        // Dente 3 — on-live heap repair. Root decision on the initial
         // registration order: (r_in=true, r_lt_l=false, best_lt_hole=true)
         // -> kernel SwapLeft vs as-is Stay (would emit b35 first).
         let stream = |keys: &[&[u8]]| -> LayerStream<'static> {

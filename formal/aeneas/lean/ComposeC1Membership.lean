@@ -48,7 +48,7 @@ theorem c1_modelo_single_cfg_via_membership_extract :
     unfold pedra_aeneas_membership_kernel.majority_of
     rfl
 
-/-- AS-IS tooth: `c1_modelo_as_is` serves, and membership as-is elects on C-old. -/
+/-- AS-IS dente: `c1_modelo_as_is` serves, and membership as-is elects on C-old. -/
 theorem c1_modelo_as_is_via_membership_as_is :
     pedra_aeneas_c1_modelo_kernel.c1_modelo_kernel.c1_modelo_as_is jointAdd
       = ok true

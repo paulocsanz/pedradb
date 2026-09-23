@@ -12,7 +12,7 @@
 
 use std::ops::Bound;
 
-use pedradb_core::{prefix_exclusive_end, ChangeKind, Db, Result};
+use pedradb_core::{prefix_exclusive_end, ChangeKind, ConcurrentDb, Result};
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now()
@@ -54,14 +54,14 @@ fn parse_i64(bytes: &[u8]) -> i64 {
         .expect("i64")
 }
 
-fn balance(db: &Db, name: &[u8]) -> i64 {
+fn balance(db: &ConcurrentDb, name: &[u8]) -> i64 {
     parse_i64(&db.get(&acct(name)).expect("account"))
 }
 
-fn open_account(db: &mut Db, name: &[u8], email: &[u8], cents: i64) -> Result<bool> {
+fn open_account(db: &mut ConcurrentDb, name: &[u8], email: &[u8], cents: i64) -> Result<bool> {
     let pk = acct(name);
     let idx = email_idx(email);
-    let mut tx = db.begin();
+    let mut tx = db.begin_occ();
     if tx.get(&pk)?.is_some() {
         tx.abort();
         return Ok(false);
@@ -76,10 +76,10 @@ fn open_account(db: &mut Db, name: &[u8], email: &[u8], cents: i64) -> Result<bo
     Ok(true)
 }
 
-fn transfer(db: &mut Db, from: &[u8], to: &[u8], cents: i64) -> Result<bool> {
+fn transfer(db: &mut ConcurrentDb, from: &[u8], to: &[u8], cents: i64) -> Result<bool> {
     let src_k = acct(from);
     let dst_k = acct(to);
-    let mut tx = db.begin();
+    let mut tx = db.begin_occ();
     let src = parse_i64(&tx.get(&src_k)?.expect("src"));
     let dst = parse_i64(&tx.get(&dst_k)?.expect("dst"));
     if src < cents {
@@ -107,16 +107,17 @@ fn transfer(db: &mut Db, from: &[u8], to: &[u8], cents: i64) -> Result<bool> {
     Ok(true)
 }
 
-fn lookup_name(db: &Db, email: &[u8]) -> Option<Vec<u8>> {
+fn lookup_name(db: &ConcurrentDb, email: &[u8]) -> Option<Vec<u8>> {
     db.get(&email_idx(email)).map(|b| b.to_vec())
 }
 
-fn ledger(db: &Db) -> Vec<String> {
+fn ledger(db: &ConcurrentDb) -> Vec<String> {
     let prefix = b"xfer/";
     let end = prefix_exclusive_end(prefix);
     let end_b = end.as_deref().map_or(Bound::Unbounded, Bound::Excluded);
-    db.scan(Bound::Included(prefix.as_ref()), end_b)
-        .map(|kv| String::from_utf8_lossy(&kv.value).into_owned())
+    db.scan_collect(Bound::Included(prefix.as_ref()), end_b)
+        .into_iter()
+        .map(|(_, value)| String::from_utf8_lossy(&value).into_owned())
         .collect()
 }
 
@@ -124,7 +125,7 @@ fn run() -> Result<()> {
     let dir = scratch("bank");
     let cursor;
     {
-        let mut db = Db::open(&dir)?;
+        let mut db = ConcurrentDb::open(&dir)?;
         cursor = db.last_sequence();
 
         assert!(open_account(&mut db, b"ada", b"ada@ex.com", 10_000)?);
@@ -156,7 +157,7 @@ fn run() -> Result<()> {
         // No close: same contract as crash_reopen.
     }
 
-    let db = Db::open(&dir)?;
+    let db = ConcurrentDb::open(&dir)?;
     assert_eq!(balance(&db, b"ada"), 7_500);
     assert_eq!(balance(&db, b"bob"), 6_500);
     assert_eq!(

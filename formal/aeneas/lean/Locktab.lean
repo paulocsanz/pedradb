@@ -16,8 +16,8 @@ theorem wait_for_deadlock_is_loop
   unfold wait_for_deadlock
   rfl
 
-/-- AS-IS tooth: the cycle is never a deadlock. -/
-theorem wait_for_deadlock_as_is_tooth
+/-- AS-IS dente: the cycle is never a deadlock. -/
+theorem wait_for_deadlock_as_is_dente
     (owned waiting waiter owner) :
     wait_for_deadlock_as_is owned waiting waiter owner = ok false := by
   unfold wait_for_deadlock_as_is

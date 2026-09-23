@@ -18,20 +18,20 @@ theorem submit_complete_act_harvested :
   unfold submit_complete_act
   rfl
 
-/-- AS-IS tooth: failed submit returns Err (releases the buffer). -/
-theorem submit_complete_act_as_is_tooth :
+/-- AS-IS dente: failed submit returns Err (releases the buffer). -/
+theorem submit_complete_act_as_is_dente :
     submit_complete_act_as_is false false =
       ok SubmitCompleteAct.ReturnSubmitErr := by
   unfold submit_complete_act_as_is
   rfl
 
-/-- AS-IS tooth: constant per-opcode tag. -/
-theorem next_user_data_as_is_tooth :
+/-- AS-IS dente: constant per-opcode tag. -/
+theorem next_user_data_as_is_dente :
     next_user_data_as_is (1#u64) (0x77#u64) = ok (0x77#u64, 1#u64) := by
   unfold next_user_data_as_is
   rfl
 
-/-! ## RFC-0214 P1.1 — costura CQE no degrau atom (fate ∀) -/
+/-! ## RFC-0214 P1.1 — costura CQE no degrau átomo (fate ∀) -/
 
 /-- RFC-0214 P1.1 (atom `catalog:cqe_res`): um CQE é sucesso
 se, e somente se, `res >= 0` — res negativo é erro, o kernel não
@@ -205,7 +205,7 @@ e senão espera (`WaitMore`) — o SQE já está no anel, voltar
 Err no submit solta o buffer sob DMA (F208). Fate forall
 sobre o corpo extraído (`submit_complete_act`). O mutante
 AS-IS (`submit_complete_act_as_is`) volta Err no submit
-com CQE pentooth — a planta DST
+com CQE pendente — a planta DST
 `harvest_on_submit_err_uses_cqe` recusa. -/
 theorem submit_complete_act_fate_iff :
     ∀ (submit_ok harvested : Bool) (act : SubmitCompleteAct),

@@ -10,8 +10,8 @@ theorem ae_ack_success_dirty_without_persist :
   unfold ae_ack_success
   rfl
 
-/-- AS-IS tooth: persist failure still acks. -/
-theorem ae_ack_success_as_is_tooth :
+/-- AS-IS dente: persist failure still acks. -/
+theorem ae_ack_success_as_is_dente :
     ae_ack_success_as_is true false = ok true := by
   unfold ae_ack_success_as_is
   rfl

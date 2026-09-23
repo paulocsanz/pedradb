@@ -337,7 +337,7 @@ mod tests {
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("pedra-scan-guard-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut db = crate::Db::open_with(
+        let mut db = crate::db::Db::open_with(
             &dir,
             crate::OpenOptions {
                 auto_flush_bytes: None,
@@ -400,7 +400,7 @@ mod tests {
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("pedra-key-window-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut db = crate::Db::open_with(
+        let mut db = crate::db::Db::open_with(
             &dir,
             crate::OpenOptions {
                 auto_flush_bytes: None,
@@ -458,7 +458,7 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("pedra-bounds-live-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut db = crate::Db::open_with(
+        let mut db = crate::db::Db::open_with(
             &dir,
             crate::OpenOptions {
                 auto_flush_bytes: None,

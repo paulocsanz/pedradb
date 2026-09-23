@@ -21,7 +21,7 @@
 //! Load-sensitive by design (wall-clock ratio, not qps): absolute
 //! numbers want a quiet box; the ratio is the claim.
 
-use pedradb_core::{Db, HistoryHorizon, HistoryOptions, OpenOptions};
+use pedradb_core::{db::Db, HistoryHorizon, HistoryOptions, OpenOptions};
 use std::fs;
 use std::path::PathBuf;
 use std::thread::sleep;

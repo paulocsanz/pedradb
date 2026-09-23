@@ -204,7 +204,7 @@ mod tests {
             key_in_cf_family_as_is(&lock, "default"),
             "AS-IS tooth: scan leak"
         );
-        let mut db = crate::Db::open(
+        let mut db = crate::db::Db::open(
             std::env::temp_dir().join(format!("pedra-cf-plant-{}", std::process::id())),
         )
         .unwrap();

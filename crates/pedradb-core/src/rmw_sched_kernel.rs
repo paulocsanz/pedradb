@@ -26,7 +26,7 @@
 //!
 //! 2026-09-14: the wiring default is ON (`PEDRA_RMW_SCHED=0` restores the
 //! bypass). Railway overwrite_mc4 0.35× was 4 writers on 48 CPUs taking
-//! the 0201 bypass; the 4-vCPU board is the same `writers == ncpu` hole.
+//! the 0201 bypass; the 4-vCPU cartaz is the same `writers == ncpu` hole.
 
 #![forbid(unsafe_code)]
 
@@ -107,7 +107,7 @@ mod tests {
         assert_eq!(
             rmw_group_sched(4, 4, true, None),
             SchedDecision::Merge,
-            "mc4 on the 4-vCPU board box: the rmw regime this RFC owns"
+            "mc4 on the 4-vCPU cartaz box: the rmw regime this RFC owns"
         );
         assert_eq!(
             rmw_group_sched_as_is(4, 4, true, None),

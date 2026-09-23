@@ -18,11 +18,11 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P2.1 10/12 (atom `catalog:ship_stamp`, entrada
+/-- RFC-0218 P2.1 10/12 (átomo `catalog:ship_stamp`, entrada
     `stamp_changed`): o stamp mudou EXATAMENTE como citado — stamp
     agora maior já é mudança (true); do mesmo tamanho, mudou é o
     prefixo citado de mesmo comprimento ser diferente (`ne` gate).
-    O AS-IS nunca vê mudança (rotaciona atrasado — tooth plantado). -/
+    O AS-IS nunca vê mudança (rotaciona atrasado — dente plantado). -/
 theorem stamp_changed_fate_iff :
     ∀ (stamp_then stamp_now : Slice U8) (v : Bool),
       (stamp_changed stamp_then stamp_now = ok v) ↔
@@ -62,14 +62,14 @@ theorem stamp_changed_is_def : True := by
   have _ := @stamp_changed
   trivial
 
-/-- RFC-0218 P2.1 11/12 (atom `catalog:ship_guard`, entrada
+/-- RFC-0218 P2.1 11/12 (átomo `catalog:ship_guard`, entrada
     `pull_plan`): o plano de pull é EXATAMENTE a árvore citada —
     arquivo sumiu: Rotated (cursor atrasado ou stamp_then presente
     segura); arquivo de mesmo comprimento: UpToDate; arquivo
     maior: Ship do mínimo entre (len - cursor) e max_pull, com o
     gate citado stamp_changed forçando Rotated quando o stamp
     girou. O AS-IS nunca rotaciona no stamp (pull atrasado lê
-    truncado — tooth plantado). -/
+    truncado — dente plantado). -/
 theorem pull_plan_fate_iff :
     ∀ (file_len : Option U64) (cursor : U64) (max_pull : U64)
       (stamp_then : Option (Slice U8)) (stamp_now : Slice U8)

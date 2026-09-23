@@ -18,7 +18,7 @@ theorem l28_durability_kill_step_fails_closed :
   unfold l28_durability_ok
   rfl
 
-/-- AS-IS L28 tooth: the get answer alone decides (kill/restart ignored). -/
+/-- AS-IS L28 dente: the get answer alone decides (kill/restart ignored). -/
 theorem l28_durability_as_is_ignores_kill :
     l28_durability_ok_as_is true false true = ok true := by
   rfl
@@ -28,7 +28,7 @@ theorem l28_leader_kill_matches_durability :
     l28_leader_kill_ok true false true = ok false := by
   rfl
 
-/-- AS-IS L28 tooth: leader-kill ignores the kill step. -/
+/-- AS-IS L28 dente: leader-kill ignores the kill step. -/
 theorem l28_leader_kill_as_is_ignores_kill :
     l28_leader_kill_ok_as_is true false true = ok true := by
   rfl
@@ -46,7 +46,7 @@ theorem world_seed_l28_ok_clean_cluster_ok :
   unfold world_seed_l28_ok
   simp
 
-/-- AS-IS world-seed tooth: the cluster verdict is only the seed being
+/-- AS-IS world-seed dente: the cluster verdict is only the seed being
     clean — silent-wrong with ok seed still reports ok. -/
 theorem world_seed_l28_ok_as_is_ignores_cluster :
     world_seed_l28_ok_as_is (0#u64) false = ok true := by
@@ -63,7 +63,7 @@ theorem l28_tcp_plant_remove_failure_blocks :
     l28_tcp_plant_ok false true = ok false := by
   rfl
 
-/-- AS-IS plant tooth: neither remove nor leave is checked. -/
+/-- AS-IS plant dente: neither remove nor leave is checked. -/
 theorem l28_tcp_plant_as_is_ignores_both :
     l28_tcp_plant_ok_as_is false false = ok true := by
   rfl
@@ -73,7 +73,7 @@ theorem l28_tcp_napply_retry_never_admitted :
     l28_tcp_napply_retry_admitted (5#u64) true = ok false := by
   rfl
 
-/-- AS-IS retry tooth: first retry of a not-applied op is admitted. -/
+/-- AS-IS retry dente: first retry of a not-applied op is admitted. -/
 theorem l28_tcp_napply_retry_as_is_admits :
     l28_tcp_napply_retry_admitted_as_is (1#u64) true = ok true := by
   unfold l28_tcp_napply_retry_admitted_as_is
@@ -84,7 +84,7 @@ theorem l28_tcp_leave_propagates :
     l28_tcp_leave_ok false = ok false ∧ l28_tcp_leave_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 leave tooth: the gate is always ok. -/
+/-- AS-IS L28 leave dente: the gate is always ok. -/
 theorem l28_tcp_leave_as_is_always_ok :
     l28_tcp_leave_ok_as_is false = ok true := by
   rfl
@@ -94,7 +94,7 @@ theorem l28_tcp_left_propagates :
     l28_tcp_left_ok false = ok false ∧ l28_tcp_left_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 left tooth: the gate is always ok. -/
+/-- AS-IS L28 left dente: the gate is always ok. -/
 theorem l28_tcp_left_as_is_always_ok :
     l28_tcp_left_ok_as_is false = ok true := by
   rfl
@@ -104,7 +104,7 @@ theorem l28_tcp_hw_propagates :
     l28_tcp_hw_ok false = ok false ∧ l28_tcp_hw_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 hw tooth: the gate is always ok. -/
+/-- AS-IS L28 hw dente: the gate is always ok. -/
 theorem l28_tcp_hw_as_is_always_ok :
     l28_tcp_hw_ok_as_is false = ok true := by
   rfl
@@ -114,7 +114,7 @@ theorem l28_tcp_part_propagates :
     l28_tcp_part_ok false = ok false ∧ l28_tcp_part_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 part tooth: the gate is always ok. -/
+/-- AS-IS L28 part dente: the gate is always ok. -/
 theorem l28_tcp_part_as_is_always_ok :
     l28_tcp_part_ok_as_is false = ok true := by
   rfl
@@ -124,7 +124,7 @@ theorem l28_tcp_apply_propagates :
     l28_tcp_apply_ok false = ok false ∧ l28_tcp_apply_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 apply tooth: the gate is always ok. -/
+/-- AS-IS L28 apply dente: the gate is always ok. -/
 theorem l28_tcp_apply_as_is_always_ok :
     l28_tcp_apply_ok_as_is false = ok true := by
   rfl
@@ -134,7 +134,7 @@ theorem l28_tcp_napply_propagates :
     l28_tcp_napply_ok false = ok false ∧ l28_tcp_napply_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 napply tooth: the gate is always ok. -/
+/-- AS-IS L28 napply dente: the gate is always ok. -/
 theorem l28_tcp_napply_as_is_always_ok :
     l28_tcp_napply_ok_as_is false = ok true := by
   rfl
@@ -144,7 +144,7 @@ theorem l28_tcp_trunc_propagates :
     l28_tcp_trunc_ok false = ok false ∧ l28_tcp_trunc_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 trunc tooth: the gate is always ok. -/
+/-- AS-IS L28 trunc dente: the gate is always ok. -/
 theorem l28_tcp_trunc_as_is_always_ok :
     l28_tcp_trunc_ok_as_is false = ok true := by
   rfl
@@ -154,7 +154,7 @@ theorem l28_tcp_odrop_propagates :
     l28_tcp_odrop_ok false = ok false ∧ l28_tcp_odrop_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 odrop tooth: the gate is always ok. -/
+/-- AS-IS L28 odrop dente: the gate is always ok. -/
 theorem l28_tcp_odrop_as_is_always_ok :
     l28_tcp_odrop_ok_as_is false = ok true := by
   rfl
@@ -164,7 +164,7 @@ theorem l28_tcp_abort_propagates :
     l28_tcp_abort_ok false = ok false ∧ l28_tcp_abort_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 abort tooth: the gate is always ok. -/
+/-- AS-IS L28 abort dente: the gate is always ok. -/
 theorem l28_tcp_abort_as_is_always_ok :
     l28_tcp_abort_ok_as_is false = ok true := by
   rfl
@@ -174,7 +174,7 @@ theorem l28_tcp_nowms_propagates :
     l28_tcp_nowms_ok false = ok false ∧ l28_tcp_nowms_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 nowms tooth: the gate is always ok. -/
+/-- AS-IS L28 nowms dente: the gate is always ok. -/
 theorem l28_tcp_nowms_as_is_always_ok :
     l28_tcp_nowms_ok_as_is false = ok true := by
   rfl
@@ -184,7 +184,7 @@ theorem l28_tcp_dterm_propagates :
     l28_tcp_dterm_ok false = ok false ∧ l28_tcp_dterm_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 dterm tooth: the gate is always ok. -/
+/-- AS-IS L28 dterm dente: the gate is always ok. -/
 theorem l28_tcp_dterm_as_is_always_ok :
     l28_tcp_dterm_ok_as_is false = ok true := by
   rfl
@@ -194,7 +194,7 @@ theorem l28_tcp_hist_propagates :
     l28_tcp_hist_ok false = ok false ∧ l28_tcp_hist_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 hist tooth: the gate is always ok. -/
+/-- AS-IS L28 hist dente: the gate is always ok. -/
 theorem l28_tcp_hist_as_is_always_ok :
     l28_tcp_hist_ok_as_is false = ok true := by
   rfl
@@ -204,7 +204,7 @@ theorem l28_tcp_fence_propagates :
     l28_tcp_fence_ok false = ok false ∧ l28_tcp_fence_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 fence tooth: the gate is always ok. -/
+/-- AS-IS L28 fence dente: the gate is always ok. -/
 theorem l28_tcp_fence_as_is_always_ok :
     l28_tcp_fence_ok_as_is false = ok true := by
   rfl
@@ -214,7 +214,7 @@ theorem l28_tcp_clear_propagates :
     l28_tcp_clear_ok false = ok false ∧ l28_tcp_clear_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 clear tooth: the gate is always ok. -/
+/-- AS-IS L28 clear dente: the gate is always ok. -/
 theorem l28_tcp_clear_as_is_always_ok :
     l28_tcp_clear_ok_as_is false = ok true := by
   rfl
@@ -224,7 +224,7 @@ theorem l28_tcp_pre_propagates :
     l28_tcp_pre_ok false = ok false ∧ l28_tcp_pre_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 pre tooth: the gate is always ok. -/
+/-- AS-IS L28 pre dente: the gate is always ok. -/
 theorem l28_tcp_pre_as_is_always_ok :
     l28_tcp_pre_ok_as_is false = ok true := by
   rfl
@@ -234,7 +234,7 @@ theorem l28_tcp_peer_propagates :
     l28_tcp_peer_ok false = ok false ∧ l28_tcp_peer_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 peer tooth: the gate is always ok. -/
+/-- AS-IS L28 peer dente: the gate is always ok. -/
 theorem l28_tcp_peer_as_is_always_ok :
     l28_tcp_peer_ok_as_is false = ok true := by
   rfl
@@ -244,7 +244,7 @@ theorem l28_tcp_lid_propagates :
     l28_tcp_lid_ok false = ok false ∧ l28_tcp_lid_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 lid tooth: the gate is always ok. -/
+/-- AS-IS L28 lid dente: the gate is always ok. -/
 theorem l28_tcp_lid_as_is_always_ok :
     l28_tcp_lid_ok_as_is false = ok true := by
   rfl
@@ -254,7 +254,7 @@ theorem l28_tcp_rdr_propagates :
     l28_tcp_rdr_ok false = ok false ∧ l28_tcp_rdr_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 rdr tooth: the gate is always ok. -/
+/-- AS-IS L28 rdr dente: the gate is always ok. -/
 theorem l28_tcp_rdr_as_is_always_ok :
     l28_tcp_rdr_ok_as_is false = ok true := by
   rfl
@@ -264,7 +264,7 @@ theorem l28_tcp_dsc_propagates :
     l28_tcp_dsc_ok false = ok false ∧ l28_tcp_dsc_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 dsc tooth: the gate is always ok. -/
+/-- AS-IS L28 dsc dente: the gate is always ok. -/
 theorem l28_tcp_dsc_as_is_always_ok :
     l28_tcp_dsc_ok_as_is false = ok true := by
   rfl
@@ -274,7 +274,7 @@ theorem l28_tcp_pld_propagates :
     l28_tcp_pld_ok false = ok false ∧ l28_tcp_pld_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 pld tooth: the gate is always ok. -/
+/-- AS-IS L28 pld dente: the gate is always ok. -/
 theorem l28_tcp_pld_as_is_always_ok :
     l28_tcp_pld_ok_as_is false = ok true := by
   rfl
@@ -284,7 +284,7 @@ theorem l28_tcp_std_propagates :
     l28_tcp_std_ok false = ok false ∧ l28_tcp_std_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 std tooth: the gate is always ok. -/
+/-- AS-IS L28 std dente: the gate is always ok. -/
 theorem l28_tcp_std_as_is_always_ok :
     l28_tcp_std_ok_as_is false = ok true := by
   rfl
@@ -294,7 +294,7 @@ theorem l28_tcp_hnt_propagates :
     l28_tcp_hnt_ok false = ok false ∧ l28_tcp_hnt_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 hnt tooth: the gate is always ok. -/
+/-- AS-IS L28 hnt dente: the gate is always ok. -/
 theorem l28_tcp_hnt_as_is_always_ok :
     l28_tcp_hnt_ok_as_is false = ok true := by
   rfl
@@ -304,7 +304,7 @@ theorem l28_tcp_slot_propagates :
     l28_tcp_slot_ok false = ok false ∧ l28_tcp_slot_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 slot tooth: the gate is always ok. -/
+/-- AS-IS L28 slot dente: the gate is always ok. -/
 theorem l28_tcp_slot_as_is_always_ok :
     l28_tcp_slot_ok_as_is false = ok true := by
   rfl
@@ -314,7 +314,7 @@ theorem l28_tcp_sth_propagates :
     l28_tcp_sth_ok false = ok false ∧ l28_tcp_sth_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 sth tooth: the gate is always ok. -/
+/-- AS-IS L28 sth dente: the gate is always ok. -/
 theorem l28_tcp_sth_as_is_always_ok :
     l28_tcp_sth_ok_as_is false = ok true := by
   rfl
@@ -324,7 +324,7 @@ theorem l28_tcp_pj_propagates :
     l28_tcp_pj_ok false = ok false ∧ l28_tcp_pj_ok true = ok true := by
   constructor <;> rfl
 
-/-- AS-IS L28 pj tooth: the gate is always ok. -/
+/-- AS-IS L28 pj dente: the gate is always ok. -/
 theorem l28_tcp_pj_as_is_always_ok :
     l28_tcp_pj_ok_as_is false = ok true := by
   rfl
@@ -722,11 +722,11 @@ theorem l28_tcp_pj_ok_fate_iff :
   unfold l28_tcp_pj_ok
   cases b <;> cases v <;> simp
 
-/-- RFC-0218 P2.2 (atom `catalog:l28_durability`, entrada
+/-- RFC-0218 P2.2 (átomo `catalog:l28_durability`, entrada
     `l28_durability_ok`): a impressão digital de durabilidade é
     EXATAMENTE a conjunção citada — get_ok E after_kill_ok E restart_ok
     (cascata de ifs). O AS-IS aceita o primeiro get (o buraco 0072 —
-    tooth plantado). -/
+    dente plantado). -/
 theorem l28_durability_ok_fate_iff :
     ∀ (get_ok after_kill_ok restart_ok : Bool) (v : Bool),
       (l28_durability_ok get_ok after_kill_ok restart_ok = ok v) ↔
@@ -757,10 +757,10 @@ theorem l28_durability_ok_fate_iff :
     · rfl
     · rfl
 
-/-- RFC-0218 P2.2 (atom `catalog:l28_napply_retry`, entrada
+/-- RFC-0218 P2.2 (átomo `catalog:l28_napply_retry`, entrada
     `l28_tcp_napply_retry_admitted`): retries do harness NÃO são ∀
     traços TCP — admissão é a constante citada false. O AS-IS arredonda
-    um napply com sucesso após >= 1 tentativa para ∀ TCP (tooth
+    um napply com sucesso após >= 1 tentativa para ∀ TCP (dente
     plantado). -/
 theorem l28_tcp_napply_retry_admitted_fate_iff :
     ∀ (attempts : U64) (napply_ok : Bool) (v : Bool),

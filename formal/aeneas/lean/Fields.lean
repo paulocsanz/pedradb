@@ -12,8 +12,8 @@ theorem field_kept_id (len nul) :
   unfold field_kept
   rfl
 
-/-- AS-IS tooth: keep only up to the NUL. -/
-theorem field_kept_as_is_tooth (len nul) :
+/-- AS-IS dente: keep only up to the NUL. -/
+theorem field_kept_as_is_dente (len nul) :
     field_kept_as_is len nul = ok nul := by
   unfold field_kept_as_is
   rfl

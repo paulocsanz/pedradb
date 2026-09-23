@@ -12,25 +12,25 @@ theorem strip_authority_for_routing_true :
   unfold strip_authority_for_routing
   rfl
 
-/-- AS-IS tooth: never strip authority. -/
-theorem strip_authority_for_routing_as_is_tooth :
+/-- AS-IS dente: never strip authority. -/
+theorem strip_authority_for_routing_as_is_dente :
     strip_authority_for_routing_as_is true = ok false := by
   unfold strip_authority_for_routing_as_is
   rfl
 
-/-- AS-IS tooth: fragment stays in the path. -/
+/-- AS-IS dente: fragment stays in the path. -/
 theorem strip_uri_fragment_as_is_id (t) :
     strip_uri_fragment_as_is t = ok t := by
   unfold strip_uri_fragment_as_is
   rfl
 
-/-- AS-IS tooth: Host is never compared. -/
-theorem host_authority_mismatch_as_is_tooth (h a) :
+/-- AS-IS dente: Host is never compared. -/
+theorem host_authority_mismatch_as_is_dente (h a) :
     host_authority_mismatch_as_is h a = ok false := by
   unfold host_authority_mismatch_as_is
   rfl
 
-/-! ### RFC-0216 P2.1 — path ×8 atom -/
+/-! ### RFC-0216 P2.1 — path ×8 átomo -/
 
 private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : β)
     (h : Aeneas.Std.bind x f = ok v) : ∃ a, x = ok a ∧ f a = ok v := by
@@ -39,9 +39,9 @@ private theorem bind_ok_inv {α β} (x : Result α) (f : α → Result β) (v : 
   | fail e => exact absurd h (by simp)
   | div => exact absurd h (by simp)
 
-/-- RFC-0216 P2.1 1/8 (atom `catalog:strip_authority_for_routing`):
+/-- RFC-0216 P2.1 1/8 (átomo `catalog:strip_authority_for_routing`):
   o roteador da forma-authority repassa exatamente a bandeira de
-  forma-authority; o AS-IS nunca strips (tooth já provado acima). -/
+  forma-authority; o AS-IS nunca strips (dente já provado acima). -/
 theorem strip_authority_for_routing_fate_iff :
     ∀ (b : Bool) (r : Bool),
       (strip_authority_for_routing b = ok r) ↔ r = b := by
@@ -54,7 +54,7 @@ theorem strip_authority_for_routing_fate_iff :
     unfold strip_authority_for_routing
     rw [hr]
 
-/-- RFC-0216 P2.1 2/8 (atom `catalog:strip_uri_fragment`): o
+/-- RFC-0216 P2.1 2/8 (átomo `catalog:strip_uri_fragment`): o
   fragmento é descartado exatamente pelo split no `#` — sem `#` a
   target volta inteira, com `#` fica o prefixo. -/
 theorem strip_uri_fragment_fate_iff :
@@ -84,7 +84,7 @@ theorem strip_uri_fragment_fate_iff :
       rw [ho]
       simp only [Aeneas.Std.bind_tc_ok]
 
-/-- RFC-0216 P2.1 3/8 (atom `catalog:path_after_authority`): o path
+/-- RFC-0216 P2.1 3/8 (átomo `catalog:path_after_authority`): o path
   depois da autoridade é exatamente o primeiro `/` em diante — sem
   `/` a resposta é a raiz `/`, com `/` é o slice index a partir
   dele. -/
@@ -119,7 +119,7 @@ theorem path_after_authority_fate_iff :
       simp only [Aeneas.Std.bind_tc_ok]
       exact hindex
 
-/-- RFC-0216 P2.1 4/8 (atom `catalog:strip_http_authority`): a
+/-- RFC-0216 P2.1 4/8 (átomo `catalog:strip_http_authority`): a
   autoridade HTTP é descartada exatamente pelo rest extraído — sem
   `//` prefixo nada a fazer (none), com `//` o path é o
   path_after_authority do rest. -/
@@ -153,7 +153,7 @@ theorem strip_http_authority_fate_iff :
       rw [hp]
       simp only [Aeneas.Std.bind_tc_ok]
 
-/-- RFC-0216 P2.1 5/8 (atom `catalog:host_authority_mismatch`): o
+/-- RFC-0216 P2.1 5/8 (átomo `catalog:host_authority_mismatch`): o
   Host nunca diverge do authority sem ser detectado — hosts
   diferentes (case-insensitive) ⇒ true; hosts iguais ⇒ o veredito é
   a negação da equivalência de portas. -/
@@ -225,7 +225,7 @@ theorem host_authority_mismatch_fate_iff :
       simp only [Aeneas.Std.bind_tc_ok]
       simp
 
-/-- RFC-0216 P2.1 6/8 (atom `catalog:origin_path`, entrada
+/-- RFC-0216 P2.1 6/8 (átomo `catalog:origin_path`, entrada
   `origin_form_path`): o path de roteamento é exatamente a cadeia
   citada — strip do fragmento, strip da autoridade HTTP (com fallback
   `//` do rest), e o corte no `?`. -/
@@ -340,7 +340,7 @@ theorem origin_form_path_fate_iff :
       rw [hsp]; simp only [Aeneas.Std.bind_tc_ok]
       rw [ho2]; simp only [Aeneas.Std.bind_tc_ok]
 
-/-- RFC-0216 P2.1 7/8 (atom `catalog:split_host_port`): o par
+/-- RFC-0216 P2.1 7/8 (átomo `catalog:split_host_port`): o par
   host/porta é exatamente a cadeia citada — o `@` descarta o usuário,
   `[...]` marca um host IPv6 literal com a porta depois de `:`, e
   fora disso o veredito é o `split_host_port_colon`. -/
@@ -580,7 +580,7 @@ theorem split_host_port_fate_iff :
       rw [hbr]; simp only [Aeneas.Std.bind_tc_ok]
       exact hcol
 
-/-- RFC-0216 P2.1 8/8 (atom `catalog:request_target_authority`): a
+/-- RFC-0216 P2.1 8/8 (átomo `catalog:request_target_authority`): a
   autoridade da request-target é exatamente a cadeia citada — strip do
   fragmento, o rest da autoridade HTTP (ou o fallback `//` quando não há
   scheme), e o corte no primeiro `/`/`?` (ou o fim); autoridade vazia

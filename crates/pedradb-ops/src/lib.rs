@@ -38,10 +38,7 @@ use pedradb_core::manifest::{self, VersionSet};
 use pedradb_core::wal::Wal;
 #[cfg(test)]
 use pedradb_core::StdEnv;
-use pedradb_core::{
-    copy_db_directory, read_checkpoint_meta, verify_at_rest, CheckpointMeta, ConcurrentDb,
-    CoreError, Db, Env, EnvFile, OpenOptions, SequenceNumber, WriteOp, WriteRecord, WAL_FILE_NAME,
-};
+use pedradb_core::{copy_db_directory, read_checkpoint_meta, verify_at_rest, CheckpointMeta, ConcurrentDb, CoreError, db::Db, Env, EnvFile, OpenOptions, SequenceNumber, WriteOp, WriteRecord, WAL_FILE_NAME, };
 use pedradb_io_uring::IoUringEnv;
 
 mod dir_kind;
@@ -311,7 +308,22 @@ impl<E: Env> BackupEngine<E> {
     /// # Errors
     /// WAL recover / I/O.
     pub fn ship_wal(&mut self, db: &Db<E>) -> Result<WalShipMeta> {
-        let wal_path = db.path().join(WAL_FILE_NAME);
+        self.ship_wal_from(db.path())
+    }
+
+    /// Same archive as [`Self::ship_wal`], from a [`pedradb_core::ConcurrentDb`].
+    ///
+    /// # Errors
+    /// WAL recover / I/O.
+    pub fn ship_wal_concurrent<E2: Env>(
+        &mut self,
+        db: &pedradb_core::ConcurrentDb<E2>,
+    ) -> Result<WalShipMeta> {
+        self.ship_wal_from(&db.path())
+    }
+
+    fn ship_wal_from(&mut self, dir: &Path) -> Result<WalShipMeta> {
+        let wal_path = dir.join(WAL_FILE_NAME);
         if !self.env.exists(&wal_path) {
             return Ok(WalShipMeta {
                 segment: None,
@@ -1011,7 +1023,7 @@ pub fn migrate_to_latest_env(path: impl AsRef<Path>, env: impl Env) -> Result<Mi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pedradb_core::{Db, OpenOptions};
+    use pedradb_core::{db::Db, OpenOptions};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 

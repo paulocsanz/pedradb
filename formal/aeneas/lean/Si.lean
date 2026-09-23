@@ -31,8 +31,8 @@ theorem si_reader_beats_watermark_breaks_last_tie :
   have h : (5#u64 > 3#u64) = true := by native_decide
   simp [h]
 
-/-- AS-IS F42 tooth: the fold never advances the reader. -/
-theorem si_reader_beats_as_is_tooth :
+/-- AS-IS F42 dente: the fold never advances the reader. -/
+theorem si_reader_beats_as_is_dente :
     si_reader_beats_as_is true true false 0#u64 false false false 0#u64
       = ok false := by
   rfl
@@ -42,8 +42,8 @@ theorem point_get_prefer_applied_teeth :
     point_get_prefer_applied = ok true := by
   rfl
 
-/-- AS-IS F84 tooth: point get rides the global sequence. -/
-theorem point_get_prefer_applied_as_is_tooth :
+/-- AS-IS F84 dente: point get rides the global sequence. -/
+theorem point_get_prefer_applied_as_is_dente :
     point_get_prefer_applied_as_is = ok false := by
   rfl
 
@@ -52,15 +52,15 @@ theorem point_get_watermark_prefers_range_applied :
     point_get_watermark (7#u64) (9#u64) = ok 7#u64 := by
   rfl
 
-/-- AS-IS F84 tooth: the watermark is the global sequence instead. -/
-theorem point_get_watermark_as_is_tooth :
+/-- AS-IS F84 dente: the watermark is the global sequence instead. -/
+theorem point_get_watermark_as_is_dente :
     point_get_watermark_as_is (7#u64) (9#u64) = ok 9#u64 := by
   rfl
 
-/-- RFC-0218 P1.3 1/11 (atom `catalog:point_get_prefer`, entrada
+/-- RFC-0218 P1.3 1/11 (átomo `catalog:point_get_prefer`, entrada
     `point_get_prefer_applied`): o point-get prefere o índice applied
     — EXATAMENTE a constante citada true. O AS-IS é false (applied
-    ignorado — tooth plantado). -/
+    ignorado — dente plantado). -/
 theorem point_get_prefer_applied_fate_iff :
     ∀ (v : Bool),
       (point_get_prefer_applied = ok v) ↔ (v = true) := by
@@ -74,10 +74,10 @@ theorem point_get_prefer_applied_fate_iff :
     subst hv
     rfl
 
-/-- RFC-0218 P1.3 5/11 (atom `catalog:point_get_wm`, entrada
+/-- RFC-0218 P1.3 5/11 (átomo `catalog:point_get_wm`, entrada
     `point_get_watermark`): o watermark do point-get é EXATAMENTE o
     lift citado `range_applied` — o global_seq não entra. O AS-IS
-    devolve global_seq (ler não-aplicado — tooth plantado). -/
+    devolve global_seq (ler não-aplicado — dente plantado). -/
 theorem point_get_watermark_fate_iff :
     ∀ (range_applied : U64) (global_seq : U64) (r : U64),
       (point_get_watermark range_applied global_seq = ok r) ↔
@@ -106,11 +106,11 @@ private theorem bind_intro {α β} {x : Result α} {f : α → Result β} {v : �
   rw [hx]
   exact h
 
-/-- RFC-0218 P1.3 8/11 (atom `catalog:si_read`, entrada
+/-- RFC-0218 P1.3 8/11 (átomo `catalog:si_read`, entrada
     `snapshot_read_plan`): servir ou recusar um snapshot é EXATAMENTE
     compará-lo contra o piso citado `watermark - 1` (saturating) —
     abaixo do piso, TooOld (fail closed); no piso ou acima, Serve. O
-    AS-IS serve todo mundo (ausência fabricada — tooth plantado). -/
+    AS-IS serve todo mundo (ausência fabricada — dente plantado). -/
 theorem snapshot_read_plan_fate_iff :
     ∀ (snapshot : U64) (watermark : U64) (r : SnapshotRead),
       (snapshot_read_plan snapshot watermark = ok r) ↔
@@ -140,11 +140,11 @@ theorem snapshot_read_plan_fate_iff :
       subst hv
       rw [if_neg hc]
 
-/-- RFC-0218 P1.3 9/11 (atom `catalog:si_reader`, entrada
+/-- RFC-0218 P1.3 9/11 (átomo `catalog:si_reader`, entrada
     `si_reader_beats`): eleger o leitor SI é EXATAMENTE a cascata
     citada — liveness (líder+participante) decide primeiro; empatada,
     participação; empatada, self; empatada, o watermark applied
-    decide. O AS-IS nunca avança o leitor (tooth plantado). -/
+    decide. O AS-IS nunca avança o leitor (dente plantado). -/
 theorem si_reader_beats_fate_iff :
     ∀ (c_leader c_part c_self : Bool) (c_applied : U64)
       (b_leader b_part b_self : Bool) (b_applied : U64) (v : Bool),

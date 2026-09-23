@@ -10,13 +10,13 @@ theorem dcs_apply_should_advance_cas :
   unfold apply_kernel.dcs_apply_should_advance
   rfl
 
-/-- AS-IS tooth: CasFailed freezes. -/
-theorem dcs_apply_should_advance_as_is_tooth :
+/-- AS-IS dente: CasFailed freezes. -/
+theorem dcs_apply_should_advance_as_is_dente :
     apply_kernel.dcs_apply_should_advance_as_is false true = ok false := by
   unfold apply_kernel.dcs_apply_should_advance_as_is
   rfl
 
-/-- Catalog entry (RFC-0218 P2.2, atom `dcs_apply`): the advance
+/-- Catalog entry (RFC-0218 P2.2, átomo `dcs_apply`): the advance
     decision on a DCS apply result is exactly the cited tree — ok
     advances; CasFailed still advances; Core/LeaseNotFound/Corrupt
     freeze (F12/F22). -/
@@ -84,7 +84,7 @@ theorem dcs_apply_should_advance_result_fate_iff :
         show ok false = ok v
         rw [h]
 
-/-- Catalog entry (RFC-0218 P2.2, atom `dcs_advance_bool`): the
+/-- Catalog entry (RFC-0218 P2.2, átomo `dcs_advance_bool`): the
     advance bit is exactly the cited ite — ok1 forces true; a failed
     result advances exactly when it failed on Cas (F12/F22). -/
 theorem dcs_apply_should_advance_fate_iff :

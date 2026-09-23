@@ -22,8 +22,8 @@ theorem c1_modelo_joint_add_refuses :
   unfold commit_kernel.propose_ack_ok
   rfl
 
-/-- AS-IS tooth: C-old majority acks during joint add. -/
-theorem c1_modelo_as_is_tooth :
+/-- AS-IS dente: C-old majority acks during joint add. -/
+theorem c1_modelo_as_is_dente :
     c1_modelo_kernel.c1_modelo_as_is jointAdd = ok true := by
   unfold c1_modelo_kernel.c1_modelo_as_is
   unfold c1_modelo_kernel.c1_advance_commit_as_is
@@ -34,7 +34,7 @@ theorem c1_modelo_as_is_tooth :
   unfold commit_kernel.propose_ack_ok_as_is
   rfl
 
-/-! ## RFC-0215 P0.2 — crown de produto no degrau atom (modelo ×4) -/
+/-! ## RFC-0215 P0.2 — coroa de produto no degrau átomo (modelo ×4) -/
 
 /-- Any ok-valued Result bind forces the bound term to be ok
 (Cf.lean's `bind_ok_inv`, restated for this module). -/
@@ -104,7 +104,7 @@ theorem c1_modelo_fate_iff :
         rw [hserved, if_pos rfl]
         exact hcall
 
-/-! ## RFC-0215 P1.1 — crown de produto no degrau atom (fate ×2) -/
+/-! ## RFC-0215 P1.1 — coroa de produto no degrau átomo (fate ×2) -/
 
 /-- RFC-0215 P1.1 2/2 (atom `catalog:c1_advance_commit`, entry
 `c1_advance_commit`): o commit avança exatamente na maioria — `ok t` é
@@ -112,7 +112,7 @@ exatamente: `c1_quorum` computa `b`, `may_commit_at` decide `b1`; sem
 maioria `t = s`, com maioria `t` leva o máximo proposto
 (`c1_quorum`/`may_commit_at`/`Ord.max` citados, corpos não reabertos).
 O mutante AS-IS (`c1_advance_commit_as_is`) aceita commit sem maioria;
-planta três-teeth recusa. -/
+planta três-dentes recusa. -/
 theorem c1_advance_commit_fate_iff :
     ∀ (s t : c1_modelo_kernel.C1State),
       (c1_modelo_kernel.c1_advance_commit s = ok t) ↔

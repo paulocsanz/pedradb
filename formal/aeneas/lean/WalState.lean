@@ -14,8 +14,8 @@ theorem inv_wal_well_formed :
   unfold wal.wal_state_kernel.inv_wal
   rfl
 
-/-- AS-IS tooth: acked past the barrier still admits. -/
-theorem inv_wal_as_is_tooth :
+/-- AS-IS dente: acked past the barrier still admits. -/
+theorem inv_wal_as_is_dente :
     wal.wal_state_kernel.inv_wal_as_is
       { acked := 5#u64, synced := 0#u64, written := 10#u64 } = ok true := by
   unfold wal.wal_state_kernel.inv_wal_as_is
@@ -33,8 +33,8 @@ theorem acked_survives_legal_cut :
   simp [core.cmp.Ord.min.trait_default, core.cmp.Ord.min.default,
     core.cmp.Ord.min_body, core.cmp.impls.PartialOrdU64.lt]
 
-/-- AS-IS tooth: a cut below the barrier is treated as legal and fails. -/
-theorem acked_survives_as_is_tooth :
+/-- AS-IS dente: a cut below the barrier is treated as legal and fails. -/
+theorem acked_survives_as_is_dente :
     wal.wal_state_kernel.acked_survives_as_is
       { acked := 4#u64, synced := 4#u64, written := 10#u64 }
       (3#u64) = ok false := by
@@ -373,7 +373,7 @@ inductive wal_write_step :
 
 /-- Corolário da classe completa (RFC-0198 P1.2, fecha a frase): TODO
 passo do write path que toca o WAL preserva Inv-WAL — cada construtor
-cita o lema um-passo correspontooth (`wal_append_preserves_inv_wal`
+cita o lema um-passo correspondente (`wal_append_preserves_inv_wal`
 RFC-0191 P2.1; `wal_sync_preserves_inv_wal` e `wal_ack_preserves_inv_wal`
 P1.2); nada é re-provado aqui. -/
 theorem wal_write_step_preserves_inv_wal :
@@ -415,7 +415,7 @@ theorem inv_wal_write_reachable :
   | step k' s0 s1 hstep _ IH =>
       exact wal_write_step_preserves_inv_wal _ _ IH hstep
 
-/-! ## RFC-0214 P0.1 — spine de durabilidade no degrau atom (fate ∀) -/
+/-! ## RFC-0214 P0.1 — espinha de durabilidade no degrau átomo (fate ∀) -/
 
 /-- RFC-0214 P0.1 (atom `catalog:wal_state`): o desfecho de `inv_wal`
 é EXATAMENTE a conjunção Booleana das duas contenções — `acked ⊆
@@ -424,7 +424,7 @@ logo `synced ≤ written` é "synced está no prefixo-recuperável").
 Fate forall sobre o corpo extraído (padrão `fate_iff` dos RFCs
 0205–0213); CITA o fechado ∀ `wal_inv_closed` (RFC-0191 P2.1) como
 perna — nada é re-provado. O mutante AS-IS esquece o braço
-acked⊆synced (tooth `inv_wal_as_is_tooth`). -/
+acked⊆synced (dente `inv_wal_as_is_dente`). -/
 theorem inv_wal_fate_iff :
     ∀ (s : wal.wal_state_kernel.WalState) (v : Bool),
       (wal.wal_state_kernel.inv_wal s = ok v) ↔

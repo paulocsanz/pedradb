@@ -10,10 +10,10 @@ theorem may_advance_pin_forward :
   have h : (5#u64 > 3#u64) = true := by native_decide
   simp [h]
 
-/-- RFC-0218 P2.1 1/12 (atom `catalog:journal_catch_up_pin`, entrada
+/-- RFC-0218 P2.1 1/12 (átomo `catalog:journal_catch_up_pin`, entrada
     `catch_up_pins_on_read`): ler com pins atrasados SEMPRE alcança os
     pins — EXATAMENTE a constante citada true. O AS-IS é false (pins
-    ficam para trás na leitura — tooth plantado). -/
+    ficam para trás na leitura — dente plantado). -/
 theorem catch_up_pins_on_read_fate_iff :
     ∀ (v : Bool),
       (catch_up_pins_on_read = ok v) ↔ (v = true) := by
@@ -27,10 +27,10 @@ theorem catch_up_pins_on_read_fate_iff :
     subst hv
     rfl
 
-/-- RFC-0218 P2.1 2/12 (atom `catalog:journal_fold_pin`, entrada
+/-- RFC-0218 P2.1 2/12 (átomo `catalog:journal_fold_pin`, entrada
     `fold_pins_on_read`): varrer NUNCA segura pins — EXATAMENTE a
     constante citada false. O AS-IS é true (o fold congela o journal
-    — tooth plantado). -/
+    — dente plantado). -/
 theorem fold_pins_on_read_fate_iff :
     ∀ (v : Bool),
       (fold_pins_on_read = ok v) ↔ (v = false) := by
@@ -44,11 +44,11 @@ theorem fold_pins_on_read_fate_iff :
     subst hv
     rfl
 
-/-- RFC-0218 P2.1 3/12 (atom `catalog:journal_pin`, entrada
+/-- RFC-0218 P2.1 3/12 (átomo `catalog:journal_pin`, entrada
     `may_advance_pin`): avançar o pin é EXATAMENTE o lift citado
     `applied_through > pin` — o journal só solta o que já foi
     aplicado. O AS-IS nunca segura (pin anda antes do applied —
-    tooth plantado). -/
+    dente plantado). -/
 theorem may_advance_pin_fate_iff :
     ∀ (pin : U64) (applied_through : U64) (v : Bool),
       (may_advance_pin pin applied_through = ok v) ↔
@@ -63,11 +63,11 @@ theorem may_advance_pin_fate_iff :
     subst hv
     rfl
 
-/-- RFC-0218 P2.1 4/12 (atom `catalog:journal_next_pin`, entrada
+/-- RFC-0218 P2.1 4/12 (átomo `catalog:journal_next_pin`, entrada
     `next_pin`): o próximo pin é EXATAMENTE o citado — sem batch, o
     pin fica; com batch_max, o pin anda para o batch_max somente
     quando ele está à frente. O AS-IS anda para trás (pin pode
-    regredir — tooth plantado). -/
+    regredir — dente plantado). -/
 theorem next_pin_fate_iff :
     ∀ (pin : U64) (batch_max : Option U64) (r : U64),
       (next_pin pin batch_max = ok r) ↔

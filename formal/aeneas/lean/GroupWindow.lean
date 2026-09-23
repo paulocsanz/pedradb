@@ -18,7 +18,7 @@ theorem merge_eligible_fate_iff :
   unfold merge_eligible
   rfl
 
-/-- AS-IS tooth: no window, no low-writer merge. -/
+/-- AS-IS dente: no window, no low-writer merge. -/
 theorem merge_eligible_as_is_never :
     ∀ (writers : Usize) (window_us : U64),
       merge_eligible_as_is writers window_us = ok false := by
@@ -48,7 +48,7 @@ theorem flight_capped_window_us_fate_iff :
   unfold flight_capped_window_us
   rfl
 
-/-- AS-IS tooth: the flat window, never cap to flight. -/
+/-- AS-IS dente: the flat window, never cap to flight. -/
 theorem flight_capped_window_us_as_is_never_caps :
     ∀ (window_us flight_ema_us : U64) (cap_to_flight : Bool),
       flight_capped_window_us_as_is window_us flight_ema_us cap_to_flight
@@ -123,7 +123,7 @@ theorem seal_async_first_drain_fate_iff :
   repeat' split
   all_goals simp [*]
 
-/-- AS-IS tooth: 2026-09-14 sealed on writers≤ncpu, ignoring batch_len. -/
+/-- AS-IS dente: 2026-09-14 sealed on writers≤ncpu, ignoring batch_len. -/
 theorem seal_async_first_drain_as_is_ignores_batch :
     ∀ (writers ncpu : Usize) (any_sync : Bool) (window_us : U64)
       (batch_len : Usize),
@@ -151,7 +151,7 @@ theorem solo_leader_bypass_fate_iff :
   repeat' split
   all_goals simp [*]
 
-/-- AS-IS tooth: every first drain stays in `lead()`. -/
+/-- AS-IS dente: every first drain stays in `lead()`. -/
 theorem solo_leader_bypass_as_is_never :
     ∀ (batch_len queue_len active : Usize),
       solo_leader_bypass_as_is batch_len queue_len active = ok false := by

@@ -86,7 +86,7 @@ axiom alloc.vec.Vec.pop
   alloc.vec.Vec T → Result ((Option T) × (alloc.vec.Vec T))
 
 /-- [pedra_aeneas_prefix_kernel::prefix_exclusive_end]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/prefix_kernel.rs', lines 18:4-27:1
+    Source: '../../../crates/pedradb-core/src/prefix.rs', lines 18:4-27:1
     Visibility: public -/
 @[rust_loop_body]
 def prefix_exclusive_end_loop.body
@@ -113,7 +113,7 @@ def prefix_exclusive_end_loop.body
   else ok (done none)
 
 /-- [pedra_aeneas_prefix_kernel::prefix_exclusive_end]: loop 0:
-    Source: '../../../crates/pedradb-core/src/prefix_kernel.rs', lines 18:4-27:1
+    Source: '../../../crates/pedradb-core/src/prefix.rs', lines 18:4-27:1
     Visibility: public -/
 @[rust_loop]
 def prefix_exclusive_end_loop
@@ -123,7 +123,7 @@ def prefix_exclusive_end_loop
     e
 
 /-- [pedra_aeneas_prefix_kernel::prefix_exclusive_end]:
-    Source: '../../../crates/pedradb-core/src/prefix_kernel.rs', lines 16:0-27:1
+    Source: '../../../crates/pedradb-core/src/prefix.rs', lines 16:0-27:1
     Visibility: public -/
 def prefix_exclusive_end
   (prefix1 : Slice Std.U8) : Result (Option (alloc.vec.Vec Std.U8)) := do
@@ -131,7 +131,7 @@ def prefix_exclusive_end
   prefix_exclusive_end_loop e
 
 /-- [pedra_aeneas_prefix_kernel::prefix_exclusive_end_as_is]:
-    Source: '../../../crates/pedradb-core/src/prefix_kernel.rs', lines 31:0-35:1
+    Source: '../../../crates/pedradb-core/src/prefix.rs', lines 31:0-35:1
     Visibility: public -/
 def prefix_exclusive_end_as_is
   (prefix1 : Slice Std.U8) : Result (Option (alloc.vec.Vec Std.U8)) := do
@@ -140,7 +140,7 @@ def prefix_exclusive_end_as_is
   ok (some e1)
 
 /-- [pedra_aeneas_prefix_kernel::key_in_prefix_range]:
-    Source: '../../../crates/pedradb-core/src/prefix_kernel.rs', lines 39:0-47:1
+    Source: '../../../crates/pedradb-core/src/prefix.rs', lines 39:0-47:1
     Visibility: public -/
 def key_in_prefix_range
   (key : Slice Std.U8) (prefix1 : Slice Std.U8) (end1 : Option (Slice Std.U8))

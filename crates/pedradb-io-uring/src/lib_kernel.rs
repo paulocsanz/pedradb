@@ -19,7 +19,7 @@
 //! # Usage
 //! ```ignore
 //! use pedradb_io_uring::IoUringEnv;
-//! use pedradb_core::{Db, OpenOptions};
+//! use pedradb_core::{db::Db, OpenOptions};
 //!
 //! let env = IoUringEnv::new()?;
 //! let mut db = Db::open_with_env("/data/pedra", OpenOptions::default(), env)?;
@@ -42,9 +42,7 @@ use std::sync::Arc;
 
 #[cfg(target_os = "linux")]
 use parking_lot::Mutex;
-use pedradb_core::{
-    AdviseKind, ConcurrentDb, Db, Env, EnvFile, OpenOptions as DbOpen, Result as CoreResult, StdEnv,
-};
+use pedradb_core::{AdviseKind, ConcurrentDb, db::Db, Env, EnvFile, OpenOptions as DbOpen, Result as CoreResult, StdEnv, };
 
 /// Which I/O backend this env is using.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1040,7 +1038,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_failingenv_wrap_uring_enospc() {
-        use pedradb_core::Db;
+        use pedradb_core::db::Db;
         use pedradb_sim::{FailingEnv, FaultKind, OpClass};
 
         let inner = IoUringEnv::new().unwrap();

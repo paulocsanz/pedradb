@@ -1061,15 +1061,25 @@ impl MemTable {
             ..
         } = self;
         let pfx = idx_prefix(key.user_key.as_ref());
-        let pfx_b = Bytes::copy_from_slice(pfx);
-        let cap = point_reserve(pfx);
-        let s = tail_idx.entry(pfx_b).or_insert_with(|| {
-            let mut s = TailShard::default();
-            if cap > 0 {
-                s.point.reserve(cap);
+        // RFC-0239: lookup-first. A hot prefix (CF / idx shard) finds its
+        // shard via `Borrow<[u8]>` with zero allocation; the `entry` path
+        // allocated a fresh `Bytes` per put, so concurrent solo writers
+        // serialized on the allocator inside the memtable write lock
+        // (Linux ycsb_f_mc4 mem phase 28.45µs/commit vs 0.58µs/put when
+        // single-writer; the shard key is the only per-put heap alloc).
+        let s = match tail_idx.get_mut(pfx) {
+            Some(s) => s,
+            None => {
+                let cap = point_reserve(pfx);
+                tail_idx.entry(Bytes::copy_from_slice(pfx)).or_insert_with(|| {
+                    let mut s = TailShard::default();
+                    if cap > 0 {
+                        s.point.reserve(cap);
+                    }
+                    s
+                })
             }
-            s
-        });
+        };
         let i = tail.len();
         Self::shard_insert(
             s,
@@ -2387,6 +2397,71 @@ mod tests {
             m.get(b"k", 1),
             Lookup::Found(Bytes::from_static(b"old")),
             "snapshot 1 still sees the older version"
+        );
+    }
+
+    /// RFC-0239: `tail_append` looks the shard up first; steady-state puts
+    /// into a hot prefix must reuse one shard (zero shard-key allocs), a
+    /// fresh prefix must still land via the `entry` fallback, and shards
+    /// must not cross-contaminate.
+    #[test]
+    fn rfc0239_tail_append_lookup_first_shard_reuse() {
+        let mut m = MemTable::new();
+        for i in 0..50u64 {
+            m.insert(
+                InternalKey::new(Bytes::from(format!("ycsb/{i:06}")), i, ValueType::Value),
+                Bytes::from_static(b"v"),
+            );
+        }
+        assert_eq!(
+            m.tail_idx.len(),
+            1,
+            "50 same-prefix puts must share the single 'ycsb/' shard"
+        );
+        assert_eq!(
+            m.get(b"ycsb/000010", 10),
+            Lookup::Found(Bytes::from_static(b"v"))
+        );
+
+        // Fresh prefix exercises the entry fallback into its own shard.
+        m.insert(
+            InternalKey::new(Bytes::from_static(b"lock/k"), 100, ValueType::Value),
+            Bytes::from_static(b"w"),
+        );
+        assert_eq!(m.tail_idx.len(), 2, "new prefix must create its own shard");
+        assert_eq!(m.get(b"lock/k", 100), Lookup::Found(Bytes::from_static(b"w")));
+        // The pre-existing shard still answers after the fallback insert.
+        assert_eq!(
+            m.get(b"ycsb/000042", 42),
+            Lookup::Found(Bytes::from_static(b"v"))
+        );
+    }
+
+    /// RFC-0239 source pin: the `get_mut(pfx)` lookup must precede the
+    /// `entry` fallback, and the unconditional per-put shard-key
+    /// allocation must not return (it serialized solo writers on the
+    /// allocator inside the memtable write lock).
+    #[test]
+    fn rfc0239_tail_append_lookup_first_source_pin() {
+        let src = include_str!("memtable_kernel.rs");
+        let body = src
+            .split("fn tail_append")
+            .nth(1)
+            .and_then(|s| s.split("fn ").next())
+            .expect("tail_append");
+        let lookup = body
+            .find("tail_idx.get_mut(pfx)")
+            .expect("lookup-first get_mut in tail_append");
+        let fallback = body
+            .find("entry(Bytes::copy_from_slice(pfx))")
+            .expect("entry fallback in tail_append");
+        assert!(
+            lookup < fallback,
+            "lookup-first must precede the entry fallback"
+        );
+        assert!(
+            !body.contains("let pfx_b = Bytes::copy_from_slice(pfx);"),
+            "unconditional per-put shard-key alloc must not return"
         );
     }
 

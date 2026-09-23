@@ -40,11 +40,11 @@ theorem as_is_applies_hole :
       apply_advance (1#u64) (2#u64) false = ok ApplyAction.Stop := by
   constructor <;> rfl
 
-/-- RFC-0218 P2.2 (atom `catalog:apply_step`, entrada
+/-- RFC-0218 P2.2 (átomo `catalog:apply_step`, entrada
     `apply_advance`): o passo de aplicação é exatamente a árvore citada
     — na frente do commit, Done; atrás do commit, Apply só com entrada
     presente, buraco é Stop (o prefixo contíguo é a fronteira). O
-    AS-IS aplica o buraco (tooth plantado). -/
+    AS-IS aplica o buraco (dente plantado). -/
 theorem apply_advance_fate_iff :
     ∀ (last_applied commit_index : U64) (entry_present : Bool)
       (v : ApplyAction),

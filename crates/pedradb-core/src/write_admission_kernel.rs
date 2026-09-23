@@ -1,7 +1,7 @@
 //! Write-admission + put-Ok path predicates (RFC-0170 P2.4 / RFC-0171 P0.3).
 //!
 //! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). No twin-copy.
+//! proves (`cfg(verus_keep_ghost)`). No twin copy.
 //!
 //!   ./scripts/verus_write_admission.sh
 
@@ -694,7 +694,7 @@ pub fn storage_write_recovered(
 }
 
 #[cfg(not(verus_keep_ghost))]
-/// AS-IS tooth, composed: admission always admits, the plan never fences,
+/// AS-IS compound tooth: admission always admits, the plan never fences,
 /// recovery never truncates — the write is "always present" after a crash.
 #[must_use]
 pub fn storage_write_recovered_as_is(

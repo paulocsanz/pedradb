@@ -25,8 +25,8 @@ theorem c_len_fate_iff :
     subst hv
     rfl
 
-/-- AS-IS tooth: oversize still admits. -/
-theorem c_len_admitted_as_is_tooth :
+/-- AS-IS dente: oversize still admits. -/
+theorem c_len_admitted_as_is_dente :
     c_len_admitted_as_is (9#usize) (8#usize) = ok true := by
   unfold c_len_admitted_as_is
   rfl
@@ -38,8 +38,8 @@ theorem c_path_walk_bytes_4k :
   unfold C_PATH_WALK_BYTES
   rfl
 
-/-- AS-IS tooth: walk is unbounded. -/
-theorem c_path_walk_bytes_as_is_tooth :
+/-- AS-IS dente: walk is unbounded. -/
+theorem c_path_walk_bytes_as_is_dente :
     c_path_walk_bytes_as_is = ok core.num.Usize.MAX := by
   unfold c_path_walk_bytes_as_is
   rfl
@@ -52,8 +52,8 @@ theorem c_path_nul_off_admitted_at_bound :
   unfold C_PATH_WALK_BYTES
   simp
 
-/-- AS-IS tooth: any offset admits. -/
-theorem c_path_nul_off_admitted_as_is_tooth :
+/-- AS-IS dente: any offset admits. -/
+theorem c_path_nul_off_admitted_as_is_dente :
     c_path_nul_off_admitted_as_is (4096#usize) = ok true := by
   unfold c_path_nul_off_admitted_as_is
   rfl
@@ -64,8 +64,8 @@ theorem c_free_table_admitted_false :
   unfold c_free_table_admitted
   rfl
 
-/-- AS-IS tooth: free table looks proven. -/
-theorem c_free_table_admitted_as_is_tooth :
+/-- AS-IS dente: free table looks proven. -/
+theorem c_free_table_admitted_as_is_dente :
     c_free_table_admitted_as_is = ok true := by
   unfold c_free_table_admitted_as_is
   rfl

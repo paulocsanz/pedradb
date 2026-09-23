@@ -11,8 +11,8 @@ theorem txn_commit_action_abort_reverts :
   unfold txn_commit_action
   rfl
 
-/-- AS-IS tooth: abort still materialises. -/
-theorem txn_commit_action_as_is_tooth :
+/-- AS-IS dente: abort still materialises. -/
+theorem txn_commit_action_as_is_dente :
     txn_commit_action_as_is true = ok TxnCommitAction.Materialise := by
   unfold txn_commit_action_as_is
   rfl
@@ -23,8 +23,8 @@ theorem leftover_txn_is_aborted_true :
   unfold leftover_txn_is_aborted leftover_fate
   rfl
 
-/-- AS-IS tooth: leftover TX is not aborted. -/
-theorem leftover_txn_is_aborted_as_is_tooth :
+/-- AS-IS dente: leftover TX is not aborted. -/
+theorem leftover_txn_is_aborted_as_is_dente :
     leftover_txn_is_aborted_as_is = ok false := by
   unfold leftover_txn_is_aborted_as_is leftover_fate_as_is
   rfl
@@ -59,8 +59,8 @@ theorem si_hist_repair_plan_leave_iff_floor_or_match :
         · exact absurd h0 c
         · exact absurd hm c2
 
-/-- AS-IS tooth: the repair stomps the gen-0 preimage floor. -/
-theorem si_hist_repair_plan_as_is_tooth :
+/-- AS-IS dente: the repair stomps the gen-0 preimage floor. -/
+theorem si_hist_repair_plan_as_is_dente :
     si_hist_repair_plan_as_is 0#u64 false = ok SiHistRepair.Rewrite := by
   unfold si_hist_repair_plan_as_is
   rfl
@@ -90,9 +90,9 @@ theorem hist_load_fate_merge_new_iff_decoded_and_not_below :
   · rintro ⟨hd, hm⟩
     rw [if_pos hd, if_pos hm]
 
-/-- AS-IS tooth: the corrupt replica wins (its hist replaces a newer
+/-- AS-IS dente: the corrupt replica wins (its hist replaces a newer
     best tip — F119). -/
-theorem hist_load_fate_as_is_tooth :
+theorem hist_load_fate_as_is_dente :
     hist_load_fate_as_is false true 0#u64 9#u64
       = ok HistLoadFate.MergeNew := by
   unfold hist_load_fate_as_is
@@ -118,9 +118,9 @@ theorem revert_user_action_restore_value_iff_record_and_present :
   · rintro ⟨hd, hp⟩
     rw [if_pos hd, if_neg (by simp [hp])]
 
-/-- AS-IS tooth: a missing preimage record is NOT "absent" — the as-is
+/-- AS-IS dente: a missing preimage record is NOT "absent" — the as-is
     blind-deletes a user key the peer never prepared (F34). -/
-theorem revert_user_action_as_is_tooth :
+theorem revert_user_action_as_is_dente :
     revert_user_action_as_is false false
       = ok RevertUserAction.RestoreAbsent := by
   unfold revert_user_action_as_is
@@ -172,7 +172,7 @@ theorem t1_recover :
   unfold txn_recover_materializes leftover_fate txn_commit_action
   cases committed <;> simp
 
-theorem txn_recover_materializes_as_is_tooth :
+theorem txn_recover_materializes_as_is_dente :
     txn_recover_materializes_as_is false = ok true := by
   unfold txn_recover_materializes_as_is
   rfl
