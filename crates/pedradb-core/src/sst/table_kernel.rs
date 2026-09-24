@@ -2104,7 +2104,14 @@ impl SstTable {
                 // `hi == s` means the next block starts at `s`; this block
                 // may hold trailing versions of `s` from a mid-key split —
                 // keep it (same window rule as `blocks_for_point`).
-                Bound::Included(s) | Bound::Excluded(s) => block_hi_excl.is_none_or(|hi| hi >= s),
+                Bound::Included(s) => match block_hi_excl {
+                    Some(hi) => hi >= s,
+                    None => self.largest_user_key.as_deref().is_none_or(|hi| hi >= s),
+                },
+                Bound::Excluded(s) => match block_hi_excl {
+                    Some(hi) => hi > s,
+                    None => self.largest_user_key.as_deref().is_none_or(|hi| hi > s),
+                },
             };
             if ends_after_start {
                 out.push(i);

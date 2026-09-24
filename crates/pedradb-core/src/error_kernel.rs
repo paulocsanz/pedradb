@@ -165,6 +165,42 @@ pub enum CoreError {
         /// Hard floor that was missed.
         need: u64,
     },
+
+    /// Write refused because pending compaction debt across all levels exceeds limit (RFC-0274).
+    #[error("write stall: compaction debt {pending_bytes}B (limit {limit}B)")]
+    WriteStallCompactionDebt {
+        /// Estimated pending compaction bytes.
+        pending_bytes: u64,
+        /// Configured hard threshold in bytes.
+        limit: u64,
+    },
+
+    /// Read refused because the requested snapshot has exceeded max age (RFC-0274).
+    #[error("snapshot expired: active for {age_secs}s (max allowed {max_age_secs}s)")]
+    SnapshotExpired {
+        /// Age in seconds of the expired snapshot.
+        age_secs: u64,
+        /// Maximum allowed snapshot age in seconds.
+        max_age_secs: u64,
+    },
+
+    /// Write refused because active snapshot pin sequence lag threatens storage bloat (RFC-0274).
+    #[error("snapshot pin debt: sequence lag {lag} exceeds threshold {hard_lag}")]
+    SnapshotPinDebt {
+        /// Current commit sequence lag behind the oldest active snapshot.
+        lag: u64,
+        /// Hard sequence lag threshold.
+        hard_lag: u64,
+    },
+
+    /// Write submission rejected because concurrent in-flight queue depth exceeded (RFC-0274).
+    #[error("concurrency queue full: {active} writers in-flight (limit {limit})")]
+    ConcurrencyQueueFull {
+        /// Active concurrent writers currently in submission.
+        active: usize,
+        /// Configured maximum concurrent writers limit.
+        limit: usize,
+    },
 }
 
 /// Convenience `Result` alias used throughout the crate.

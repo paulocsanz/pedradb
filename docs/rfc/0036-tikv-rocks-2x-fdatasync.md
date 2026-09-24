@@ -1,0 +1,151 @@
+# RFC-0036: ≤2× vs TiKV-class Rocks (`fdatasync`) — WAL still synced before Ok
+
+**Status:** in-progress  
+**Updated:** 2026-08-24
+**Parked (quiet remesure):** remaining P0.3/P1.1 remesure+gate need a quiet host; dirty sandbox is not the official floor.  
+**Parents:** [0001](0001-pedradb-high-level-spec.md) (O1: WAL `fdatasync` before Ok), [0031](0031-rocks-parity-10x-budget.md)–[0035](0035-mvcc-scan-2x-measure-first.md) (same-class FF table)
+
+## Background
+
+- Pedra no Ok faz `File::sync_all`. No Apple, Rust std mapeia **tanto** `sync_all` **quanto** `sync_data` para `fcntl(F_FULLFSYNC)` (~4–5 ms neste Mac).
+- O Rocks que o TiKV usa (`sync-log=true` → `WriteOptions.sync=true`) chama `libc::fdatasync` (~30–50 µs). `librocksdb-sys` desta build **não** define `HAVE_FULLFSYNC`.
+- Remesura `38cef53`, 4096/2000 zipfian 1 KB, ycsb+deps: leituras já ≤2× (C 1.39×; MVCC/scan **0.77×**). Escritas 27–191× — o piso é o syscall, não o LSM.
+- RFC-0001 O1 já é **`fdatasync` antes do Ok**. A linha posterior “não trocar `sync_all` por `sync_data`” assumia que `File::sync_data` era `fdatasync`. Neste Mac **não é**.
+
+## Problems This Solves
+
+- **Problem:** 2× vs o Rocks padrão do TiKV é o alvo; com `F_FULLFSYNC` vs `fdatasync` as escritas são fisicamente ~100×.
+- **Problem:** descer o WAL para “não sincar” quebraria G1. Precisamos do **mesmo** barrier class do peer, não da ausência de barrier.
+
+## Proposed Solution
+
+1. `EnvFile::sync_data` no Unix chama `fdatasync(2)` de verdade (`rustix`, sem `unsafe` no core). Apple `F_FULLFSYNC` fica só em `sync_all` (SST / MANIFEST / CHANGELOG / close).
+2. `commit_ops_with` / `wal_sync_group` usam `wal.sync_data()`. Append → sync → Ok. Falha de sync ainda **cerca** o `Db` (RFC-0015 H1). CRC, atomicidade, fail-closed intactos.
+3. Gate 2× = `compat / rocks_fdatasync ≥ 0.5` na tabela de 11 shapes. Sem floor de escrita vs um peer que não sinca.
+
+## Garantias invariáveis
+
+| # | Garantia | Este RFC |
+|---|---|---|
+| G1 | WAL sincado antes do Ok | **mantida** — `fdatasync` (RFC-0001), não skip |
+| G2 | visibilidade = lookup / range_at | intocada |
+| G4 | adversarial compat | re-verde **sem** editar asserção |
+| G5 | fence se sync falha depois do append | `sync_data` Err → `DurabilityFenced` |
+| G6 | sem thread no core | intocada |
+| G8 | números honestos | peer = Rocks `sync=true` / `fdatasync`; label no JSON |
+
+Não é “menos durável que o TiKV”. É a **mesma** classe. `F_FULLFSYNC` continua disponível em `sync_all` para ficheiros publicados.
+
+## Addendum v2 2026-08-23 — decisão invertida: classe forte é o DEFAULT no Darwin
+
+O addendum acima entregou o `wal_full_fsync` como opt-in (default `fdatasync`
+fraco). Decisão revertida no mesmo dia, por coerência de contrato:
+
+1. **`sync=true` é uma promessa de durabilidade.** No Darwin só
+   `fcntl(F_FULLFSYNC)` entrega "Ok sobrevive a corte de energia". Um default
+   silenciosamente mais fraco numa plataforma é a classe de buraco que o
+   produto existe para não ter.
+2. **Os artifacts derivados já pagam a classe forte.** `sync_all` (SST /
+   MANIFEST / CHANGELOG) é `F_FULLFSYNC` no Darwin desde o P0. O write acked
+   — a fronteira de durabilidade — era o elo mais fraco. Incoerente.
+3. **RocksDB oficial faz igual.** O CMake detecta `HAVE_FULLFSYNC` no Darwin
+   e o `sync=true` é `F_FULLFSYNC` — sem knob (detecção em build). O
+   `librocksdb-sys` (build cc, sem detecção) é que fica na classe fraca —
+   nosso default passa a bater no build oficial, não no crate.
+4. **Custo zero em produção.** Linux: as duas classes são o mesmo
+   `fdatasync` (barreira completa). O default novo só muda o Darwin.
+
+Custo medido (probe `wal_full_fsync_cost_probe`): 4,0 ms/commit na classe
+forte vs 31–33 µs na fraca (~120×) — 250 commits/s single-client, ~4,0k
+puts/s no shape raftlog-16; group commit (`ConcurrentDb`) escala com C
+clientes (C×250/s). Quem precisa de velocidade já tem o knob de primeira
+classe: `sync=false` (o default do Rocks que todo mundo roda). O opt-out
+`wal_full_fsync=false` restaura a classe fraca (colunas comparativas e dev).
+
+**Pisos oficiais não mudam:** as pernas oficiais (peer `sync=false`) rodam o
+Pedra async (`set_write_sync(false)` via `write_sync_for_suite`) — nenhuma
+barreira de WAL executa nelas. Só as colunas host-sync (myrocks/surreal/
+ceph, não-oficiais) e a suíte de testes no Mac pagam a classe forte.
+
+## Addendum 2026-08-23 — classe de barreira no Darwin, verificada na fonte primária
+
+Pergunta: “Pedra `fdatasync` é menos durável que RocksDB no Mac?” Verificado
+em três camadas independentes contra o peer exato que linkamos
+(librorocksdb-sys 8.10):
+
+1. **Fonte** — `rocksdb/port/port_posix.h`: `#if defined(OS_MACOSX) … #define
+   fdatasync fsync`. No Darwin o próprio RocksDB reescreve `fdatasync` para
+   `fsync`.
+2. **Build** — `librocksdb-sys/build.rs` define `OS_MACOSX` mas nunca
+   `HAVE_FULLFSYNC`; só o `CMakeLists.txt` do RocksDB (~L555,
+   `check_cxx_symbol_exists(F_FULLFSYNC…)`) detecta e define. Sem a macro,
+   `PosixWritableFile::Sync()` cai no ramo `fdatasync(fd_)` → que o macro
+   virou `fsync(fd_)`.
+3. **Binário** — disassembly do `rocks-parity-bench-real` que medimos:
+   `PosixWritableFile::Sync` chama `_fsync`.
+
+No Darwin `fsync` e `fdatasync` são a mesma classe fraca (nenhum dos dois
+esvazia o cache do disco; só `fcntl(F_FULLFSYNC)` esvazia).
+
+**Veredicto por plataforma:**
+
+- **Linux (produção):** sem gap — `fdatasync` lá é barreira completa.
+- **vs peer oficial (`sync=false`):** sem gap — Pedra `fdatasync` > nada.
+- **vs RocksDB CMake `sync=true` no Darwin:** gap real de classe (o Ok deles
+  sobrevive a corte de energia com cache volátil; o nosso `fdatasync` não
+  garante).
+
+**Entrega (P2.1):** `wal_full_fsync` (kernel
+`pedradb_core::OpenOptions::wal_full_fsync`; compat `Options::wal_full_fsync`
+/ `set_wal_full_fsync`). Default **true** (addendum v2): toda barreira de
+WAL usa `EnvFile::sync_data_strong` — `File::sync_data` no Darwin =
+`F_FULLFSYNC`, a classe do CMake-RocksDB; no Linux idêntico ao default.
+`false` = classe `fdatasync` fraca (o build crate do peer que medimos; opt-out
+de dev/coluna comparativa, ~120× mais rápido por commit em hardware Apple).
+Rotação de WAL e repair herdam o flag; `FailingFile` cerca a classe
+forte com o mesmo `OpClass::Sync` (fence inalterado). Teste:
+`wal_full_fsync_switches_barrier_class` (conta as classes de sync do
+ficheiro WAL: flag on ⇒ só forte; off ⇒ só fraca).
+
+## Delivery slices (mandatory)
+
+### P0 — must ship first
+
+- [x] **P0.1** RFC + Status vivo (este doc) — status: `done`
+- [x] **P0.2** `EnvFile::sync_data` = `fdatasync(2)` no Unix; WAL commit/group usa `sync_data`; fence inalterado — status: `done`
+- [ ] **P0.3** Remesura 11/11 ≥ 0.5 vs Rocks fd — status: `doing` (parked: quiet remesure; 10/11; apply 2.31× → [RFC-0037](0037-apply-off-put-and-2x-pedra.md))
+
+### P1 — next wave
+
+- [ ] **P1.1** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` no script **sem** FULL_SYNC (todas as 11) — status: `todo` (parked: quiet remesure)
+- [x] **P1.2** CHANGELOG fora do caminho do commit (interval 0; flush/close ainda persistem) — status: `done`
+- [x] **P1.3** Auto-compact L0-only (não absorve L1 existente); auto-flush não reescreve CHANGELOG — status: `done`
+
+### P2 — later
+
+- [x] **P2.1** `wal_full_fsync` — classe forte (`F_FULLFSYNC` no Darwin) é o **default**; `false` = opt-out da classe fraca (addendum v2) — status: `done`
+
+## Status (living — update with every PR)
+
+| ID | Band | Title | Status | Task / PR | Updated |
+|----|------|-------|--------|-----------|---------|
+| P0.1 | p0 | RFC | done | este doc | 2026-08-16 |
+| P0.2 | p0 | WAL `fdatasync` + fence | done | `pedradb-posix` + commit `sync_data` | 2026-08-16 |
+| P0.3 | p0 | remesura 11/11 ≥ 0.5 vs fd | doing | 10/11; apply 2.31× L0 compact | 2026-08-16 |
+| P1.1 | p1 | gate 0.5 default Rocks | todo | — | 2026-08-16 |
+| P1.2 | p1 | CHANGELOG fora do commit | done | interval default 0 | 2026-08-16 |
+| P1.3 | p1 | L0-only compact + skip feed no auto-flush | done | apply 6.6× → 2.31× | 2026-08-16 |
+| P2.1 | p2 | FF default forte (addendum v2) | done | knob `wal_full_fsync` default true + teste de classe | 2026-08-23 |
+
+## Acceptance Criteria
+
+- **Tests:** `cargo test -p rocksdb-compat` adversarial **sem** editar asserção; `sync_fail_after_append_fences_until_reopen` continua verde (FailingEnv já intercepta `sync_data`).
+- **Telemetry:** `scripts/tikv_ycsb_parity_v0.sh` (default FULL_SYNC=0); finding com p50/p95/p99; `meets_floor` nas 11 após P0.3.
+- **Documentation:** este RFC + tabela em `findings/tikv-ycsb-lab-20260815.md`. backend-only.
+- **Screenshots:** none — backend-only.
+
+## Out of scope
+
+- Skip de sync no Ok.
+- 2× vs Rocks `sync=false` (async WAL).
+- Trocar `F_FULLFSYNC` em SST/MANIFEST (não é o caminho do put).

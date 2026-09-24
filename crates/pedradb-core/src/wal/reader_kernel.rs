@@ -106,10 +106,12 @@ impl<R: Read> WalReader<R> {
     pub fn read_record(&mut self) -> Result<Option<Vec<u8>>> {
         loop {
             // Need at least HEADER_SIZE bytes from the current block.
-            if self.block_cursor + HEADER_SIZE > self.block_end && !self.read_next_block()? {
-                // Truncated or clean EOF: any pending scratch is abandoned
-                // (the crash happened mid-fragmented record).
-                return Ok(None);
+            if self.block_cursor + HEADER_SIZE > self.block_end {
+                if !self.read_next_block()? || self.block_cursor + HEADER_SIZE > self.block_end {
+                    // Truncated or clean EOF: any pending scratch is abandoned
+                    // (the crash happened mid-fragmented record).
+                    return Ok(None);
+                }
             }
 
             let header_offset = self.block_cursor;

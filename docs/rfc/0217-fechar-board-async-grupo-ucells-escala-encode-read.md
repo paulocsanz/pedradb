@@ -1,0 +1,496 @@
+# RFC: 0217 — Fechar o board async: grupo em baixa concorrência, U-cells nativas, escala pesada, encode off-path, read-side e produto
+
+**Status:** in-progress
+**Updated:** 2026-09-13
+
+## Background
+
+O board async same-class (Pedra `PEDRA_PARITY_ASYNC=1` vs RocksDB default
+`sync=false`, peer `ROCKS_PARITY_SYNC=0`, mesmo round/boot) tem hoje:
+
+- **15/15 formas smoke ≥ 1,254** (gate oficial, `rocks-parity-floor1x/`) e
+  20/20 no sweep p201o single-client — single-client e leitura pagos.
+- **Fronteira de concorrência**: writers 2–4 perdem (`ycsb_f_mc4` cartaz
+  Linux **0,491** default / **0,836** braço rmw p211m; DIAG Darwin mc2/mc3
+  0,25–0,39), writers ≥ 6 o drenar-grupo amortiza (DIAG mc6/mc8 rmw
+  1,97×/2,23× sobre o braço clean), mc50 paga (`kvrocks_set_mc50` 1,678×).
+  Mecanismo medido (PHASE/wg p211p/p211q): `avg_grp` 1,00 em TODAS as
+  contagens no default (nunca forma grupo); rmw 1,04→1,14→2,1→3,1
+  (mc2/3/6/8) com `lwait` 0,2–1,8µs. Entre mc8 e mc50 não há ponto medido.
+- **6 perdas U-cells nomeadas** (Linux 3-run, `p209-ucells-gate/`):
+  kafka_changelog_flush **0,036**; ingest_sst **0,069**;
+  compaction_filter_drop **0,081**; linkbench_mix **0,236**; wbwi **0,494**;
+  myrocks_write_tx **0,751**.
+- **Escala pesada sem meter**: prefix 100M @4GiB **0,70×**; overwrite_mc4
+  25M @4GiB **0,557×** (3/3); 15M sem número — mecanismos 0193/0194/0195
+  aterrizados, meter blocked (orçamento de onda + custo, datado).
+- **Encode de memtable por commit**: `mem=3,13–14,2µs` (2º dono
+  quantificado; −0,180 do déficit de kvrocks_set_mc50 é mem amortizado).
+- **Read-side −18%** (F8): `deps_scan` single 0,831 (p201o).
+- **Escada de admissão** (produto): sob banda Reclaim (FS pequeno, free <
+  `DISK_SOFT_FREE_BYTES`=256MiB) o admit custa dezenas de ms por commit
+  (14–18ms macOS/F_PREALLOCATE; 6–7ms Linux tmpfs) + parks 230–310ms/op
+  (20–60× no tempo de célula).
+- **Linha G1 single-client write-per-op** (0,001–0,056×): fd-ceiling por
+  construção (p50 F_FULLFSYNC 3,8ms ⇒ ~1/p50; Linux fdatasync p50 25,7µs ⇒
+  0,056×) — prova viva na família
+  `rfc0041_one_fdatasync_cannot_hit_2x_rocks_default_ycsb_a`.
+
+**Errata que re-ancora este RFC (commit `426272f4`, 2026-09-13):** o
+veredito P1.2 nomeou o dono do residual 0,836 como "fdatasync per-commit da
+coluna de paridade" — **falso no código**: `PEDRA_PARITY_ASYNC=1` faz
+`opts.set_sync(false)` (`rocksdb-parity-bench/src/engines.rs:83-85`) e o
+commit async só sincroniza sob plano G1 (`WalCommitPlan::AppendSync*`;
+`concurrent.rs:1228-1243`: "Async: write() per group, no fdatasync").
+Telemetria Darwin (`flsh≈0,03µs`, `wal≈1µs`) com células mc2–mc8 SUB-1
+(0,25–0,84 DIAG) prova que o dono existe **sem barreira nenhuma**: é a
+**seção serial por commit** — write() do WAL sob mutex + encode de memtable
++ publish sob write-lock — contra o memcpy userspace por writer do Rocks.
+O fd-ceiling é mecanismo exclusivo da G1. A absolvição do escalonador
+(P1.2, dois extremos) permanece de pé.
+
+Pain/why now: RFC-0211 fechou sem caixa aberta e adjudicou o mecanismo
+drenar-grupo; a direção do usuário é **resolver todos os pontos fracos do
+board**, estendendo este RFC a cada etapa nova descoberta.
+
+## Problems This Solves
+
+- **Problem:** writers 2–4 pagam a seção serial inteira por commit (ratio
+  0,49–0,84) porque o default nunca forma grupo (`async_merge_policy` só
+  mergeia quando writers > ncpu; `avg_grp=1,00` sempre).
+- **Problem:** seis formas de workload real (flush-por-op, ingestão SST,
+  filtro de compaction, mix delete/scan, batch indexado, tx N-updates)
+  perdem por rodar em emulação do compat, não em caminho nativo.
+- **Problem:** as duas células de 4 GiB (0,70/0,557) estão sem meter desde
+  que os mecanismos aterrizzaram — nem claim, nem fechamento.
+- **Problem:** encode de memtable (3,13–14,2µs) mora no caminho serial do
+  líder/membro — quantificado como 2º dono.
+- **Problem:** scan/cursor −18% no lado de leitura.
+- **Problem:** sob pressão de disco o admit por commit custa dezenas de ms
+  (produto: qualquer deploy em FS pequeno).
+- **Problem:** eixos inteiros sem número (delete-heavy, mc9–49, 1 GiB,
+  p99) — cobertura para poder publicar o board com perdas nomeadas.
+
+## Proposed Solution
+
+- **P0:** formar grupo em baixa concorrência — janela de coleta bounded no
+  líder (`PEDRA_GROUP_WINDOW_US`, default off) + attach de chegadas ao
+  grupo in-flight; merge elegível a partir de 2 writers quando a janela
+  está on. Amortiza write()+encode (async) e a barreira real (G1 mc≥2).
+- **P1:** tirar as 6 U-cells da emulação — caminhos nativos (flush
+  amortizado, SST write direto + hook de filtro no compactor, batch
+  indexado nativo, tx single-writer real) ou veredito datado de teto com
+  número.
+- **P2:** fechar escala pesada (meter 4 GiB), encode off-path, cursor de
+  scan, histerese do admit (produto) e os eixos de cobertura sem número.
+- **Adjudicação formal (non-goal):** G1 single-client write-per-op é
+  teto por construção — documentado, nunca win, nunca escondido.
+
+## Delivery slices (mandatory)
+
+### P0 — Grupo em baixa concorrência (ranking nº 1; residual 0,491/0,836)
+
+- [x] **P0.1** Kernel da janela de coleta: `group_window_kernel` puro
+  (decisão bounded: espera W µs no líder quando ≥2 writers ativos e merge
+  elegível; zeros para lone/single; twin AS-IS) + wiring no caminho real
+  (`submit_after_begin`/WriteGroup: `PEDRA_GROUP_WINDOW_US=N` torna o
+  merge elegível em writers ≥2 e o líder espera W antes de drenar;
+  caminho lone `active==1 ∧ ¬recently_concurrent` intocado) + testes
+  `rfc0217_group_window_*` no caminho real. **P0.1b** (smokes
+  2026-09-13, Darwin DIAG): a janela flat sozinha deixou `avg_grp`
+  1,16 no ycsb_f mc2 (o par no gap client-side é invisível a `active` —
+  o contador cai no consumo da reply); três braços fecharam o fantasma:
+  (1) coleta atravessando o gap no líder (wait com saída por quiessência
+  de 20 µs após o primeiro absorb, bound = janela), (2) horizonte de par
+  estendido à janela (`peer_horizon_us`; bypass lone não rouba o líder),
+  (3) merge elegível por par recente (`merge_eligible(w, win, peers)`;
+  sem isso o bypass do write-lock comita solo sem líder exatamente no
+  regime-alvo). Resultado: ycsb_f mc2 `avg_grp` 1,00 → **1,92** (96% do
+  teto físico 2,0; cache_overwrite mc2 1,88). — status: `done`
+- [x] **P0.2** Attach in-flight: chegada durante o dreno/write do líder
+  entra no mesmo voo (fold/stage na janela off-lock; na G1, attach também
+  durante a barreira do grupo) + testes `rfc0217_inflight_attach_*`.
+  **Adjudicado 2026-09-13** (dados P0.1b/P0.3): com a coleta pelo gap,
+  `avg_grp` já atinge ~96% do teto (voos cheios — o perdedor do publish
+  entra no próximo voo, também cheio, sem estacionar extra), então o
+  attach no mesmo voo não move `avg_grp` nem throughput; o ganho residual
+  é 1 ciclo de latência por membro. Attach verdadeiro exige encode
+  member-side + seq sem o write guard (estruturalmente P2.2) — **fatia
+  fundida em P2.2**, reabre se o ratio quiet do P0.3 ficar <0,9 com voos
+  cheios. **Reabertura adjudicada 2026-09-13T09:51Z**: o ratio quiet
+  window ficou <0,9 em mc2–mc4 (min 0,100–0,960) MAS sem voos cheios —
+  a janela fixa espera ANTES do voo (sem early-exit, sem barreira
+  in-flight para sobrepor); dono = **P0.3b** (early-exit), não o attach.
+  — status: `done`
+- [x] **P0.3** Meter DIAG Darwin (driver host p211p/p211q): frontier
+  mc2/3/4/6/8, braços window on/off, PHASE/wg; alvo `avg_grp` mc2–mc4
+  ≥2,0 e ratio DIAG mc2/mc3 saindo de 0,25–0,39 → ≥0,9; guardas
+  deps_apply_batch/mc50. **Veredito 2026-09-13T09:51Z** (re-run quiete,
+  3 rounds, min-of-3, peer rocks default sync=false, coluna async
+  `PEDRA_PARITY_ASYNC=1`, binário `234001f7`): **mecanismo comprovado,
+  alvo de ratio FALHOU em baixa concorrência**. avg_grp window no eixo
+  todo: mc2 1,94–1,95 (teto 2,0), mc3 2,91–2,93, mc4 3,74–3,97, mc6
+  5,76–5,80, mc8 6,58–7,18, mc50 25,2; lwait bypass mc8 28,99→0,04µs.
+  Ratios min window vs clean: **mc2–mc4 a janela PERDE** (ycsb_f_mc2
+  0,331→0,100; ycsb_a_mc2 0,342→0,110; overwrite_mc2 0,347→0,136;
+  apply_mc2 1,130→0,960) e **mc6+ GANHA** (apply_mc8 0,451→0,610,
+  apply_mc6 0,474→0,661, ycsb_f_mc6 0,179→0,201, ycsb_a_mc8
+  0,192→0,304, mc50 1,292→1,448). Sinal monotono nos writers e
+  consistente em todos os rounds. Diagnóstico: janela fixa 1ms sem
+  early-exit é imposto de latência quando não há barreira in-flight
+  para sobrepor (mc2: cada commit espera a janela cheia — n cai à
+  metade, avg_grp dobra, qps despenca); onde a barreira já existe
+  (mc6+) o attach in-flight paga a janela. **Default NÃO flipa**
+  (opt-in mantido). Perda honesta convertida em fatia nomeada: **P0.3b
+  early-exit da janela** (fechar a coleta quando todos os writers
+  observados estão attachados, ou limitar a janela ao tempo de voo da
+  barreira in-flight), re-meter DIAG + e4b. — status: `done` (veredito
+  datado; follow-up = P0.3b)
+- [ ] **P0.3b** Early-exit da janela de coleta (aberto por P0.3): kernel
+  `group_window` ganha condição de fechamento antecipado (writers
+  observados == attached, ou janela ≤ voo da barreira in-flight), sem
+  wait-to-grow (veto 0180/0190); alvo: window ≥ clean em mc2–mc4 DIAG
+  (hoje 0,100–0,960 vs 0,331–1,130) mantendo mc6+ e mc50 ≥ clean;
+  depois e4b Linux. **Adjudicado DIAG 2026-09-13** (`cw=` probes,
+  commit `0ba886fe`; ycsb_f mc2/mc4 × 2 rounds quiet): o
+  quiescence-break JÁ faz o early-exit — `cw=42–51µs/grupo` (não os
+  1000µs; absorve o peer + 20µs de silêncio). O colapso 0,33→0,10 é
+  estrutural no regime DIAG: a coluna async do Darwin não tem barreira
+  em voo para sobrepor a espera, então os ~45µs são latência pura
+  (≈25µs/op vs 6,7µs/op do clean serial-pipelined; conta fecha em 3,3×
+  = razão medida). Encolher mais o early-exit arrisca esfomear o grupo
+  sem recuperar o fator 3. A condição vencedora em baixa concorrência
+  é **janela ≤ barreira in-flight** — que só existe no Linux/e4b (lá o
+  async paga fdatasync real por grupo; a janela cavalga o voo). Fatia
+  re-escopoada: implementar a janela-limitada-ao-voo É o P0.4 (mesma
+  onda e4b); DIAG Darwin não pode validá-la (sem barreira). **Implementada
+  2026-09-13** (kernel `group_window_kernel::flight_capped_window_us` +
+  `PEDRA_GROUP_WINDOW_CAP_TO_FLIGHT`, default off): a janela nunca excede
+  o **EMA do voo** medido do grupo anterior (seção WAL off-lock:
+  `write()` + fd, mesma fronteira da fase `wal_ns`); voo < slice de
+  quiescência (20µs) colapsa a janela a 0 (Darwin-async voo ≈1–2µs →
+  volta ao AS-IS por construção — sem regressão possível); voo não
+  amostrado semeia 25µs (bootstrap: o primeiro grupo forma e mede). O
+  cap aplica nos TRÊS leitores da janela (merge-eligible, bound async,
+  peer-horizon) via `effective_group_window_us` — janela colapsada
+  mantém writers no bypass (sem hop de líder para grupo que nunca
+  coleta). Twins AS-IS intocados; testes `rfc0217_p04_*` 5/5 +
+  `rfc0217_group_window_*` 8/8 + wiring `rfc0201_*`/amortizes/sticky
+  verdes. Veredito continua **blocked e4b** (só o Linux tem o voo). —
+  status: `blocked e4b` (implementação pronta; mecanismo de early-exit
+  `cw=42–51µs` + janela-≤-voo no binário)
+- [ ] **P0.4** Meter Linux gate 3-run quiet min-of-3 (âncora p149):
+  `ycsb_f_mc4` default 0,491 → **≥1,0** com janela on; guardas ≥ nível
+  p211m (ycsb_a_mc4, overwrite_mc4, apply_mc4, mc50); cartazes pagos em
+  guarda ≥; veredito datado; **flip do default só com este meter
+  válido**; se o gate seguir blocked, veredito gate-blocked datado.
+  **Gate-blocked 2026-09-13T04:42Z**: único host BYOC conectado é o
+  MacBook (aarch64); p149 desconectado; deploy `0caaac0b` pending. Binário
+  amd64 com P0.1b + driver `p0217-linux-driver.sh` prontos para disparar
+  no retorno do host. **Braço flightcap adicionado 2026-09-13**:
+  `ARMS=clean window flightcap` — o braço alvo é agora
+  `flightcap` (`PEDRA_GROUP_WINDOW_US=1000
+  PEDRA_GROUP_WINDOW_CAP_TO_FLIGHT=1`), janela-≤-voo implementada no
+  P0.3b; o braço `window` (flat) fica como perdedor documentado do P0.3
+  para contraste no mesmo gate. Binário amd64 rebuildado com o knob
+  (zigbuild gnu `--features real`, 153MB). **Gate re-estreado
+  2026-09-13T16:0xZ**: `deploy-image` no p149 devolvia 500 (platform:
+  serviço sem recurso ativo + deploy pendente) — p149 soft-deletado
+  (mata o pendente `0caaac0b`), serviço novo **`linux-gate-p211z`**
+  (region brasil, 4 vCPU/4GB, worker) com imagem
+  `ghcr.io/paulocsanz/pedradb-linux-gate:p211z` (digest `19fd77ea`),
+  deploy **`6f509017` pending**, `WAVE=p04chain` — a onda encadeia no
+  MESMO boot: parte 1 = p211p PHASE (P0.5), parte 2 = gate 3-run
+  clean/window/flightcap (P0.4). Monitor `p211z-monitor` no ar
+  (terminal = `P0217_P04_DONE`). — status: `doing`
+- [ ] **P0.5** Re-adjudicação do dono no Linux (errata `426272f4`): onda
+  admission-clean com PHASE distribuindo a seção serial no âncora ext4
+  (wal/mem/publish/lwait por commit); finding datado. **Mesmo block do
+  P0.4** (mesma onda, mesmo host; 2026-09-13T04:42Z). **Re-estreada
+  2026-09-13**: parte 1 da onda encadeada `p04chain` no
+  `linux-gate-p211z` (deploy `6f509017` pending; o PHASE Darwin
+  write10m @10M já mediu wal=4,74µs/commit como referência — finding
+  `2026-09-13-rfc0217-p26-p27-escala`). — status: `doing`
+
+### P1 — U-cells nativas (ranking nº 2; cada fatia: ≥1,0 OU teto datado com número)
+
+- [x] **P1.1** kafka_changelog_flush 0,036: flush amortizado no compat
+  (pipeline completo por chamada — snapshot do hang: 1331/1793 amostras em
+  `compact_gate` — vira batch/staged com gate) sem mudar a semântica de
+  durabilidade do flush explícito. **Feito 2026-09-13** (mecanismo +
+  testes; números abaixo são DIAG Darwin, nunca claim — ratio ≥1,0 é o
+  meter Linux, fatia e4b): kernel `changelog_flush_store_now` +
+  `wal_rotate_archives` (debounce 64 flushes, cap 64 archives) — o rotate
+  decide por cobertura (`walless_covered`, `unpublished_below_floor`,
+  feed settled) e publica durável só quando `!settled ∧ (¬archive_now ∨
+  store_now)`; a janela WAL-less acima do floor PUBLICA (nunca arquiva —
+  frames ≤ floor já cobertos pelo manifesto); frames não-publicados >
+  floor arquivam e o replay no open é filtrado por
+  `sequence > manifest_floor`. Três hazards de durabilidade fechados com
+  guards: (1) `lookup` resolve mem-vs-SST sem comparar seq → replay
+  incondicional sombreava publicados; (2) seqs de bulk intercalam com
+  puts → o floor não prova cobertura ≤ floor; (3) tail meta 1-key e bulk
+  runs são WAL-less → `walless_seq_high` trava truncate. Drain de
+  archives com budget (`WAL_ARCHIVE_UNLINK_BUDGET=4`/chamada; cap conta
+  `wal_archive_live()`, senão o gate dispararia store a cada rotate
+  durante o drain). Naming dos archives (`WAL.archNNNN`,
+  `wal_archive_slot_name`/`wal_archive_slot_of`) ficou em db.rs, não no
+  kernel: `str::pattern`/`format!` é intraduzível na lane aeneas/charon
+  (extração re-carimbada verde, sem arquivo parcial).
+  `verify_checksums` vira subset-check (manifesto ⊆
+  memória — F196 com publish adiado; manifesto nomeando arquivo ausente
+  continua `CorruptManifest`). Suite `rfc0217_changelog_flush_amortized`
+  6/6 (defer/crash-reopen, debounce+drain, cap→store síncrono,
+  crash-feed-parity, below-floor-publishes, publish-at-gate); 4 testes
+  as-is recontratados para o flush adiado (`crash_after_flush…`,
+  `idle_rotate…`, 2 de `verify_checksums`); A/B lib 936 pass / 23 fail =
+  baseline (zero novas). DIAG Darwin OPS=300 batch=32: p50 9,2ms pré →
+  **7,21ms** (5,93 pré-budget), p99 290ms → **72ms** com o budget de
+  unlinks, stores 15/1000 (1/64, geração de MANIFEST); rocks twin
+  0,386ms. — status: `done`
+- [x] **P1.2** ingest_sst 0,069 + compaction_filter_drop 0,081: sair da
+  emulação — ingest = escrita SST direta + install; filter = hook real no
+  compactor. — status: `done` `92a76a97` — `Db::ingest_sst_file` (seq
+  globais frescas, rewrite+install L0, MANIFEST durável antes do Ok,
+  flush-first parity `allow_write_flush`) + `CompactFilterDecision`/
+  `FilterMergeSource` no merge (Remove = 1 tombstone no topo da run —
+  sem ressurreição no replay; invalidação wholesale dos caches de leitura
+  — regressão de cache-stale pega no A/B); compat nativo
+  (`compact`/`compact_with_filter`/ingest default-CF),
+  `apply_compaction_filter` removido. Suite `rfc0217_native_ingest_filter`
+  8/8; core `--tests` 937/23/4 = baseline (0 novas); compat 94/3 (3
+  pré-existentes em HEAD `52afb58c`). DIAG Darwin n=300 (não-claim):
+  filter 434→835 qps (0,47→0,935 do twin rocks 893; p99 21,3→7,8ms);
+  ingest p50 0,83→0,60ms. Cartaz Linux 3-run = meter e4b (p149).
+  Follow-up `f04d98af` (2026-09-13): o native install do `92a76a97`
+  rodava com a condição invertida (`!default_raw`) — instalava o arquivo
+  de raw user keys num default CF `default\0`-prefixado (DBs com CFs,
+  ex. suíte deps/myrocks) e o read path decodificava o bloco sem achar a
+  key (read-back None). Corrigido para `codec.default_raw`; DBs com CFs
+  voltam ao replay por WriteBatch. Teste `rfc0217_p12_ingest_readback`
+  promovido de `#[ignore]` para verde; assert de read-back devolvido à
+  suíte rocksapi (bench 31/0/0).
+- [ ] **P1.3** wbwi 0,494 + myrocks_write_tx 0,751: batch indexado nativo
+  + tx single-writer real (`begin_occ`/commit já existem) no lugar do
+  WriteBatch emulado. **DIAG micro 2026-09-13** (Darwin, rocksapi,
+  n=300, 3 rounds quiet, peer sync=0): flat overlay `5c1f5b43` move
+  0,307 → 0,317/0,324/0,349 (min +3%, best +13% relativo) — ganho real
+  mas perda honesta permanece; dono do residual = emulação WBWI
+  (per-op ~369ns vs ~117ns do WriteBatchWithIndex nativo; write_tx
+  nativo e cartaz Linux 0,494 = meter e4b). — status: `doing`
+- [ ] **P1.4** linkbench_mix 0,236: decompor primeiro (mix scan+delete;
+  telemetria read_probe/scan), atacar o dono nomeado. — status: `doing`
+  (ataque landed `2f083efb`; veredito ratio = e4b).
+  Decomposição (DIAG Darwin n=3000, sample macOS + probe): write-side =
+  `fcntl(F_FULLFSYNC)` 92,9% do wall (Darwin-only: std `sync_data` em
+  apple = F_FULLFSYNC 4,18ms/op vs `fsync()` 0,053ms que o rocks usa —
+  80× estrutural, não existe no Linux; fsync_test.c no scratch). Reads
+  do mix pagavam re-sort do `point_ord`: com myrocks/deps o engine abre
+  multi-CF → keys `default\0…` caem no shard point (HashMap) e cada um
+  dos ~750 write→scan rebuildava collect+sort de ~104k entradas
+  (~120µs). Ataque: `point_ord_btree` incremental (build 1x no primeiro
+  range count, insert O(log n) por put quando a view existe, skip de 1
+  atomic quando não — shapes sem scan pagam zero; vale também para o
+  point-path do `last_visible_under_prefix`). DIAG pós: p50 17,7→8,5µs,
+  scan 1,1µs/op, `ord_builds=0` na janela do mix (o build único foi pago
+  no `read_only` anterior). A/B: core --tests 937/23/4 = baseline;
+  compat 95/4 (os 4 r0218 pré-existentes). Sobra Linux (e4b): serial
+  write 4,5µs/commit + read 1,1µs/op vs rocks p50 6,4µs/read.
+
+### P2 — Escala pesada, encode, read-side, produto, cobertura
+
+- [ ] **P2.1** Escala pesada: meter e fechar prefix 100M @4GiB
+  (0,70→≥1,0), overwrite_mc4 25M (0,557→≥1,0) e 15M (sem número→≥1,0);
+  blocked atual: orçamento de onda + custo, datado. — status: `todo`
+- [ ] **P2.2** Encode de memtable off-path: encode no membro antes do
+  grupo ou batch-encode no apply (alvo: `mem=` saindo de 3,13–14,2µs do
+  caminho do líder; recuperar o −0,180 do déficit kvrocks_set_mc50). —
+  status: `doing` (batch-encode no apply landed `9b5ca0f5`; DIAG de fase
+  = fila p22-diag). Landed: `insert_many` (o apply do grupo) agora usa
+  memo batch-local de prefixo — slot `&mut` do shard `tail_idx` mantido
+  através do loop (mata 1 `Bytes::copy_from_slice` + 1 walk por op),
+  acumulador de delta por CF com 1 flush (mata 1 walk por op em
+  `cf_bytes`), slot do `cf_span` (mata 1 walk + re-check por op);
+  `shard_insert` extraído e compartilhado com `tail_append` (paths 1-op
+  inalterados — controle: lone `kvrocks_set` não deve mover). Equivalência
+  provada por teste novo (troca de prefixo point/short/long/one-slash,
+  replace same-seq <16, tombstone, range-del, re-insert em shard
+  existente, cf_bytes/cf_span comparados); o teste pegou 1 divergência
+  real no span durante o desenvolvimento (entrada recém-criada
+  re-checada) e ela foi corrigida. A/B: core `--lib` 937/23 = baseline
+  idêntico (1 flaky `rfc0167_l0_stall` falhou só no baseline); bench
+  `compat_vs_rocks` 6/6; lib bench 28/2 = falhas pré-existentes idem no
+  worktree baseline. **DIAG `mem=` A/B 2026-09-13** (Darwin, kvrocks
+  n=3000, 2 rounds intercalados, gate quiet, baseline `9b5ca0f5^` vs
+  patch): `kvrocks_set_mc50` mem= **4,63→4,63µs (r1) / 4,82→4,96µs (r2)**
+  — neutro (Δ≤3%, ruído; lock_wait 8,7–28,5µs domina a variância).
+  Controle: lone `kvrocks_set` não emite `phasesΔ` (só shapes
+  ycsb/deps/myrocks/mc) — ausência esperada. Leitura honesta: no Darwin o
+  memo batch-local é neutro; o dono do `mem=` aqui não é o lookup que o
+  memo mata (BTree-insert/encode por op permanece ~0,19µs/op no grupo
+  mc50). O veredito do alvo (−0,180 do déficit kvrocks_set_mc50, mem=
+  3,13–14,2µs) é Linux: **meter e4b**; se lá também for neutro, a fatia
+  reabre como encode member-side (pré-grupo no cliente), follow-up
+  nomeado abaixo. — status: `doing` (código landed; cartaz = e4b)
+- [x] **P2.3** Read-side −18%: decompor cursor do scan (`deps_scan`
+  single 0,831 DIAG p201o → ≥1,0 no cartaz Linux). **Veredito DIAG
+  2026-09-13** (deps suite n=2000 ×2 rounds quiet, peer sync=0,
+  probes novos `scan_sst_setup_ns`/`scan_merge_ns` commit `0eb0f25e`):
+  **ratio 1,023 / 1,419** — o 0,831 do p201o não reproduz (superseded;
+  trabalhos pós-P1.4 — point_ord_btree incremental — e o cache TLS
+  last-N do `count_named` já absorvem a diferença). Decomposição por
+  miss (874 walks = 44% dos ops; 56% servidos pelo cache TLS/count com
+  zero walk): merge k-way **2,55–2,98µs/miss** (dono residual nomeado),
+  setup de cursores SST 0,51–0,55µs, resto do `count_visible`
+  1,1–2,7µs; block cache quente (10 decodes/874 walks). Cartaz Linux =
+  e4b; se lá der <1,0, o ataque é o merge k-way (single-pass min-head
+  com stepped cursors em vez de scan linear por chave emitida). —
+  status: `done` (DIAG-paridade datada; dono residual nomeado)
+- [ ] **P2.4** Escada de admissão (produto): probe com histerese/cache
+  curto em vez de por commit (alvo ≤1ms/commit sob Reclaim; parks
+  230–310ms eliminados do caminho quente; guarda: semântica Refuse abaixo
+  do hard intacta, `disk_pressure` 11/11). — status: `doing` (kernel +
+  wiring landed, knob `PEDRA_DISK_PROBE_CACHE_MS` opt-in, default off até
+  meter). Landed: `probe_cached`/`reclaim_ladder_due` no
+  `disk_pressure_kernel` (puras, testadas) + wiring em
+  `ensure_disk_pressure_admitted` — (a) veredito `Ok` fresco (< janela,
+  default 200ms) reusado sem `statvfs`; (b) banda soft SÓ proeba por
+  commit e a escada (compact/rotate/vlog-GC) rate-limited a 1×/1000ms —
+  o commit admite sem esperar a escada (mata as dezenas de ms/commit);
+  (c) Refuse nunca é mascarado fora da janela: banda soft e refuse
+  nunca populam o cache (`disk_ok_probe_at=None`), e o teste prova com
+  contador de probes que o Ok cacheado não re-proeba e que o refuse
+  abaixo do hard volta no commit seguinte ao expirar a janela. Guardiãs:
+  `disk_pressure` 13/13 (11 originais + 2 novas de kernel), 2 testes Db
+  novos no SpaceEnv real (`put` end-to-end com probe contável).
+  Pendente: meter Linux em disco pequeno (efeito ≤1ms/commit + parks) e
+  decidir flip do default (off até lá).
+- [x] **P2.5** Cobertura dos eixos sem número: sweep delete-heavy (hat:
+  perda — única família tocando deletes hoje é perda), concorrência 9–49
+  (fronteira mc8→mc50 sem ponto), célula 1 GiB (faixa smoke↔4GiB vazia),
+  captura p99/p999 (todas as comparações atuais são throughput). —
+  status: `done` (sweep DIAG 2026-09-13, finding
+  `2026-09-13-rfc0217-p25-cobertura/`; binário `0ba886fe`, braço rocks
+  `--features real`): cobertura completa executada (delete-heavy via
+  linkbench_mix sync-peer DIAG; banda mc9/16/32/49; célula g1 10M
+  records ≈1 GiB vs rocks default sync=false — primeira célula de
+  escala no harness compat-vs-rocks; p99/p999 em todas as formas).
+  **Células novas <1,0 abriram P2.6/P2.7/P2.8** (regra de extensão):
+  scan colapsa com a escala (ycsb_e 7,98–10,05 **WIN** gate Linux @1024
+  → **0,001** @10M DIAG; deps_scan 1,02–1,42 @1024 → **0,045** @10M);
+  write-path degrada com a escala (cache_overwrite 0,512 Linux → 0,037;
+  raftlog 1,58–1,64 WIN Linux → 0,250; mvcc_latest 3,99–4,28 WIN →
+  0,281; ycsb_a 0,656); banda mc9–49 toda 0,29–0,60 no DIAG (fronteira
+  contínua mc2→mc49, dono = P0.4/e4b). Leitura paga em escala:
+  ycsb_b 8,78, c/c_unif/c_big 1,7–2,3, d 1,66, apply_batch 1,47,
+  lock_prewrite 1,57 (DIAG). Delete-heavy DIAG: linkbench_mix 0,009
+  (p99 4,9ms = F_FULLFSYNC Darwin, dono já decomposto no P1.4;
+  peer sync ⇒ nunca claim).
+- [ ] **P2.6** (aberto por P2.5; execução em [RFC-0234](0234-ganhar-10m-scan-write-l0.md)) scan-at-scale — novo dono nº 1 do
+  board de leitura: decompor ycsb_e/deps_scan em 10M records com os
+  probes `scan_sst_setup_ns`/`scan_merge_ns` já no código (`0eb0f25e`);
+  nomear o dono do colapso; ataque candidado = single-pass min-head com
+  stepped cursors (citado no P2.3) + skip por bloco; alvo cartaz Linux
+  1 GiB ≥1,0.
+  — status: `in-progress` — decomposição FEITA (finding
+  `2026-09-13-rfc0217-p26-p27-escala/`): setup 231µs/op = 97% (merge
+  4,75µs), 3,4 blocks/op com 76% miss, `SstCountCursor::settle` eager.
+  **Dono rev.2 (corrigido por probe)**: NÃO é o skip `commit_inflight`
+  (solo-async auto-drena: probe `rfc0217_p26_l0_debt_probe` 1,19M ops
+  l0≤4, bypass não conta commit_inflight); o dono é o **flush do seed
+  adiado para dentro da janela medida** (54 L0 files vivos nos
+  primeiros scan-ops; Rocks compacta no seed, Pedra parka) × settle
+  eager do cursor. Fix LANDED no harness: settle pós-seed default
+  (`ROCKS_PARITY_SETTLE=0` A/B; compat flush+drain≤30s, rocks
+  flush+wait_for_compact) + **simetria de write_buffer 256MiB nos dois
+  engines** (Rocks estava no default 64MiB — assimetria pró-Pedra em
+  suítes >64MiB; kvrocks_set_mc50 1,678 config-suspeito até re-run).
+  Falta: re-meter @10M com settle (DIAG) + gate Linux; cursor settle
+  eager segue aberto.
+  **Rev.3 (`p26r3`)**: settle funciona mecanicamente (memtable
+  6,27M→0, L0 54→14) mas não completa sob load 13 (deadline 30s) e o
+  dono do setup SOBREVIVE — tables sondadas/op 3,6 (ON) vs 4,2 (OFF),
+  blocks 726 vs 762: largura de table, não nível ⇒ P2.1 do
+  [RFC-0223](0223-escala-donos-flush-write-miss-read.md)
+  (lazy-first-block) justificado por dados; p50 oficial = gate.
+- [ ] **P2.7** (aberto por P2.5; execução em [RFC-0234](0234-ganhar-10m-scan-write-l0.md)) write-at-scale: meter de atribuição
+  `write_phase_stats`/PHASE na célula 10M (g1) para raftlog 0,250 /
+  mvcc_latest 0,281 / cache_overwrite 0,037 / ycsb_a 0,656 — o dono
+  @escala não é o dono @1024 (cache_overwrite @1024 = pwrite-por-op
+  **hat** ticket 0193; raftlog/mvcc_latest @1024 são WIN Linux);
+  suspeitos **hat**: L0/SST count e flush por commit com 10M chaves,
+  memtable BTree grande, admission ladder. Dono nomeado → ataque.
+  — status: `in-progress` — decomposição PHASE FEITA (finding
+  `2026-09-13-rfc0217-p26-p27-escala/`, write10m 10,63M commits):
+  wal 4,74µs (50,7% — async, ataque é o P0.4/grouping no meter
+  oficial), **flush_check 2,69µs (28,8%) = dono novo**, mem 1,55µs,
+  publish/prepare <0,1µs; split gate×work landed `7f2758d4`
+  (`flush_events`/`flush_work_ns` no WRITEPHASE) — número do split vem
+  do pipeline local `p26r3` (DIAG), ataque (epoch no gate × flush fora
+  do commit) decidido pelo split; desenrolado no
+  [RFC-0223](0223-escala-donos-flush-write-miss-read.md) P1.1.
+- [ ] **P2.8** (aberto por P2.5) banda mc9–49: DIAG Darwin fechado como
+  fronteira contínua (0,29–0,60 de mc9 a mc32; mc49 encosta quando o
+  rocks paga cauda — ycsb_a_mc49 4,03 com rocks p999 58ms,
+  cache_overwrite_mc49 1,153, ycsb_f_mc49 0,889); nenhum mecanismo novo
+  a implementar — o veredito da banda é o mesmo do P0.4 (janela ≤ voo
+  da barreira, Linux e4b). — status: `todo` (depende de e4b)
+
+### Regra de extensão (board aberto)
+
+Este RFC **permanece aberto** até toda célula nomeada do board estar ≥1,0
+ou carregar veredito datado de teto-por-construção. Qualquer onda deste
+RFC que descubra célula nova <1,0 abre fatia datada nova aqui (P2.6,
+P2.7, …) no mesmo commit do finding — nada é descoberto e deixado sem
+dono.
+
+## Status (living — update with every PR)
+
+| ID | Band | Title | Status | Task / PR | Updated |
+|----|------|-------|--------|-----------|---------|
+| P0.1 | p0 | Kernel janela de coleta + wiring real + testes `rfc0217_group_window_*` | done | `010f61fe` + P0.1b `234001f7` | 2026-09-13 |
+| P0.2 | p0 | Attach in-flight: adjudicado — fundido em P2.2 (encode member-side; voos já cheios) | done | `234001f7` | 2026-09-13 |
+| P0.3 | p0 | Meter DIAG Darwin: avg_grp ok; ratio janela fixa PERDE mc2–4 (0,100–0,960 vs clean), GANHA mc6+; default fica off | done | veredito 09-13T09:51Z (perda→P0.3b) | 2026-09-13 |
+| P0.3b | p0 | Early-exit: quiescence fecha cw=42–51µs; janela-≤-voo IMPLEMENTADA (`flight_capped_window_us`, knob default off, EMA do voo, colapso <20µs, twins ok) | blocked e4b | probes 09-13 (`0ba886fe`) + impl 09-13 (`9f361642`) | 2026-09-13 |
+| P0.4 | p0 | Meter Linux 3-run quiet: braço flightcap no driver; imagem `p211z` publicada; gate re-estreado em `linux-gate-p211z` (deploy `6f509017` pending, host Brasil ainda down; onda encadeada P0.5→P0.4) | doing | — | 2026-09-13 |
+| P0.5 | p0 | Re-adjudicação do dono no Linux: parte 1 da onda encadeada `p04chain` (p211p PHASE no ext4) | doing | — | 2026-09-13 |
+| P1.1 | p1 | kafka_changelog_flush: flush amortizado | done | `ded231ab` (ratio ≥1,0 = meter Linux e4b) | 2026-09-13 |
+| P1.2 | p1 | ingest_sst + compaction_filter: caminhos nativos | done | `92a76a97` + read-back fix `f04d98af` (cartaz Linux = e4b; DIAG filter 0,47→0,935) | 2026-09-13 |
+| P1.3 | p1 | wbwi + write_tx: batch indexado + tx nativos | doing | `5c1f5b43` + DIAG micro 09-13: 0,307→0,317–0,349 (perda honesta; cartaz = e4b) | 2026-09-13 |
+| P1.4 | p1 | linkbench_mix: decompor + atacar dono | doing | `2f083efb` (point_ord_btree incremental; DIAG p50 −52%; cartaz = e4b) | 2026-09-13 |
+| P2.1 | p2 | Escala pesada 4GiB: meter + fechar (0,70/0,557) | todo | — | 2026-09-13 |
+| P2.2 | p2 | Encode memtable off-path | doing | `9b5ca0f5`; DIAG 09-13 mem= neutro no Darwin (4,63→4,63/4,82→4,96µs); veredito alvo = e4b | 2026-09-13 |
+| P2.3 | p2 | Read-side: cursor de scan | done | DIAG 09-13: ratio 1,023–1,419 (0,831 não reproduz); dono residual = merge k-way 2,5–3µs/miss; cartaz = e4b | 2026-09-13 |
+| P2.4 | p2 | Escada de admissão: histerese (produto) | doing | `c4fe195d` (knob opt-in; meter disco pequeno p/ flip default = e4b) | 2026-09-13 |
+| P2.5 | p2 | Cobertura: delete-heavy, mc9–49, 1GiB, p99/p999 | done | finding 09-13 `p25-cobertura` (abriu P2.6/P2.7/P2.8) | 2026-09-13 |
+| P2.6 | p2 | scan-at-scale: ycsb_e 0,001 / deps_scan 0,045 @10M — execução [RFC-0234](0234-ganhar-10m-scan-write-l0.md) | in-progress | finding 09-13; 0234 P0.2/P1.3 | 2026-09-16 |
+| P2.7 | p2 | write-at-scale: raftlog 0,250 / mvcc 0,281 / overwrite 0,037 / ycsb_a 0,656 @10M — execução [RFC-0234](0234-ganhar-10m-scan-write-l0.md) | in-progress | finding 09-13; 0234 P0.3/P1.1–P1.2 | 2026-09-16 |
+| P2.8 | p2 | Banda mc9–49 DIAG 0,29–0,60 (fronteira contínua; veredito = P0.4/e4b) | todo | — | 2026-09-13 |
+
+## Acceptance Criteria
+
+- **Tests:** `rfc0217_group_window_*` e `rfc0217_inflight_attach_*` no
+  caminho real (`ConcurrentDb` + env real, env pin on/off); guarda do
+  caminho lone (single-client p50 sem janela — sem regressão); twin AS-IS
+  com env off idêntico ao comportamento atual; `disk_pressure` 11/11
+  intactas (P2.4); serial A/B ⊆ baseline conhecido + musl exit 0 a cada
+  fatia de código.
+- **Telemetry:** `write_group_stats` (`avg_grp` alvo ≥2 em mc2–mc4),
+  `write_phase_stats` (decomposição da seção serial no Linux), contadores
+  do flush amortizado (P1.1), read_probe/scan (P1.4), parks do admit
+  (P2.4) — sempre na linha existente das ondas p211p/p211q.
+- **Documentation:** finding datado por onda; linha viva no
+  `docs/status.md`; inventário rev. 4 ao fechar o board; errata
+  `426272f4` referenciada (dono corrigido).
+- **Screenshots:** none — backend-only.
+
+## Out of scope
+
+- Ratios contra peer `sync=true` (nunca win; `rocks-parity-compare`
+  exits 2) e qualquer re-medida de cartaz pago (apply_mc4 1,0859;
+  kvrocks_set_mc50 1,678; G1 apply_mc4 2,788 head3) — guardas ≥ apenas.
+- Mudar o contrato G1 (fdatasync antes de Ok é o produto); a linha G1
+  single-client write-per-op fica no teto por construção, documentada,
+  nunca citada como win nem escondida.
+- Mass-fix das 23 falhas formais shared-lane (sessão separada); RFCs da
+  sessão paralela (0216); multi-node/Montanha; Darwin como claim (DIAG).

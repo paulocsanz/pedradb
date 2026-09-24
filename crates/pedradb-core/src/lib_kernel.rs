@@ -65,6 +65,22 @@ pub mod key;
 #[path = "leveling_kernel.rs"]
 mod leveling;
 pub mod lsm_r1_kernel;
+/// RFC-0278: LSM Inductive Bisimulation & Snapshot Equivalence Kernel.
+pub mod lsm_bisimulation_kernel;
+/// RFC-0278: FSCQ-class Mechanized Crash-Recovery Refinement Kernel.
+pub mod crash_refinement_kernel;
+/// RFC-0278: Bounded Dynamic Resources & Stack Limits Kernel.
+pub mod bounded_alloc_kernel;
+/// RFC-0279: Manifest Confluence & Church-Rosser VersionSet Kernel.
+pub mod manifest_confluence_kernel;
+/// RFC-0279: Liveness, Starvation-Freedom & Deadlock-Free Backpressure Kernel.
+pub mod liveness_progress_kernel;
+/// RFC-0279: Serializable Snapshot Isolation (SSI) & Anti-Dependency Kernel.
+pub mod ssi_conflict_kernel;
+/// RFC-0279: Merge Operator Associativity & CRDT Determinism Kernel.
+pub mod merge_determinism_kernel;
+/// RFC-0279: Causal Seam Order & Handler Invariant Kernel.
+pub mod causal_seam_kernel;
 pub mod product_crown_kernel;
 pub mod rmw_sched_kernel;
 pub mod wal_buffer_kernel;
@@ -78,6 +94,8 @@ pub mod write_cycle_kernel;
 pub mod disk_pressure_kernel;
 /// RAM-pressure watermarks and backpressure admission (OOM prevention).
 pub mod ram_pressure_kernel;
+/// Unified backpressure and protection kernel (RFC-0274).
+pub mod backpressure_kernel;
 pub mod leftover_page_kernel;
 #[path = "lock_kernel.rs"]
 pub mod lock;
@@ -158,6 +176,10 @@ pub use db::{
 pub use disk_pressure_kernel::{
     compact_refuse, disk_pressure_admit, disk_probe_or_unknown, external_write_admitted,
     DiskPressureAdmit, DISK_HARD_FREE_BYTES, DISK_SOFT_FREE_BYTES,
+};
+pub use backpressure_kernel::{
+    BackpressureConfig, CompactionDebtVerdict, CompactionIoPacer, ConcurrencyVerdict,
+    SnapshotPinVerdict, VlogGcVerdict,
 };
 pub use health_kernel::{
     evaluate_db_health, format_json_status, format_prometheus_metrics, DbHealthReport,
