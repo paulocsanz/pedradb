@@ -4,7 +4,54 @@
 //! medians land in `estimates.json` after `BenchmarkGroup::finish`; we
 //! classify that number, not a second stopwatch.
 
-use pedradb_core::{classify_get, scale_kernel, GetClass};
+use pedradb_core::scale_kernel;
+
+/// Classification of a point-get measurement against the RFC-0176 scale model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GetClass {
+    FasterThanModel,
+    Best,
+    Happy,
+    Worst,
+    Degraded,
+    AsIsWalk,
+}
+
+impl GetClass {
+    #[must_use]
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::FasterThanModel => "faster_than_model",
+            Self::Best => "best",
+            Self::Happy => "happy",
+            Self::Worst => "worst",
+            Self::Degraded => "degraded",
+            Self::AsIsWalk => "as_is_walk",
+        }
+    }
+}
+
+/// Classify a measured point-get time in ns against forecast envelopes.
+#[must_use]
+pub fn classify_get(
+    measured_ns: u64,
+    best_ns: u64,
+    happy_ns: u64,
+    worst_ns: u64,
+    as_is_ns: u64,
+) -> GetClass {
+    if measured_ns < best_ns {
+        GetClass::FasterThanModel
+    } else if measured_ns <= happy_ns {
+        GetClass::Happy
+    } else if measured_ns <= worst_ns {
+        GetClass::Worst
+    } else if measured_ns >= as_is_ns {
+        GetClass::AsIsWalk
+    } else {
+        GetClass::Degraded
+    }
+}
 
 /// `(class, best, happy, worst, as_is)` ns against the 0176 forecast.
 #[must_use]
@@ -50,7 +97,6 @@ pub fn eprint_get_from_criterion(group: &str, id: &str, n: u64, ram: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pedradb_core::GetClass;
 
     /// RFC-0182 cites snapshot 1M get_hit 1,38 µs vs Rocks 2,58 µs — RAM clock.
     #[test]

@@ -119,7 +119,7 @@ pub mod cellcost {
 
     impl Drop for Guard {
         fn drop(&mut self) {
-            let delta = match self.start {
+            let delta = match self.start.take() {
                 Some(start) => {
                     let d = CostSnapshot::default().since(&start);
                     println!("cost/{}/{}: {}", self.group, self.id, d.line());
