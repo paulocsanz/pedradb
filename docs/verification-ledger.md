@@ -1,0 +1,251 @@
+# Ledger de verificação — Teorema / Experimento / TCB
+
+**Status:** living (atualizado no mesmo commit que o código que move uma linha de camada)
+**ID:** ledger-0187
+**Parents:** [0187](rfc/0187-teorema-experimento-tcb.md)
+**Gate:** `python3 scripts/check_ledger_consistency.py` (bloqueante; vermelho em inconsistência com `scripts/formal/catalog.json`)
+
+Toda garantia do Pedra mora em uma de três camadas. Este ledger é a lista
+autoritativa de qual garantia está em qual camada, com o artefato que a
+sustenta. Uma linha só sobe de camada (`experimento → teorema`) com o
+gate da camada de destino verde no mesmo commit (three-teeth ou
+enumeração completa); nunca por reescrita de ledger.
+
+<!-- ledger-catalog: total=335 proof=309 campaign=26 absent=0 single_artifact=328 aeneas_scripts=271 clones=7 models=35 -->
+
+## Teorema — ∀ sobre código/modelo (machine-checked ou enumeração completa)
+
+| Garantia | Artefato | Piso nomeado (o que NÃO é) |
+|---|---|---|
+| Kernels de produção verificados (Verus twin / Aeneas Lean) | `scripts/formal/catalog.json` — 261 pares proof; exemplares `catalog:vote`, `catalog:ae_entry`, `catalog:ae_ack`, `catalog:commit_raft`, `catalog:joint_election` | O term de prova é o fonte de produção linkado pelo rustc; twin é gêmeo, não substituto |
+| Exaustivo N≤3: todo escalonamento do espaço de grants do harness mantém o invariantes (66/66, 181 nós) | gate P0.1 `crates/pedradb-world/src/bin/gate_exhaustive_kernel.rs` | Não é ∀ interleavings do SO (R-pct/R-glue); é ∀ sobre o espaço enumerado do harness |
+| Crash-injection em família (RFC-0188 P2.1): todo índice de op falível de cada workload do grid (T,S) recupera fail-closed; T e S medidos no mesmo seam (`FailingEnvArc::tripped`); 4 workloads, T∈{6,9,12} S∈{2,3,4}, 33/33 pontos | gate `gate_crash_injection.rs` (família w0-baseline / w1-double / w2-wide-values / w3-singles) | Fronteira do grid: max T=12, max S=4. Fora: workload com T>12 ou S>4, setor partido/torn write (TCG nightly), ∀π, timing de grupo |
+| Piso de barreiras: TODO sítio `sync_data`/`sync_all`/`sync_dir` de produção está pinado (igualdade exata por (arquivo,tipo)) | gate P0.4 `scripts/check_barrier_floor.py` + `scripts/ratchet/barrier_sites.tsv` | A amarração dinâmica prova sync≥1 no stream injetado, não que cada sítio foi exercitado neste run |
+| Ratchet de seeds: cada seed pinada reproduz seu desfecho/hash de escalonamento | gate P0.2 `gate_seed_ratchet.rs` + `scripts/ratchet/pct_seeds.txt` | Replay determinístico de seeds pinadas; não é descoberta nem ∀ |
+| Escada de profundidade (RFC-0188): extracts 248 + 1 close registrado (`merge_sift_step_repairs_iff`) + 31 atoms (`visible_at_deletion_never_live` ∀ range_hidden — deleção nunca surfaced live; `si_hist_repair_plan_leave_iff_floor_or_match` ∀ tip_gen tip_matches — repair SI-hist deixa o piso gen-0 e o tip já-igual intactos, RFC-0191 P1.5; `apply_put_plan_hist_iff_live_and_gen_positive` ∀ is_reserved si_gen — hist do apply persiste só em chave viva acima do piso gen-0, RFC-0191 P2.3 passo 2; `hist_load_fate_merge_new_iff_decoded_and_not_below` ∀ decoded_ok best_has_user new_last existing — merge da SI-hist na réplica só quando o decode é ok e o novo não fica abaixo do existente (réplica corrompida nunca evita a cópia boa), RFC-0191 P2.3 passo 3; `revert_user_action_restore_value_iff_record_and_present` ∀ had_pre_record pre_was_absent — revert restaura o valor de prepare-time exatamente quando existe registro de pré-imagem marcando a chave presente (registro ausente não é ausência; nunca delete às cegas), RFC-0191 P2.3 passo 4; `txn_commit_action_reverts_iff_abort` ∀ status_is_abort — commit de txn com status abortado sempre reverta e nunca materializa (a cerca de abort sempre ganha, F47), RFC-0191 P2.3 passo 5; `tx_range_action_majority_reverts_iff_failed_and_committed` ∀ range_committed tx_failed — a maioria reverta exatamente quando o TX falhou e o range commitou (TX falho commitado nunca fica vivo na maioria, F47/F34), RFC-0191 P2.3 passo 6; `revert_clears_status_clears_iff_pairs_gone_and_live` ∀ status_is_abort pairs_empty — a chave de status só cai quando todos os pares foram e o status não era abort (a cerca de abort sobrevive a um replay posterior de TxnCommit, F47), RFC-0191 P2.3 passo 7; `durable_term_if_newer_raised_iff_newer_and_persisted` ∀ current_term incoming_term persist — o termo sobe durável exatamente quando o termo que chega é estritamente novo E o persist deu Ok (persist falho restaura o termo velho, nunca mantém um raise não-durável, F125/F127), RFC-0191 P2.3 passo 8; `queued_leave_finish_ok_iff_not_in_log_or_committed` ∀ leave_in_log leave_committed — um leave pendente termina exatamente quando a entrada de leave não está no log ou já está commitada (leave ainda no log sem commit nunca termina, RFC-0122/0123), RFC-0191 P2.3 passo 9; `election_grant_from_counts_ok_iff_ids_or_pending` ∀ in_ids in_pending_old_or_new — um voto concedido por um nó conta exatamente quando o nó está no conjunto de ids, ou está no pending old-or-new do joint (nó fora dos dois nunca concede, RFC-0114/0116), RFC-0191 P2.3 passo 10; `joint_election_ok_elects_iff_old_and_new_majority` ∀ old_yes old_n new_yes — a eleição conjunta elege exatamente quando C-old tem maioria E (não há joint pendente OU C-new também tem maioria; um lado sozinho nunca elege, F-L28/RFC-0064), RFC-0191 P2.3 passo 11; `lease_live_iff_zero_or_now_below` ∀ lease now_ms — uma lease está viva exatamente quando é zero (nunca expira) ou o relógio está abaixo do expiry (lease expirada nunca está viva, F7/F56), RFC-0191 P2.3 passo 12; `ae_ack_success_ok_iff_clean_or_dirty_persisted` ∀ log_dirty persist_ok — um ack de AppendEntries ok exatamente quando o log está limpo, OU sujo e o persist deu certo (log sujo com persist falho nunca acka ok, F48), RFC-0191 P2.3 passo 13; `plant_joint_schedule_ok_iff_opt_in_emits_and_default_omits` ∀ opt_in_emits default_omits — uma planta de joint-commit é ok exatamente quando o mundo opt-in emite E o default ainda omite (a planta é visível só para o leitor opted-in, RFC-0068), RFC-0191 P2.3 passo 14; `blob_gc_action_rewrite_iff_inactive_with_bytes` ∀ is_active bytes — o GC de blob reescreve exatamente quando o gen está inativo E ainda tem bytes (gen ativo nunca é reescrito; inativo vazio não tem o que reescrever, F-active-gen), RFC-0191 P2.3 passo 15; `point_version_fate_drop_iff_newer_kept_at_or_below_oldest_snapshot` ∀ this_seq newer_kept_seq oldest_snapshot — uma versão de ponto cai exatamente quando existe versão mais nova mantida E ela está no-ou-abaixo do oldest snapshot (versão visível ao snapshot mais velho nunca cai; sem cópia mais nova nunca cai, F177/F20), RFC-0191 P2.3 passo 16; `sst_recover_action_refuse_iff_corrupt_or_inventory_missing` ∀ obs listed — recovery recusa abrir exatamente quando o manifest está Corrupt OU é Inventory com SST listado faltando (manifest ausente rescanneia; inventário completo serve; dano nunca serve, F196/G8), RFC-0191 P2.3 passo 17; `compact_pick_gc_rewrite_max_iff_none_and_gc_and_files_at_max` ∀ lowest_level_with_files files_at_max_level gc_requested max_level — a reescrita de GC do nível máximo é escolhida exatamente quando nenhum nível tem arquivos, o GC foi pedido e já há arquivos no máximo (nível com arquivos vira Merge com o sucessor; sem as duas bandeiras o plano é NoOp, F177/F20), RFC-0191 P2.3 passo 18; `reopen_outcome_serve_all_iff_damage_none` ∀ damage point_in_time escalated — um reopen do WAL serve todos os registros exatamente quando o log não tem dano (cabeça truncada, CRC, header zerado ou resync são recusados ou servidos só como prefixo reportado, nunca inteiros em silêncio, F170/F171/G8), RFC-0191 P2.3 passo 19; `vlog_recover_action_refuse_open_iff_wants_large_use_new_and_nothing_on_disk` ∀ blob_active wants_large primary_exists use_new new_exists — a recovery do vlog recusa abrir exatamente quando o MANIFEST diz que o swing commitou e nenhum dos dois arquivos está em disco (inventar um primary vazio faria todo valor grande sumir, F51/G-swing), RFC-0191 P2.3 passo 20; `ae_entry_action_truncate_and_install_iff_conflict_above_commit` ∀ entry_index entry_term existing_term commit_index last_log_index — uma entrada conflitante trunca e reinstala exatamente quando um termo diferente já ocupa o slot e o slot está acima do commit index (conflito no-ou-abaixo do commit é recusado, nunca reescrito, F16), RFC-0191 P2.3 passo 21; `cf_encode_effective_empty_iff_default_raw_else_identity` ∀ cf default_raw — o encoding efetivo de column-family é vazio exatamente quando o cf é default com default_raw, ou o else manteve um cf já vazio (igualdade de Str declarada sobre o Result da comparação, RFC-0150 P0), RFC-0191 P2.3 passo 22; `gc_oldest_from_pin_value_iff_pin_or_unpinned_visible_min` ∀ oldest_pin last_seq visible_seq v — a fronteira mais-velha de GC é exatamente o pin vivo; sem pin o mínimo visível de last e visible (Ord.min declarada sobre o Result, RFC-0150 P2b/F20), RFC-0191 P2.3 passo 23; `level_target_bytes_ok_iff_zero_or_fanout_chain` ∀ level l1_target v — o alvo de tamanho de um nível é 0 exatamente no L0; nível não-zero computa l1_target·FANOUT^min(level−1,18) com aritmética saturante e cada passo intermediário ok (a cadeia ∃ é a regra de computação do monádico), RFC-0191 P2.3 passo 24; `compact_rewrites_sst_cf_ok_iff_empty_tag_never_or_representative_in_family` ∀ sst_cf family v — um compact reescreve um SST tagueado exatamente quando a tag não é vazia e o teste in-family sobre a chave representativa codificada decide sim, cada passo monádico da rota ok (tag vazia/mista/legacy nunca é reescrita, RFC-0150 P0), RFC-0191 P2.3 passo 25; `decode_cf_key_ok_iff_identity_or_stripped_past_prefix` ∀ cf encoded default_raw v — o decode é identidade exatamente com encoding efetivo vazio; senão o prefixo cf\0 é fatiado de len+1, e um prefixo que não cabe no buffer devolve o slice vazio, nunca uma vista parcial ou deslocada (RFC-0150 P0), RFC-0191 P2.3 passo 26; `encode_cf_key_ok_iff_bare_key_or_prefixed_vec` ∀ cf key default_raw v — o encode devolve a chave nua exatamente com encoding efetivo vazio; senão o output é a cadeia planejada por capacidade (bytes do cf, um 0 separador, a chave) com cada passo ok (RFC-0150 P0), RFC-0191 P2.3 passo 27; `infer_sst_cf_ok_iff_shared_family_or_empty` ∀ smallest largest v — um SST é tagueado com a família dos bounds exatamente quando ambos compartilham uma família; bound único toma a família dele; sem bounds a tag vazia (mista/legacy) — nunca uma tag que minta sobre conteúdo misto (RFC-0150 P0), RFC-0191 P2.3 passo 28; `batch_is_empty_ok_iff_zero` ∀ n v — um lote de comprimento n roteia pelo caminho vazio exatamente quando a comparação de máquina de n contra zero cai em v (corpo sem passo monádico: a iff é a regra de computação inteira do do-block extraído), RFC-0191 P2.3 passo 29; `dir_sync_required_ok_iff_sync` ∀ sync v — um rename/create é seguido de fsync de diretório exatamente quando o sync das open-options está ligado e a bandeira cai em v (corpo é o lift puro ok sync: a iff é a regra de computação inteira do do-block extraído), RFC-0191 P2.3 passo 30) sobre corpos Aeneas extraídos | gate `depth-floor` `scripts/check_depth_floor.py` + registro `scripts/ratchet/close_proofs.tsv` + floors `scripts/ratchet/proof_depth.tsv` | Crédito de degrau só via registro ∀ sem sorry; twins close não registrados contam só no live count do residuals; wrap-factory nunca ganha linha. Extract 276→…→248 é recount das promoções (`visible_at` em 0085e919; passos 4–30 do P2.3 sobem `revert_user_action`, `txn`, `tx_glue`, `revert_clears_status`, `durable_term`, `queued_leave_finish`, `election_grant_from`, `joint_election`, `lease`, `ae_ack`, `sched_plant_joint`, `blob_gc_pick`, `compact_retention`, `manifest_recover`, `compact_decision`, `reopen_outcome`, `vlog_recover`, `ae_entry`, `cf_encode_effective`, `pin_gc`, `leveling`, `compact_rewrites_sst_cf`, `decode_cf_key`, `encode_cf_key`, `infer_sst_cf`, `batch_is_empty`, `dir_sync_required` a atom — cada par promovido sai do pool extract), não extração perdida |
+| Cobertura de interleaving 15/15 (RFC-0188 P2.2): union das 3 seeds irredundantes (0x1, 0x15, 0xc8) cobre os 15 sítios do inventário, incl. `E.create_open`/`E.remove`/`E.meta`/`W.crash`; remoção de qualquer seed → vermelho | gate `gate_coverage_floor.rs` + `scripts/ratchet/coverage_floor.tsv` | Piso sobre ESTE conjunto pinado com `buggify_widen_sites`; não é ∀ do espaço de seams nem descoberta (soak/hunt noturnos) |
+
+## Escada de contagem (RFC-0199) — cotas de trabalho por operação
+
+A escada `count` prova **trabalho** (∀ sobre o extract Aeneas: passos do
+walk, chamadas a primitivas nomeadas), nunca correção (escada close/atom)
+e nunca relógio (ns é âncora medida datada; TCG/F_FULLFSYNC seguem
+experimento, 0187). Crédito `count` no registro
+`scripts/ratchet/close_proofs.tsv` (kind `count`, ortogonal ao degrau
+close/atom — um par pode carregar ambos); `floor_count` só sobe, no mesmo
+commit do teorema. Par `model` com linha `count` gradua (sai do pool
+stand-in). Cada teorema tem Rust twin test que dirige a fn de produção e
+assegura a mesma cota com contador instrumentado NO TESTE (nunca em hot
+path). Gatilho: `check_depth_floor.py` (residual `proof_depth.count` ==
+linhas registradas).
+
+Inventário vivo (kernel → medida de tamanho → cota-alvo → status; status
+`count` = teorema registrado, `todo` = fatia aberta, `deferido` = razão
+datada):
+
+| Kernel | Medida de tamanho | Cota-alvo | Status |
+|---|---|---|---|
+| Point-get ladder (`catalog:probe_order_covering`) | runs candidatas no ladder | probes ≤ candidates; iterations = candidates | **count** (P0.3 0199 → P1.1 0204: `probe_order_covering_work_bound` agora MACHINE-EMITIDO em `ProbeOrderCoveringDerived.lean` pela ferramenta de derivação — espelho Nat aposentado; pontes cont/exact-step humanas em `ProbeLadderBridges.lean`; twins in-module em `probe_order_kernel.rs` intocados) |
+| Escala/ladder de níveis (`catalog:scale_predict`) | bytes do store | probes = levels + L0 (razão de níveis; forma do `scale_kernel`) | **count** (P0.3 0199 → P1.1 0204: `point_get_probes_le_levels_l0_max` agora MACHINE-EMITIDO em `ScalePredictDerived.lean` — espelho aposentado; ponte `saturating_add_val_le` humana (pública) em `ProbeLadderBridges.lean`; twin `tests/scale_ladder_count.rs` intocado; gradua o par model→count, fecha 0198 P2.1) |
+| Compact merge walk (`catalog:lsm_compact`) | Σ entradas dos níveis fundidos | one-pass: cada entrada visitada ≤ 1× por compact; work ≤ Σ níveis + MAX_LEVELS | **count** (P0.2 0199 → P0.1 0204: `lsm_compact_work_bound` agora MACHINE-EMITIDO em `LsmCompactDerived.lean` pela ferramenta de derivação — espelho Nat aposentado; pontes semânticas humanas em `LsmCompactBridges.lean`; twin `tests/lsm_compact_count.rs` intocado) |
+| Insert memtable → flush (amortizado) (`catalog:auto_flush_due`) | writes sob o cap | k writes ⇒ work total de flush ≤ c·k (crédito; N concreto) | **count** (P1.2 0199 → P1.1 0204: `memtable_flush_amortized` agora MACHINE-EMITIDO em `AutoFlushDueDerived.lean` pela ferramenta — espelho Nat aposentado; invariante `run_paid_plus_mem_le` (cada byte pago ≤ 1×) também emitido; pontes `auto_flush_due_fires_iff`/`auto_flush_due_hold_under_limit` (dispara iff armed ∧ limit ≤ mem) humanas em `FlushAmortBridges.lean`; twin `tests/flush_amort_count.rs` intocado — schedule sim dirigindo o gate real `auto_flush_due`) |
+| Write path confirmado (`catalog:wal_commit_plan`) | 1 commit/grupo confirmado | ≤1 `fdatasync` por plano confirmado (contagem na álgebra `Work.io`; ns = âncora datada) | **count** (P1.1: `wal_commit_plan_at_most_one_fdatasync` — álgebra `Work.io` (pwrite/fdatasync/pread/fadvise construtores contáveis) + sharp `wal_commit_plan_committed_sync_count` (grupo confirmado: exatamente 1 barreira se pediu sync, 0 senão) + primitivo posix `fdatasync_rc_ok` (rc=0 único ok); `WorkIo.lean`; twin `tests/wal_commit_work_count.rs` — par carrega close E count) |
+| Bloom probe (`catalog:bloom_may_contain`) | k hashes da política | probes = k por consulta (loop extraído) | **count** (P2.3 0199 → P1.2 0204: `bloom_may_contain_work_bound` agora MACHINE-EMITIDO em `BloomMayContainDerived.lean` pela ferramenta — espelho Nat aposentado e o loop INSCRITO no parse (deferimento do 0203 fechado; step_work=7); pontes `bloom_may_contain_body_cont_step` (cada `cont` avança o índice exatamente 1, add sem overflow) + `bloom_may_contain_body_done_true_at_k` (`done true` só ao atingir k — bit claro short-circuita com `done false`, estritamente abaixo) humanas em `BloomBridges.lean`; twin `tests/bloom_probe_count.rs` intocado — primitivos reais `probe_bit`/`bit_index`/`test_bit`/`hash_pair` agora pub, contador no teste, resposta conferida contra o `may_contain` real) |
+| Scan/range (`catalog:scan_guard`) | arquivos × tombstones | decisão por arquivo ≤ 1 + \|tombs\|; scan linear no emitido | **count** (P1.4 0199 → P1.1 0204: `scan_decision_work_bound` agora MACHINE-EMITIDO em `ScanGuardDerived.lean` pela ferramenta — espelho Nat aposentado; pontes `scan_overlap_short_circuit` (overlap short-circuit no extract) + `scan_closure_one_check_per_call` (1 `tombstone_reaches_window` por chamada do closure gerado) humanas em `ScanDecisionBridges.lean`; twin `tests/scan_decision_count.rs` intocado — par carrega close E count) |
+
+Âncoras ns por classe de host (medidas datadas — nunca teorema,
+RFC-0187): tabela viva `scripts/ratchet/host_anchors.tsv`, consumida
+pelo teste `crates/pedradb-core/tests/host_anchor_table.rs` — toda
+classe `HostIoClass` (`linux_fdatasync`, `darwin_fullfsync`) presente,
+datada e fontada; rótulo quiet/DIAG honesto (decidido do loadavg do
+run). As contagens seguem class-independent (teoremas any-class do
+`WorkIo.lean`); a âncora só preenche o custo físico ns por classe —
+linux = `LINUX_QUIET_0189_P01` (RFC-0189 P0.1, 2026-09-10, quiet, pino
+de fases por op, labeled-stale pré-0193); darwin =
+`DARWIN_DIAG_0203_P11` (2026-09-11, DIAG honesto — loadavg 10–16:
+fdatasync p50 17,7 µs vs `F_FULLFSYNC` p50 4,0 ms intra-host,
+`findings/2026-09-11-rfc0203-p11-darwin-fullfsync-anchor.md`).
+
+Movimento de linha: `todo → count` exige teorema ∀ sem sorry sobre o
+extract + twin test + linha no registro + `floor_count` no MESMO commit
+(RFC-0199 P0.2 estabelece a receita). Enforcement (RFC-0203): um par
+novo sem linha `count`/`deferido` datada no MESMO commit falha o gate
+`check_inventory_terminal.py` (teorema sem linha, linha sem teorema,
+`todo` no ledger — tudo RED); o contrato de twin falha o
+`check_twin_contracts.py` se a ferramenta de derivação não souber o
+twin do par (emissão recusada). Rito completo no runbook
+`docs/runbooks/verification-gates.md` §Movimento de linha. A ferramenta própria de derivação
+mecânica de contadores (P2.1) — `scripts/ratchet/derive_count_annotations.py`,
+emissora de `CountDerived.lean` (6 fns inscritas, anotações por expansão:
+leaf/local/dispatch/cmp/arith; loops aninhados e self excluídos) com gate
+`--check` dentro de `lean_extracts.sh` — deriva as anotações que o twin
+hand-escrito passa a CONFIRMAR módulo a módulo; o hand-twin continua
+obrigatório (dirige a fn de produção Rust, não o extract).
+
+## Garantias de produto (RFC-0191)
+
+Quatro frases sobre o fn que o rustc liga. Camada só sobe
+(`model → atom → close`) no **mesmo commit** que o teorema. Gate
+`product-floor` (`scripts/check_product_floor.py` +
+`scripts/ratchet/product_guarantees.tsv`). Floor: ≥1 atom\|close.
+
+| Frase | Camada | Artefato | Piso nomeado (o que NÃO é) |
+|---|---|---|---|
+| R1-deleção + value: `Deletion` nunca live; `Value` live iff not hidden; ∀ `range_hidden` | close | RFC-0227 sujeito `get_live` (Isolated `while` sobre versões newest-first que merge/SST/memtable/count_visible matcheiam); teorema `r1_get_live` (`Merge.lean`, unfold `merge.get_live`); callee `visible_at`. `catalog:visible_at` | Não é o `Db::get` inteiro (Env/cache); é o walk Isolated. Disco/media fora (0078). |
+| D1-script: `need_sync ⇒ Sync` antes de Apply/Ok; sync fail ⇒ Fence | close | RFC-0227 sujeito `put_crash_reopen_survives`; teorema `d1_put_crash_reopen` (`ComposeDefining.lean`, unfold `put_handler_plan` × `wal_commit_plan` × `crash_legal` × `recover_collect_act` × `get_live`). `catalog:wal_commit_plan` | Não é prova de `fdatasync`/disco (0078). Lying Env suspende. |
+| T1-leftover: leftover aborta, nunca materializa | close | RFC-0227 sujeito `txn_recover_materializes`; teorema `t1_recover` (`Txn.lean`, unfold `leftover_fate` × `txn_commit_action`). `catalog:leftover_txn_is_aborted` | Recover Isolated; não é o reopen I/O. |
+| C1-joint: eleição joint exige as duas maiorias | close | RFC-0227 sujeito `replica_served_ok`; teorema `c1_replica_served` (`Membership.lean`, unfold `participating_if_member` × `joint_election_ok`). `catalog:joint_election` | Valor servido ∈ prefixo majority-durable (participating ∧ elects ∧ seq≤commit). 32 plantas L28 TCP continuam campaign. |
+
+## Experimento — estatística/mecânica (nunca viram um ∀)
+
+| Garantia medida | Artefato | Fronteira honesta |
+|---|---|---|
+| PCT d=2/d=3/d=4 sobre código real (bug cadeia-3 achado a ~1e-3/seed no d=3; d=2 nunca) | `pct_concurrent.rs` campanhas + ratchet P0.2 | Amostragem; `forall_schedules_admitted` sempre false |
+| Lock interleavings / data races | `scripts/race_job.sh` (TSan box no CI) | estatístico, nunca ∀ |
+| World swarm 1024/256/256 seeds exit-1 | job `world-parallel` (`synthetic-field.yml`) | campanha; oráculo por run |
+| Descoberta de cobertura (sítios de seam) | soak adaptativo + `world-nightly` | o piso P1.1 é tripwire, não descoberta |
+| Piso de cobertura pinned-seeds (união 11/15 sítios) | gate P1.1 `gate_coverage_floor.rs` + `scripts/ratchet/coverage_floor.tsv` | 4 sítios (`E.create_open`, `E.remove`, `E.meta`, `W.crash`) ficam com o soak adaptativo |
+| Determinismo TCG guest = native | jobs `tcg-*` (`synthetic-field.yml`) | oráculo trace_hash, não wall-clock |
+| "Persistiu no disco" (power-cut) | TCG power-cut nightly (P2.2, RFC-0187) + F_FULLFSYNC | SEMPRE experimento; a barreira de SO é TCB |
+| Rocks parity (peer default `sync=false`, floor 1.0; G1 fdatasync-antes-do-Ok) | `findings/rocks-parity-floor1x*` | medição; regras de peer do repo |
+| Bug-plants three-teeth (dente DST) | `three_teeth_queued.rs` etc. (catálogo, tier campaign — 33 pares `l28_*`) | planta prova que o dente morde, não ∀; exemplares `catalog:l28_durability`, `catalog:l28_tcp_left`, `catalog:l28_tcp_part` |
+
+### Herdados do 0187 — estado terminal (RFC-0191 P2.4)
+
+Os três gates herdados do [0187](rfc/0187-teorema-experimento-tcb.md) NÃO
+foram re-fatiados para o RFC-0191 e NÃO foram descartados — permanecem
+exatamente onde o 0187 os deixou:
+
+- **Série L28** (33 pares `l28_*`, tier campaign): **user-gated** — não
+  iniciar a promoção a teorema three-teeth sem decisão registrada (rank H).
+- **Nightly experimental de durabilidade física** (TCG guest power-cut por
+  barreira + `F_FULLFSYNC` no macOS): permanece nightly, **sempre
+  experimento** — "persistiu no disco" além da barreira de SO não vira
+  claim de teorema; a barreira de SO é TCB (tabela abaixo).
+- **Exaustivo N=4 com poda/simetria**: aberto no 0187 por custo do runner;
+  o exaustivo registrado segue N≤3 (gate P0.1).
+
+A fronteira do grid de crash-injection permanece NOMEADA: max T=12,
+max S=4 (coluna "Piso nomeado" da linha de crash-injection, acima).
+Fora dela: T>12, S>4, setor partido/torn write (TCG nightly), ∀π, timing
+de grupo. Alargar a fronteira é movimento de ledger com gate verde no
+mesmo commit — nunca silêncio.
+
+Recount do marker nesta mesma edição (dívida da própria campanha): os pares
+`merge_sift` (59738caa), `si_hist_repair`, `apply_put_plan`, `hist_load_fate`
+(2d60af11–f42d17ed) entraram no catálogo sem mover o marker — total
+294→298, proof 262→265, single_artifact 288→291, aeneas_scripts 228→231.
+
+Recount do marker 2026-09-13 (dívida do fechamento RFC-0219, achada pela
+auditoria independente de 2026-09-13): as 20 promoções átomo do 0219
+(trampolim→escada, `80782f6c..93a9799e`) entraram no catálogo sem mover o
+marker — total 292→312, proof 266→286, single_artifact 285→305,
+aeneas_scripts 224→245.
+
+Migração de rota 2026-09-13 (RFC-0222 P0.5): os runners `verus_vote_decision.sh`
+e `verus_dictionary_link.sh` ficaram órfãos pós-pagamento — os kernels perderam
+o bloco `verus!` (`3c91d402`, `b27fe284`) e o Verus aborta com "verus_builtin
+not imported" antes de provar nada. Os 3 pares (`vote`, `grant_persist` →
+`aeneas_vote.sh`; `dictionary_link` → `aeneas_reopen.sh`) migram para a rota
+Aeneas dos irmãos de kernel (`durable_term`, `reopen_outcome` já eram
+aeneas-only); átomos pagos em `close_proofs.tsv`. `verus_changelog_rebuild.sh`
+e `verus_lookup.sh` voltaram ao verde no mesmo commit (spec twins +
+`when_used_as_spec`, 13/14 verified 0 errors). aeneas_scripts 245→248.
+
+Enrollment 2026-09-14 (RFC-0222 P0.7, 1/8 kernels): `client_axis_kernel.rs`
+entra no catálogo (`pipeline_drain_cap`, `async_merge_policy` — produção
+`concurrent.rs` já chamava; extract `aeneas_client_axis.sh`, teoremas
+`pipeline_drain_cap_fate_iff` / `async_merge_policy_fate_iff` em
+ClientAxis.lean). total 312→314, proof 286→288, single_artifact 305→307,
+aeneas_scripts 248→250.
+
+Enrollment 2026-09-14 (RFC-0222 P0.7, 2/8): `group_window_kernel.rs`
+(`merge_eligible`, `flight_capped_window_us` — produção `concurrent.rs`
+já chamava; extract `aeneas_group_window.sh`, teoremas em
+GroupWindow.lean). total 314→316, proof 288→290, single_artifact 307→309,
+aeneas_scripts 250→252.
+
+Enrollment 2026-09-14 (RFC-0222 P0.7, 8/8): os 6 kernels restantes entram
+no catálogo — `leftover_page_advice`, `scan_readahead_window`,
+`serial_cs_ns`, `spine_replay`, `cold_permille` (`--start-from`, lifetime
+CFailure no arquivo inteiro), `product_crown` (Isolated `while`).
+`leftover_page_kernel`/`scan_readahead_kernel` passam a ser `pub mod` no
+lib.rs (o rustc liga). total 316→322, proof 290→296, single_artifact
+309→315, aeneas_scripts 252→258.
+
+Enrollment 2026-09-15 (dívida do fire 2026-09-14 write-degrada): o corte
+`seal_async_first_drain` (fn de kernel do RFC-0211 follow-up) tinha
+aterrissado SEM linha de catálogo — estava estacionado no
+`kernel_fn_allowlist` (baseline datada), invisível à varredura de dentes.
+Matrícula paga no mesmo commit da regra: par atom twin
+`seal_async_first_drain_as_is` (AS-IS = líder async sempre paga
+join/collect), teoremas `seal_async_first_drain_fate_iff` /
+`seal_async_first_drain_as_is_never` em GroupWindow.lean, allowlist
+encolhe (7→6 no kernel), floor_atom 324→325. total 328→329, proof
+302→303, single_artifact 321→322, aeneas_scripts 264→265.
+findings/2026-09-14-write-degrada-n-seal-async.
+
+Enrollment 2026-09-15 (RFC-0226 P0.2+P1.1): `seal_async_first_drain`
+ganha `batch_len` (sela só no singleton; AS-IS = política 2026-09-14
+que ignora batch_len). Par novo `solo_leader_bypass` (grupo-de-1 cai
+no `commit_async_one`; AS-IS sempre Keep; env `PEDRA_SOLO_BYPASS=1`
+opt-in). Teoremas `seal_async_first_drain_fate_iff` /
+`solo_leader_bypass_fate_iff` em GroupWindow.lean. floor_atom 325→326.
+total 329→330, proof 303→304, single_artifact 322→323,
+aeneas_scripts 265→266.
+
+Enrollment 2026-09-16 (RFC-0233 P1.4, negative result): tentativa de
+gate `inflight <= batch_len` em `seal_async_first_drain` (só selar
+quando ninguém está em submit) revertida no mesmo dia — formou grupos
+reais (avg_group 1.10→2.17, lock_wait 4.28µs→0.49µs) mas **cortou a
+vazão pela metade** (min-of-3 0.732→0.429 vs peer são 474–517k): o WAL
+async é memcpy mmap (~0.4µs), não há fd a amortizar, então o collect
+de ~10µs é imposto de latência puro. Contrato 5-arg mantido; teoremas
+`seal_async_first_drain_fate_iff` /
+`seal_async_first_drain_as_is_ignores_batch` em GroupWindow.lean
+re-extraídos. Sem mudança de contagem (par existente).
+
+Enrollment 2026-09-16 (RFC-0230 P0.3): `wal_ticket_kernel.rs` —
+`reserve_frame` + `pwrite_off_lock` (ticket de ordem; pwrite off-lock
+iff pin AND handle posicional). Teoremas em WalTicket.lean. floor_atom
+326→328. total 330→332, proof 304→306, single_artifact 323→325,
+aeneas_scripts 266→268.
+
+Enrollment 2026-09-16 (RFC-0234 P0.1): `l0_compact_due` no
+`flush_kernel.rs` — compacta L0 EXATAMENTE no/acima do trigger
+(AS-IS never; o park que deixou 54–773 L0 após seed de 10M).
+Trampolins `maybe_auto_compact` / `maybe_compact_l0_at_trigger` /
+`drain_l0_below_trigger` / `spawn_compact_worker` (inflight já não
+pula compact due). Teorema `l0_compact_due_fate_iff` em Flush.lean.
+floor_atom 328→329. total 332→333, proof 306→307, single_artifact
+325→326, aeneas_scripts 268→269.
+
+Enrollment 2026-09-17 (RFC-0236 P0.1): `filter_partition_kernel.rs` —
+`filter_partition(h1, nparts)` is `h1 % nparts` (0 when nparts≤1).
+AS-IS always 0 (Bloom monolítico). Teorema
+`filter_partition_collapses_iff` em FilterPartition.lean. floor_atom
+330→331. total 334→335, proof 308→309, single_artifact 327→328,
+aeneas_scripts 270→271.
+
+## TCB — axiomas nomeados (fora de prova, por decisão registrada)
+
+| Axioma | Onde está nomeado |
+|---|---|
+| Contrato do SO: `fdatasync`/`fsync`/`F_FULLFSYNC` persistem antes de retornar (disk-not-media, never_floor, ∀π fora) | RFC-0187 §TCB; produto G1 assume |
+| Firmware/controladora de disco não mente para o SO | RFC-0187 §Out of scope |
+| rustc linka o kernel de produção — o term de prova é o binário | RFC-0151 (three-teeth) |
+| Stdlib Aeneas no fork: `Chars` UTF-8; `Slice.get_unchecked` = `get` e OOB `Error.undef` (não panic do `index`, não opaque). Spec usize provada. Ponteiro `ConstRawPtr` continua `fail .undef`. Aeneas stdlib sorries named in TCB: `Slice.lean`, `StringIter.lean` (A10). | fork `ff713e6`; #1321 recusou `= index` |
+| Pins de toolchain: Verus `0.2026.08.09.92f466f`, Kani sha256, Aeneas `daa85d7`, Charon `0.1.232`/`340b1af`, Lean `4.31.0` | `.github/workflows/proof-check.yml`; re-pin só com widen-sem-sorry medido (P1.4) |
+| Harness PCT controla os grants; threads de SO fora do modelo | RFC-0070 (R-pct / R-glue) |
+| `StdEnv` = filesystem real do host nas campanhas não-sim | `pedradb-core/src/env.rs` |
+
+## Regras de movimento
+
+1. `experimento → teorema`: só com gate da camada teorema verde no mesmo
+   commit (three-teeth completo OU enumeração completa com asserção de
+   contagem). A movimentação edita este ledger no mesmo commit.
+2. `teorema → experimento` (regressão de camada): gate ficou vermelho e
+   o consenso é descer — o commit desce a linha E nomeia o piso perdido.
+   Nunca silencioso.
+3. TCB novo (axioma novo): precisa de linha nesta tabela com dono e
+   motivo; axioma sem nome aqui não existe para o produto.

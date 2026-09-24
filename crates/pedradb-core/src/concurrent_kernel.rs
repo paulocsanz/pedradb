@@ -245,6 +245,8 @@ struct WriteGroup {
     /// counted here but absent from the queue are waking between ops — exactly
     /// the stragglers the catch-up window waits for.
     active: AtomicUsize,
+    /// Maximum concurrent in-flight submissions allowed before queue backpressure (RFC-0274 Pillar VI; 0 = unconstrained).
+    max_in_flight_writers: AtomicUsize,
     /// Catch-up window length in µs (RFC-0037 P2.2): `0` disables. Runtime
     /// knob via [`ConcurrentDb::set_write_group_catchup_window`];
     /// `PEDRA_CATCHUP_US` seeds the default for lab sweeps.
@@ -496,6 +498,7 @@ impl WriteGroup {
             stall_parks: AtomicU64::new(0),
             arrived: Condvar::new(),
             active: AtomicUsize::new(0),
+            max_in_flight_writers: AtomicUsize::new(crate::backpressure_kernel::DEFAULT_MAX_IN_FLIGHT_WRITERS),
             catchup_window_us: AtomicU64::new(
                 std::env::var("PEDRA_CATCHUP_US")
                     .ok()
@@ -1010,6 +1013,17 @@ impl WriteGroup {
         self.submit_inner(db, ops, do_sync, None)
     }
 
+    fn check_concurrency_capacity(&self) -> Result<()> {
+        let active = self.active.load(Ordering::Relaxed);
+        let limit = self.max_in_flight_writers.load(Ordering::Relaxed);
+        if let crate::backpressure_kernel::ConcurrencyVerdict::QueueFull { active, limit } =
+            crate::backpressure_kernel::evaluate_concurrency_admission(active, limit)
+        {
+            return Err(CoreError::ConcurrencyQueueFull { active, limit });
+        }
+        Ok(())
+    }
+
     /// 1c put/delete: no `Vec<BatchOp>` on the lone-async path (RFC-0154 P1.6).
     fn submit_one<E: Env>(
         &self,
@@ -1017,6 +1031,7 @@ impl WriteGroup {
         op: BatchOp,
         do_sync: bool,
     ) -> Result<SequenceNumber> {
+        self.check_concurrency_capacity()?;
         self.await_flush_debt(db);
         self.await_l0_park(db);
         self.await_ram_pressure(db);
@@ -1109,6 +1124,7 @@ impl WriteGroup {
         vals: Vec<Bytes>,
         tail: Vec<BatchOp>,
     ) -> Result<SequenceNumber> {
+        self.check_concurrency_capacity()?;
         self.await_flush_debt(db);
         self.await_l0_park(db);
         self.await_ram_pressure(db);
@@ -1150,6 +1166,7 @@ impl WriteGroup {
         do_sync: bool,
         occ: Option<(SequenceNumber, Vec<Bytes>)>,
     ) -> Result<SequenceNumber> {
+        self.check_concurrency_capacity()?;
         self.await_flush_debt(db);
         self.await_l0_park(db);
         self.await_ram_pressure(db);
@@ -3056,6 +3073,34 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().write_stall_l0()
     }
 
+    /// Maximum concurrent in-flight submissions before backpressure (RFC-0274 Pillar VI; 0 = unconstrained).
+    pub fn set_max_in_flight_writers(&self, max: usize) {
+        self.writes.max_in_flight_writers.store(max, Ordering::Relaxed);
+    }
+
+    /// Current maximum concurrent in-flight submissions limit.
+    #[must_use]
+    pub fn max_in_flight_writers(&self) -> usize {
+        self.writes.max_in_flight_writers.load(Ordering::Relaxed)
+    }
+
+    /// Set compaction I/O write rate limit in bytes/sec (RFC-0274 Pillar I; 0 = unconstrained).
+    pub fn set_compaction_rate_bytes_per_sec(&self, rate: u64) {
+        self.inner.write().set_compaction_rate_bytes_per_sec(rate);
+    }
+
+    /// Estimated pending compaction debt in bytes across all LSM levels (RFC-0274 Pillar III).
+    #[must_use]
+    pub fn pending_compaction_bytes(&self) -> u64 {
+        self.inner.read().pending_compaction_bytes()
+    }
+
+    /// Update unified backpressure configuration (RFC-0274).
+    pub fn set_backpressure_config(&self, config: crate::backpressure_kernel::BackpressureConfig) {
+        self.writes.max_in_flight_writers.store(config.max_in_flight_writers, Ordering::Relaxed);
+        self.inner.write().set_backpressure_config(config);
+    }
+
     /// One compact drain before WriteStall (see [`Db::set_write_stall_drain`]).
     pub fn set_write_stall_drain(&self, enabled: bool) {
         self.inner.write().set_write_stall_drain(enabled);
@@ -4474,7 +4519,7 @@ impl<E: Env> ConcurrentDb<E> {
                 // the L0 installed above.
                 let reads = self.reads_served.load(Ordering::Relaxed);
                 let mark = self.retire_reads_mark.swap(reads, Ordering::Relaxed);
-                if reads != mark {
+                if reads != mark && g.retired_cache_cap() > 0 {
                     let tu = std::time::Instant::now();
                     let owned = Arc::try_unwrap(popped).unwrap_or_else(|a| (*a).clone());
                     d2_unwrap_ms = tu.elapsed().as_secs_f64() * 1e3;

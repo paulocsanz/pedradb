@@ -141,6 +141,6 @@ fn auto_flush_gate_fires_iff_armed_and_reached() {
             }
         }
     }
-    // AS-IS tooth: never fires (the degradation this credit replaces)
+    // AS-IS dente: never fires (the degradation this credit replaces)
     assert!(!pedradb_core::flush_kernel::auto_flush_due_as_is(100, true, 10));
 }

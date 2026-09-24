@@ -1,0 +1,564 @@
+# PedraDB usage (P0)
+
+**Status:** user-facing minimal docs for justify-use  
+**Updated:** 2026-08-14  
+**API:** `pedradb-core` — `Db`, `Transaction`, `OpenOptions`  
+**Engine maturity:** [RFC-0014](rfc/0014-rocks-pebble-redwood-maturity.md)
+
+---
+
+## One-liner
+
+Embedded ordered key-value store with **multi-key ACID** in one process.
+
+Runnable gallery (hello → bank → layers): [`examples/`](../examples/).
+
+```text
+open → begin → get / put / delete → commit
+```
+
+No server. No multi-node. No SQL in core. Link the crate into your app.
+
+A future **`pedra-map`** crate may expose sled/BTreeMap-shaped helpers (`insert`,
+`open_tree`, CAS) as a **layer** on this API — same storage, no second engine.
+See [`performance-ceiling-option-preservation-and-sled-layer.md`](performance-ceiling-option-preservation-and-sled-layer.md).
+
+---
+
+## Quick start
+
+```toml
+# Cargo.toml
+pedradb-core = { path = "crates/pedradb-core" }  # or version once published
+```
+
+```rust
+use pedradb_core::Db;
+
+fn main() -> pedradb_core::Result<()> {
+    let mut db = Db::open("/tmp/pedra-demo")?;
+
+    // Auto-commit single key
+    db.put(b"hello", b"world")?;
+    assert_eq!(db.get(b"hello").as_deref(), Some(b"world".as_ref()));
+
+    // Multi-key transaction (row + secondary index)
+    {
+        let mut tx = db.begin();
+        tx.put(b"u/42", br#"{"name":"ada"}"#)?;
+        tx.put(b"idx/name/ada", b"42")?;
+        tx.commit()?; // one WAL record, fsync by default
+    }
+
+    assert_eq!(db.get(b"u/42").as_deref(), Some(br#"{"name":"ada"}"#.as_ref()));
+    assert_eq!(db.get(b"idx/name/ada").as_deref(), Some(b"42".as_ref()));
+
+    db.close()?;
+    Ok(())
+}
+```
+
+Reopen the same directory after process exit — committed keys are still there (WAL replay).
+
+---
+
+## CAS, sequence pin, change feed (RFC-0019)
+
+These are the L1 hooks for leases/watch/CDC layers (Scylla-need without DIY RMW).
+
+```rust
+use pedradb_core::{Db, ScanProjection, Snapshot};
+use std::ops::Bound;
+
+fn layer_sketch(db: &mut Db) -> pedradb_core::Result<()> {
+    // Conditional put (IF NOT EXISTS / version CAS)
+    let seq = db.put_if_absent(b"lease/vol-1", b"holder-a")?;
+    assert!(db.put_if_absent(b"lease/vol-1", b"holder-b").is_err()); // CasMismatch
+    let seq2 = db.compare_and_swap(b"lease/vol-1", b"holder-a", b"holder-c")?;
+
+    // Layer pin: after Ok, get_at(seq) sees the write; get_at(seq-1) does not
+    assert_eq!(
+        db.get_at(Snapshot::at(seq2), b"lease/vol-1").as_deref(),
+        Some(b"holder-c".as_ref())
+    );
+
+    // Change feed for watch catch-up: (from, to] exclusive lower, inclusive upper
+    let changes = db.changes(seq, seq2)?;
+    assert!(!changes.is_empty());
+    let tail = db.changes_after(seq2); // empty until next durable commit
+
+    // multi_get + key-only scan (cheap listings)
+    let _ = db.multi_get(&[b"a", b"b", b"c"]);
+    for kv in db.scan_projected(Bound::Unbounded, Bound::Unbounded, ScanProjection::KeyOnly) {
+        assert!(kv.value.is_empty());
+        let _ = kv.key;
+    }
+    let _ = tail;
+    Ok(())
+}
+```
+
+| API | Role |
+|-----|------|
+| `put_if_absent` / `put_if_eq` / `compare_and_swap` | First-class CAS; fail closed on mismatch |
+| `put_with` / `delete_with` / `apply_batch` / `tx.commit` | Return **commit sequence** (layer pin) |
+| `changes(from, to)` / `changes_after(from)` | Post-commit logical feed (durable CHANGELOG). `changes` fails `SnapshotTooOld` when the window starts below the retention watermark (aged events — including lone tombstones — may be gone; catch up from the last sequence you were served). `changes_after` seeds last-write-wins state (safe under GC: the newest version per key always survives) but is not exact event history below the watermark |
+| `multi_get` / `multi_get_at` | N point reads, same visibility as `get`/`get_at` — including the below-watermark tier read and LSM fallback (a batch with an uncoverable key fails closed as a whole) |
+| `scan_projected(..., KeyOnly)` | Keys without loading values |
+
+---
+
+## Montanha fold — open, pin, resume (RFC-0024)
+
+A **fold** is a local Pedra materializer of a Montanha/Pedra prefix. It is **not**
+a Raft member and **not** linearizable. `get` is LocalApplied at the pinned
+cursor. Use Montanha `get_strong` only when you need SoR.
+
+The pin advances **after** `apply` returns. A crash between receive and apply
+re-delivers those revisions; a torn apply cannot leave the pin ahead of data.
+
+```rust
+use pedradb_fold::{
+    watch_applied_prefix, caixote_host_filter, FoldStore, PedraFold,
+};
+use pedradb_journal::JournalConsumer;
+
+fn open_pin_resume(src: &pedradb_core::Db, fold_dir: &std::path::Path) -> pedradb_fold::Result<()> {
+    let prefixes = caixote_host_filter("h1", &["vm-a"]);
+    let (pin, mut fold) = PedraFold::open(fold_dir)?;
+    let mut consumer = JournalConsumer { pin: pin.seq() };
+    // apply batch, then persist pin (watch_applied does this)
+    watch_applied_prefix(src, &mut consumer, &mut fold, Some(&prefixes))?;
+    let _ = fold.get(b"/host/h1/cap")?; // LocalApplied
+    // Reopen: only seq > pin is delivered
+    drop(fold);
+    let (pin2, fold2) = PedraFold::open(fold_dir)?;
+    assert!(pin2.seq() >= pin.seq());
+    let _ = fold2;
+    Ok(())
+}
+```
+
+| API | Role |
+|-----|------|
+| `PedraFold::open` / `open_role` | Open or resume a fold directory; recovered cursor is the last applied seq |
+| `watch_applied` / `watch_applied_prefix` | CHANGELOG → apply → *then* pin |
+| `JournalConsumer::peek` + `pin_after_apply` | Same invariant without `catch_up` (pin-on-read) |
+| `state_sync_then_tail` | No-cursor start is last-per-key then live |
+| `export_fold` / `import_fold` | Checkpoint + cursor; reopen cursor must equal live |
+| `FoldRole::{Storage, Relay, Proxy}` | Full replica / cursor-only / keep-keys evict-values |
+
+---
+
+## Durability (read this)
+
+| Call | Default (`OpenOptions { sync: true }`) |
+|------|----------------------------------------|
+| `put` / `delete` / `tx.commit()` returns `Ok` | WAL appended **and** synced to disk |
+| Process kill after `Ok` | Committed data recoverable on `open` |
+| Crash mid-write | Truncated tail skipped; **no partial multi-key TX** |
+| Uncommitted TX drop | Nothing durable |
+| `OpenOptions { sync: false }` | Faster; **may lose acked writes on power loss** — benches/bulk only |
+| **`Err` on required WAL sync** | **Uncertain outcome** — append may have landed; handle is **durability-fenced** ([`CoreError::DurabilityFenced`]) until `close` + `open` |
+| Further puts after fence | Always `DurabilityFenced` (no silent continue) |
+| Reopen after fence | Rebuilds mem from WAL; recovered prefix is consistent (failed-sync write may appear) |
+| Flush / MANIFEST / checkpoint with `sync=true` | **`Env::sync_dir` errors are propagated** (not discarded) |
+| `sync=false` dir fsync | Best-effort discard still OK |
+
+**I/O backend:** production `open` (CLI, store, compat, HTTP, SQL, DCS, …)
+uses [`IoUringEnv`](../crates/pedradb-io-uring): Linux `io_uring` for write +
+fsync, POSIX fallback on macOS / if the ring cannot be created. Engine unit
+tests and DST keep [`StdEnv`](../crates/pedradb-core/src/env_kernel.rs) (`Db::open`).
+Force POSIX with `IoUringEnv::posix()` / `Db::open_with_env(..., StdEnv)`.
+
+**Apple / Darwin:** G1's WAL barrier is std `File::sync_data` =
+`fcntl(F_FULLFSYNC)` by default (`wal_full_fsync=true`, ~4 ms here;
+`sync_dir` publish stays `pedradb_posix::sync_dir_fd` → `fdatasync`). Rust
+`File::sync_data` / `sync_all` on macOS *are* `F_FULLFSYNC`. On this host's RocksDB
+**as linked by the Rust crate** (`librocksdb-sys` 8.10), `WriteOptions.sync`
+is the same class: `port/port_posix.h` maps `#define fdatasync fsync` on
+Darwin and the cargo build never defines `HAVE_FULLFSYNC` (only CMake
+auto-detects it), so the WAL calls libSystem `fsync` — verified in the
+disassembly of the parity peer's `PosixWritableFile::Sync` (`bl _fsync`).
+**Official CMake builds of RocksDB on macOS are a stronger class**:
+`HAVE_FULLFSYNC` is defined and the WAL uses `fcntl(F_FULLFSYNC)`
+(`env/io_posix.cc`). On **Linux** `fdatasync` is a full barrier (the block
+layer flushes the drive cache) — same class as RocksDB, no gap on the
+production target (RFC-0036). On Darwin, a power cut can lose a
+WAL that already returned Ok if the drive cache still holds it. Windows
+`FlushFileBuffers` is a different, typically stronger, class.
+
+Mechanical proof (not a plug-pull): posix test
+`darwin_fdatasync_and_dirfd_are_not_fullfsync_class` — **file** `fdatasync`
+p50 is ≥8× faster than `File::sync_all` (`F_FULLFSYNC`, ~24–30 µs vs ~4–5 ms
+here). **Directory** `fdatasync` stays in that fast class (~0.3–0.7 µs).
+`File::sync_all` on a Darwin dirfd is noisy (~300 ns **or** ~5 ms) — not a
+reliable FULLFSYNC; Pedra does not use it for publish. Process crash after
+Ok is WAL recover. Drive-cache power-loss is the file-`fdatasync` class.
+
+Opt-in strong class: **strong is the default** — `OpenOptions::wal_full_fsync`
+defaults to `true` (compat `Options::wal_full_fsync` /
+`set_wal_full_fsync(false)` to opt out): every WAL barrier goes through
+`EnvFile::sync_data_strong` — on Darwin `File::sync_data` =
+`fcntl(F_FULLFSYNC)`, the CMake-RocksDB `sync=true` class (on Linux the two
+classes are the same barrier). Cost on Apple hardware ~4 ms/commit (~120× the
+weak class; ~250 commits/s single-client — group commit scales with clients);
+`wal_full_fsync=false` restores the `fdatasync`/`fsync` weak class (the
+`librocksdb-sys` crate-build class) for comparative columns and dev speed.
+WAL rotation and repair inherit the flag; a failing strong barrier fences
+with the same `OpClass::Sync` semantics (RFC-0036 addendum v2).
+
+Linux live `io_uring` soak: `scripts/io_uring_linux_soak.sh` (CI job
+`io-uring-linux-soak`). Docker Desktop needs `--privileged` (`io_uring_setup`
+is EPERM under default seccomp).
+
+Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-audit-pedradb-correctness-fixes.md). Unsafe/FFI inventory: [2026-08-22 audit](audits/2026-08-22-unsafe-and-ffi.md).
+
+---
+
+## History retention — bounded by default (RFC-0046 P0)
+
+| Setting | Behavior |
+|---------|----------|
+| **Default** (`OpenOptions { history: HistoryOptions::default(), .. }`) | `HistoryHorizon::Window(24 h)`, archive cap **1 GiB** |
+| MVCC / `get_at` / change feed | Full fidelity **inside the window** (pins always win, even past it) |
+| Older than the window | Auto-compact **archives first** (CRC'd segments under `history/`), then drops. Aged versions leave the LSM through the **dead-weight-doubling full rewrite** (RFC-0046 P0.5, `findings/rfc0046-sizing/`): once total SST bytes at least double since the last full reclaim while the horizon floor advanced, all SSTs are rewritten under the GC floor — at most one full rewrite per dead-weight doubling, so total disk ≈ live set + in-window versions + archive cap. (Without it the horizon floor lags the L0-merge inputs and the LSM would keep aged versions like F20; measured A/B: LSM 10 991 231 B → 2 710 428 B.) `set_auto_reclaim(true)` remains the tightest profile (latest-only, no archive) |
+| Cap overflow | Oldest archive segments dropped, readable watermark advances — old snaps fail with typed `SnapshotTooOld`, **never a silent destroy** |
+| Below the watermark (`get_at`) | **Lazy tier read** (RFC-0046 P2.1): point reads older than the window fall back to the archive — local segments first, remote mirror second. A decisive record (newest put/delete/range-delete ≤ snap) answers; a no-match answers `None` only when retained coverage provably spans the request, else `SnapshotTooOld` (never-written and dropped are indistinguishable). When the tier can't cover the read but the version still lives in the LSM (single-version keys are never GC'd; the cap may still drop their archive segment), the LSM leg serves it — physically present records answer, everything else keeps the tier's fail-closed verdict. v0 cost: below-watermark reads CRC-walk retained segments, but two prunes happen before the bytes are touched — local segments whose key-coverage bound (range-delete aware, manifest v3) excludes the key, and (RFC-0046 P2.6) a per-segment **bloom sidecar** (`history/seg-<id>.bloom`, written and fsynced before the manifest persists) that rules out point keys overlapping segments can't decide; range deletes travel as explicit intervals in the sidecar. Missing, corrupt, or truncated sidecar → walk (fail-open); scans stay fail-closed. The same two prunes apply to the **remote mirror leg** (RFC-0046 P2.7): the remote manifest's key-coverage bound skips fetches outright, and each segment ships its `.bloom` sidecar as an object consulted before the download — same fail-open contract when the sidecar object is missing (pre-P2.7 upload) or corrupt. Remote segments that are fetched are decoded and CRC-verified once and kept in a **byte-bounded LRU read cache** (RFC-0046 P2.8, 64 MiB default, `set_remote_read_cache(0)` to disable): repeated reads skip the refetch and the walk; the cache trusts the content-addressed object name after that first verified read. |
+| Archive I/O error | **Fail-closed**: that GC round is skipped (history-preserving merge); nothing is dropped unarchived |
+| F20 — keep every version, forever | Explicit opt-in: `HistoryHorizon::All` (what the kernel did before 2026-08-21) |
+| `set_auto_reclaim(true)` | Different profile: latest-only, **no archive** (Rocks storage profile — disk ≈ live set + pins) |
+| `compact_horizon()` | On-demand (RFC-0046 P0.5): flush, archive below the current horizon floor (fail-closed), rewrite all SSTs under it — the same rewrite the automatic dead-weight-doubling trigger schedules, for when the operator wants aged bytes back now (e.g. after shrinking the window). No-op with `HistoryHorizon::All`; refreshes the automatic trigger's baseline so it doesn't immediately re-run |
+| `set_remote_history(env, root)` | Opt-in (RFC-0046 P1.2): mirror the archive to an object-storage-shaped destination through any `Env`. Uploads run inline on the auto-compact path; **while the destination is down, GC pauses and the local cap holds un-uploaded segments** — backpressure grows local disk rather than destroy history that never shipped. Puts are idempotent (content-addressed: len + crc32c + FNV-1a 64 name, read-back verified), so retry/resume across crashes is free; since P2.7 each segment object ships with its bloom sidecar. Below-watermark reads of remote-only segments go through a 64 MiB in-memory LRU of verified-decoded segments (`set_remote_read_cache` to tune, 0 = off; `history_stats()` reports `remote_cache_entries`/`remote_cache_bytes`). |
+| `pedradb_ops::restore_history_from_remote` | Restore (RFC-0046 P1.3) from the remote tier alone after losing the machine: replays the **archived prefix** (versions aged past the horizon) into a fresh database at an arbitrary seq, per-record CRC verified, corrupt bytes fail closed. The newest in-window tail is the WAL-ship path (`restore_with_increments`) — same split as Postgres base+WAL PITR. |
+| `set_upload_bandwidth(bytes_per_round)` | Opt-in (RFC-0046 P2.2): cap how many segment bytes one upload step ships (`None` = unlimited). Un-shipped segments stay pending and the cap holds them — bounded upload bandwidth is paid for with local disk while the backlog drains. No manifest ships while segments are missing at the destination. |
+| `history_stats()` | Metrics roll-up (RFC-0046 P2.2): local segments/bytes, archive floor, GC watermark, pending uploads, remote mirror summary (segments/bytes/seq range/next generation), age of the last archive pass, and horizon sample count (hard-capped at 4096). Remote reads propagate errors (fail-closed). |
+
+Short-lived processes never trip the horizon: the cutoff is wall-clock
+(`Env::unix_millis`, sampled), so a fresh DB GCs nothing until writes actually
+age out. Restore/checkpoint dirs stay flat until the first archive round.
+
+---
+
+## API surface (P0)
+
+| API | Notes |
+|-----|--------|
+| `Db::open(path)` | Directory; creates if missing |
+| `Db::open_with(path, OpenOptions)` | `sync` flag |
+| `Db::open_with_env` / `open_with_host` | Inject `Env` / full `Host` (DST; see [dst-seams](dst-seams.md)) |
+| `pedradb_io_uring::open` / `IoUringEnv` | Linux **io_uring** write+fsync Env (POSIX fallback on macOS/dev) |
+| `Db::get` / `put` / `delete` | Auto-commit |
+| `Db::begin` → `Transaction` | Exclusive `&mut Db` (single-writer) |
+| `tx.get` / `put` / `delete` | Staging + snapshot reads |
+| `tx.commit` / `tx.abort` | Multi-key atomic / discard |
+| `Db::flush` | MemTable → new `.sst`, rotate WAL (P1.1); auto-compact failures do **not** fail flush (see `DbStats.auto_compact_failures`) |
+| `Db::range(start, end)` | **Deprecated** — materialises a `Vec` (**OOM footgun** on large DBs); use `scan` (streaming) or `range_limited` |
+| `Db::range_limited(…, limit)` | **Preferred** for pagination — stop after N live keys |
+| `Db::scan` / `scan_at` | **Preferred** streaming merge for large ranges (bound memory) |
+| `Db::compact` / `compact_with` / `compact_reclaim` | Merge SSTs (tmp→rename); optional version GC; pin-aware reclaim |
+| `Db::pin_snapshot` / `release_snapshot_pin` | Register/release read pin so `compact_reclaim` keeps history |
+| `get_at` / `range_at` / `try_scan_at` / `SnapshotTooOld` | History-dropping GC raises watermark (MANIFEST v4 durable); old snaps fail closed |
+| TX·OCC commit | Also refuse `SnapshotTooOld` if reclaim advanced past the TX snapshot |
+| `set_auto_reclaim(true)` | Opt-in: auto-compact piggybacks pin-aware reclaim, latest-only **without archive** (default off → bounded 24 h window, see [History retention](#history-retention--bounded-by-default-rfc-0046-p0)) |
+| `set_write_stall_l0(Some(n))` | Opt-in: `WriteStall` when L0 ≥ n (default off; no sleep) |
+| `set_write_pressure_l0(Some(n))` | Soft: one flush+compact when L0 ≥ n, then admit (no error) |
+| `set_write_stall_mem_bytes(Some(b))` | Opt-in: `WriteStallMem` when active mem ≥ b (default off) |
+| `set_write_stall_drain(true)` | One flush (+ L0 compact) before hard refuse (default false) |
+| `enable_write_backpressure_defaults()` | Pressure @ `L0_COMPACTION_TRIGGER`, hard @ 2×, drain on |
+| `StoreOpenOptions::with_write_backpressure()` | Montanha open applies Pedra L0 backpressure on every node |
+| `StoreCluster::write_admission_snap()` | Aggregate L0/stall/pressure counters across local nodes (gates / A-B) |
+| `Db::create_checkpoint(dest)` | Point-in-time copy (flush + file set); openable as a DB |
+| `pedradb_ops::BackupEngine` | Local base backup, `ship_wal`, `restore` / `restore_pitr`, verify |
+| `pedradb_ops::migrate_to_latest` / `inspect_format` | Format inspect + rewrite **Pedra** SSTs/MANIFEST to current writer |
+| `pedradb_ops::migrate_from_rocks` / CLI `migrate-from-rocks` | RocksDB → new Pedra dir (MANIFEST v5). Copies every CF (default raw, named `cf\0key`). Refuses merge / blob / wide-column / user timestamps. **Not drop-in on-disk**; kernel never opens a C++ SST ([RFC-0186](rfc/0186-rocks-to-pedra-v5-migrate.md)). Feature `from-rocks` links the C++ reader. |
+| CLI `pedra backup\|restore\|pitr\|ship-wal\|migrate\|migrate-from-rocks\|inspect` | Ops suite from the command line |
+| `Db::stats()` → `DbStats` | Mem/SST/WAL + `gc_line()` (`earliest_readable`, pins, `auto_reclaim`) + vlog/amp counters |
+| `CheckpointMeta` | `last_sequence`, `sst_count`, `earliest_readable_seq` (PDBCKP02; v1 still readable) |
+| `ConcurrentDb` | Multi-thread: write group + dual-mem; snapshot get/range fail-closed; `compact_blob`/`compact_vlog`/`blob_gc_candidates` |
+| `ConcurrentDb::begin_occ` / `OccTransaction` | **OCC multi-writer** TX: conflict → `TransactionConflict` (RFC-0014 P2.1) |
+| `OpenOptions.large_value_threshold` | **Opt-in** (`None` default): spill large values to `VALUES.vlog` (WiscKey-shaped) |
+| `Db::compact_vlog()` | Crash-safe value-log GC rewrite (RFC-0016 P0.1); reclaim after overwrite/delete + SST version drop |
+| `Db::set_vlog_rotate_bytes` / `compact_blob` / `compact_blob_auto` | RFC-0029: numbered `*.blob` + one sealed-file GC + auto θ; prefetch N=4 (settable) |
+| `BackupEngine::create_incremental` / `restore_with_increments` | Incremental WAL archive + restore (RFC-0014 P2.3) |
+| `Db::verify_checksums()` | Re-validate SST + WAL integrity (fail-stop on bitrot) |
+| `WriteOptions` / `put_with` / `apply_batch_with` | Per-write sync or `no_sync` + later `Db::sync` (group fsync) |
+| `OpenOptions.auto_flush_bytes` | Auto SST flush when MemTable grows (default 4 MiB) |
+| `OpenOptions.auto_compact_sst_count` | After flush, compact when SST count ≥ N (`None` = off) |
+| `OpenOptions.auto_compact_sst_bytes` | After flush, compact when total SST bytes ≥ N (`None` = off) |
+| `OpenOptions.exclusive` | Default `true`: PID `LOCK` file (cross-process; same-PID re-open steals) |
+| `CompactOptions` / `CompactGcOptions` | `latest_only`, `min_sequence`, or `for_oldest_snapshot` (Rocks-style pin-safe) |
+| SST v3 | Block layout + on-disk Bloom; v1/v2 still readable |
+| MANIFEST / `CURRENT` | Live SST inventory rewritten on flush/compact; orphan SST GC on open |
+| `Db::last_sequence` / `sst_count` / `path` / `sync` / `close` | Introspection / shutdown |
+| `pedradb-apply` | `LogApplier`, `FakeLog`, `InProcessCluster`, `KvService` (RFC-0010) |
+| `pedradb-replicate` | WAL-shipped async read replica (`WalShipper`, `bootstrap_replica_from_wal`) |
+| `pedradb-raft` | In-process Raft (election + log replicate + apply to PedraDB) |
+| `pedradb-dcs` | etcd-class DCS SM: CAS, leases, watch, leader lock (Patroni path) |
+| `pedradb-sql` | Minimal SQL: CREATE/INSERT/SELECT/DELETE over tables-as-prefixes |
+| `pedradb-stream` | Durable append stream + consumer cursors (JetStream-class *need*) |
+| `pedradb-fold` | Slipstream-class fold on Montanha/Pedra (RFC-0024); not a Raft voter |
+| `pedradb-sim` | FailingEnv, RecordingEnv, lying sync, short-write, `from_seed`, FailingEnvArc |
+
+Multi-node / wire (RFC-0012 **delivered**):
+
+| Crate / bin | Role |
+|-------------|------|
+| `pedradb-raft` + `pedra-raft-node` | TCP Raft, persisted hard state/log |
+| `pedradb-dcs` + Raft | `DcsCommand` proposed on leader → applied on all nodes (`propose_dcs` / `dcs_get`) |
+| `pedradb-http` | HTTP KV + DCS (leader/CAS/lease) |
+| `pedradb-dst` | Seedable FailingEnv sweep harness |
+
+**DCS over Raft (e2e):** leader runs `PeerClient::propose_dcs(DcsCommand::Create{...})`; followers answer `dcs_get` with the same key after commit.
+
+**MontanhaDb (Montan-HA-DB)** — multi-node HA product on PedraDB:  
+[docs/montanhadb.md](montanhadb.md)
+
+**Montanha-Store** (`pedradb-store`): multi-Raft ranges + **DCS on store**
+(`dcs_create` / `dcs_cas` → `apply_dcs_command` on commit). Layering:
+[montanha-layering-dcs-on-store.md](montanha-layering-dcs-on-store.md).
+
+**Patroni-shaped HA + live leadership stream (design):**  
+[docs/live-leadership-and-patroni-shaped-ha.md](live-leadership-and-patroni-shaped-ha.md) — two planes (truth vs best-effort), open sessions, fencing by revision, roadmap.
+
+---
+
+## Large values (`VALUES.vlog`) — RFC-0016
+
+**Default is off** (`large_value_threshold: None`). Enable only when you measure a large-value write-amp win.
+
+```rust
+use pedradb_core::{Db, OpenOptions};
+
+let mut db = Db::open_with(
+    "/tmp/pedra-large",
+    OpenOptions {
+        large_value_threshold: Some(4 * 1024), // spill ≥ 4 KiB
+        ..OpenOptions::default()
+    },
+)?;
+
+// Under update/delete churn of large values, reclaim space:
+// 1) Prefer compacting old SST versions first (or accept multi-version live refs).
+// 2) Then rewrite the value log:
+let stats = db.compact_vlog()?;
+// stats.bytes_before / bytes_after / live_records
+println!("{}", db.stats().vlog_line());
+```
+
+CLI (exclusive open):
+
+```text
+$ pedra stats /path/to/db
+last_sequence=…
+sst_count=… sst_bytes=…
+wal_bytes=… wal_syncs=…
+vlog file=12345678B live=1048576B records=12 ratio=0.085 gc=0 blobs=0 prefetch=0 sst_written=…
+```
+
+| Rule | Why |
+|------|-----|
+| Threshold **off** by default | Avoid silent disk fill in production |
+| Watch `DbStats.vlog_bytes` vs `vlog_live_bytes` | When `vlog_bytes ≫ vlog_live_bytes`, call `compact_vlog` |
+| `pedra stats <db>` | Prints `vlog file=…B live=…B records=… ratio=0.xxx gc=N blobs=N prefetch=N sst_written=…B` (RFC-0026 P0.1 / 0029). Alert if `ratio` stays ≪ 1 under update churn |
+| Checkpoint/backup copies full `VALUES.vlog` | Correctness requires the log, including unreclaimed garbage until GC |
+| GC keeps every VLG1 still referenced by mem/imm/**any SST version** | Run SST compact / `latest_only` carefully before expecting big reclaim |
+
+**Crash safety:** GC writes `VALUES.vlog.new`, then remaps SST pointers and swings **MANIFEST** with `vlog_use_new=true` (atomic CURRENT). Only then does open prefer `.new`. Before that MANIFEST install, open keeps the primary vlog + old offsets. After MANIFEST and before promote, open uses `.new` + remapped SSTs.
+
+### Blob generations (RFC-0029 P0)
+
+Opt-in rotation after open. New large spills go to numbered files (`000001.blob`, …) with `VLG3` pointers (`file_num`, offset, len, crc). File 0 remains `VALUES.vlog` / `VLG1`.
+
+```rust
+db.set_vlog_rotate_bytes(Some(64 * 1024 * 1024)); // rotate after 64 MiB
+db.set_scan_prefetch(4); // RFC-0029 P2.2; 1 = off, max 64
+db.put(b"k", &big)?;
+// After latest_only dropped old SST versions of one sealed file:
+let stats = db.compact_blob(sealed_file_num)?;
+// Or auto-pick worst sealed file with dead_ratio ≥ 0.5 (Titan-shaped θ):
+if let Some((num, st)) = db.compact_blob_auto(0.5)? {
+    println!("gc file={num} {} → {}", st.bytes_before, st.bytes_after);
+}
+println!("{}", db.stats().vlog_line());
+// vlog file=…B live=…B records=… ratio=… gc=… blobs=N prefetch=… sst_written=…B
+```
+
+**CLI (ops):**
+
+```bash
+pedra stats <db>                          # sizes + earliest_readable / pins / auto_* + blobs
+pedra compact <db>                        # leveled SST merge (history-preserving)
+pedra compact <db> --latest-only          # aggressive version GC (raises watermark)
+pedra reclaim <db>                        # pin-aware compact_reclaim (open-items §2.1)
+pedra inspect <db>                        # SST versions + earliest_readable (MANIFEST v4)
+pedra maintain <db> [--blob-theta 0.5] [--no-reclaim] [--vlog] [--every SECS]
+                                          # ops GC pass (no core bg thread); --every = loop
+pedra blob-gc <db>                        # list candidates
+pedra compact-blob <db> --auto [0.5]      # GC worst sealed (default θ=0.5)
+pedra compact-blob <db> <file_num>        # GC explicit id
+pedra compact-vlog <db>                   # full rewrite hammer (file 0 / single log)
+```
+
+| Rule | Why |
+|------|-----|
+| Cap is a **session setter**, not `OpenOptions` | Reopen appends to the last `*.blob`; set the cap again to keep rotating |
+| `compact_blob` refuses the **active** file | Rotate first, or use `compact_vlog` for file 0 |
+| `compact_blob` remaps only SSTs that mention that file | Other generations stay put |
+| `compact_blob_auto(θ)` skips active + low dead_ratio | Same knob shape as Titan `blob_file_discardable_ratio` (default 0.5) |
+| `set_auto_blob_gc_min_ratio(Some(0.5))` | After **flush** and **latest_only** compact, best-effort auto GC (no bg thread; fails open) |
+| Scan prefetch N default 4 (`set_scan_prefetch`) | Sequential Env reads + `advise(WillNeed)` on Linux; not magic 32 |
+| Checkpoint copies every `*.blob` | Pointers are not self-contained |
+| WAL stays | L5b `REFUSE` — do not drop the LSM WAL |
+
+---
+
+## Launch readiness checklist (RFC-0016 P2.4)
+
+Before calling an embed deployment “launch-ready”:
+
+| Gate | Check |
+|------|--------|
+| Durability | Default `sync: true`; understand fence on failed WAL sync |
+| Large values | Threshold off **or** GC scheduled + `vlog_bytes` alerted |
+| Amp visibility | `DbStats` fsync / ingest / SST write counters monitored |
+| Integrity | `verify_checksums` in ops path; fail-stop on CRC |
+| Soak | Fixed-seed put/get/delete/flush/compact/vlog-GC with silent_wrong=0 (CI test) |
+| Backup | Checkpoint or `BackupEngine` exercised under your write load (P2.1 continuous still open) |
+| Encryption | **Non-goal in core** — use FS encryption (LUKS, cloud volume) or app-layer AEAD |
+| Concurrency | `ConcurrentDb` group-commit + dual-mem; not Rocks multi-mem writer class |
+| Honesty | Do not claim field parity with Rocks/Pebble/FDB ([robustness doc](robustness-vs-rocks-pebble-fdb.md); [nine axes](robustness-nine-axes.md)) |
+
+---
+
+## Ops hygiene (RFC-0015 P2)
+
+### Scans (prefer limited / streaming)
+
+```rust
+use std::ops::Bound;
+use pedradb_core::Db;
+
+fn list_page(db: &Db, start: &[u8], limit: usize) {
+    // Good: pagination
+    let page = db.range_limited(Bound::Included(start), Bound::Unbounded, Some(limit));
+    // Good: streaming (large ranges)
+    for kv in db.scan(Bound::Included(start), Bound::Unbounded).take(limit) {
+        let _ = kv;
+    }
+    // Avoid on large DBs: materialises the whole interval
+    // let all = db.range(Bound::Unbounded, Bound::Unbounded);
+}
+```
+
+### ConcurrentDb contention (M2)
+
+`ConcurrentDb` serialises **writers**: the first write-lock hold is WAL
+encode; `fdatasync` runs off that lock; memtable apply + publish take a
+second hold after the WAL is durable (RFC-0045 P2.1). One `fdatasync` is
+amortized across the write group. Concurrent puts are correct and
+linearizable. Write QPS is **not** RocksDB multi-writer class (no concurrent
+memtable / multi-flush — RFC-0055 P1.1 still gated). Many cores with disjoint
+keys still share that lock — the ceiling is ours (RFC-0045 / RFC-0050 P0.4).
+Readers share a read lock.
+
+### Raft integration wall sleep (M5)
+
+`pedradb-raft` multi-process / TCP integration tests may use `thread::sleep` for
+election timing. That is **OK for tests only**. The Montanha **store** control
+plane uses Queued RPC + logical time (`advance_time`) — keep wall sleep out of
+store DST / production control paths.
+
+### Supply chain (M3)
+
+Workspace root [`deny.toml`](../deny.toml) configures advisory checks. CI runs
+`cargo deny check advisories` (see `.github/workflows/supply-chain.yml`).
+**Owner:** maintainers run `cargo deny check advisories` (or `cargo audit`) on
+release tags and dependency bumps if CI is skipped.
+
+---
+
+## Layer sketch: secondary index
+
+PedraDB does **not** implement indexes. You do, with multi-key TX:
+
+```rust
+use pedradb_core::{Db, Result};
+
+/// Toy user store: primary key `u/{id}`, index `idx/email/{email}` → id bytes.
+fn upsert_user(db: &mut Db, id: &str, email: &str, payload: &[u8]) -> Result<()> {
+    let pk = format!("u/{id}");
+    let idx = format!("idx/email/{email}");
+
+    let mut tx = db.begin();
+
+    // Optional: remove old index if email changed (read old row first)
+    if let Some(old) = tx.get(pk.as_bytes()) {
+        // parse old email from payload in a real app; here we only set new idx
+        let _ = old;
+    }
+
+    tx.put(pk.as_bytes(), payload)?;
+    tx.put(idx.as_bytes(), id.as_bytes())?;
+    tx.commit()
+}
+
+fn lookup_by_email(db: &Db, email: &str) -> Option<Vec<u8>> {
+    let idx = format!("idx/email/{email}");
+    let id = db.get(idx.as_bytes())?;
+    let pk = format!("u/{}", String::from_utf8_lossy(&id));
+    db.get(pk.as_bytes()).map(|b| b.to_vec())
+}
+```
+
+**Rule:** any mutation that touches data **and** an index entry must use **one** `Transaction`.  
+Prefixes (`u/`, `idx/`) are application convention — not a kernel feature (FDB-style subspaces).
+
+---
+
+## What you get vs RocksDB / fjall
+
+| | PedraDB P0 | Typical RocksDB |
+|--|------------|-----------------|
+| Multi-key atomic | **Yes** (`begin`/`commit`) | WriteBatch atomicity without interactive TX by default |
+| Ordered keys | Yes (MemTable; range public later) | Yes |
+| Default durability | **Sync on commit** | Often async WAL |
+| Embed | Pure Rust, `forbid(unsafe_code)` | C++ |
+
+---
+
+## Drop-in divergences (rocksdb-compat, RFC-0047)
+
+Swapping `rocksdb` for `rocksdb-compat` compiles to the same API, but four
+behaviors differ on purpose. Everything else on the compat face is
+Rocks-shaped: PointInTime WAL recovery (with a report), compaction-GC
+retention, `resume()`, transient auto-resume, background-error listener.
+Full knob map: [rocksdb-compat.md](rocksdb-compat.md#knob-map-rocksdb--compat-behavior-rfc-0047-p21).
+
+| # | Divergence | Why |
+|---|---|---|
+| 1 | **Drop-in WAL is Rocks-shaped async.** `Options::sync` defaults to `false` (RFC-0054) — same class as `WriteOptions.sync=false`. `set_sync(true)` is G1 (barrier before Ok; Darwin `F_FULLFSYNC` via `wal_full_fsync=true`). Kernel `OpenOptions.sync` stays `true`. | The official peer is Rocks default. The drop-in matches that class; Pedra kernel stays durable-by-default. |
+| 2 | **Repeated corruption refuses the open — in every recovery mode.** A torn WAL tail recovers as a clean prefix (same as Rocks); damage **mid-WAL** in the default PointInTime mode serves the prefix **and reports the discard** (`DB::last_recovery_report`). But the third CORRUPTLOG event (RFC-0038) refuses the open even in PointInTime. | Fail-closed escalation is the integrity floor (G2) — the policy knob cannot buy silence. |
+| 3 | **A failed WAL sync fences the writer** (`ErrorKind::Fenced`) instead of continuing silently. Recovery is explicit: `DB::resume()` (close+replay+reopen) returns the uncertain sequence range and whether writes were lost; `auto_resume_transient` (default on) self-heals only ENOSPC-class fences. | Rocks' fsync-failure handling assumes the write can be retried in place; Pedra reports the uncertainty (`uncertain_from..=uncertain_through`) instead of guessing. |
+| 4 | **The storage-profile default is the Rocks shape.** The compat face defaults to `auto_reclaim: true` (disk ≈ live set + pins, **no archive**). The Pedra kernel default is bounded history — `Window(24 h)` + local archive with cap (RFC-0046), `auto_reclaim: false` on the compat face — and unbounded F20 is `HistoryHorizon::All`, explicit everywhere. | A drop-in must match the disk profile the operator expects; Pedra's bounded-history default and F20 each stay one flag away. |
+
+Official bench columns are unaffected: `rocksdb-parity-bench` pins retention
+with `ROCKS_PARITY_RETENTION=product|rocks` (default `product`) — the compat
+default flip changed no official number.
+
+---
+
+## Limits (honest P0)
+
+- Data lives in **MemTable + WAL + SSTs** after `flush`; call `compact` to merge SSTs.  
+- One writer at a time (`&mut` on begin / put); OCC multi-writer not in P1.  
+- `range` is available; no SQL/network.  
+- Not a multi-node product; see grail plan for outer rungs.
+
+---
+
+## See also
+
+- [RFC-0001](rfc/0001-pedradb-high-level-spec.md) — product spec  
+- [RFC-0004](rfc/0004-transaction-api.md) — transaction  
+- [positioning.md](positioning.md) — why this exists  

@@ -169,8 +169,12 @@ impl From<CoreError> for Error {
             CoreError::Io(_) => ErrorKind::Io,
             CoreError::TransactionConflict => ErrorKind::TransactionConflict,
             CoreError::CasMismatch => ErrorKind::CasMismatch,
-            CoreError::SnapshotTooOld { .. } => ErrorKind::SnapshotTooOld,
-            CoreError::WriteStall { .. } | CoreError::WriteStallMem { .. } => ErrorKind::WriteStall,
+            CoreError::SnapshotTooOld { .. } | CoreError::SnapshotExpired { .. } => ErrorKind::SnapshotTooOld,
+            CoreError::WriteStall { .. }
+            | CoreError::WriteStallMem { .. }
+            | CoreError::WriteStallCompactionDebt { .. }
+            | CoreError::SnapshotPinDebt { .. } => ErrorKind::WriteStall,
+            CoreError::ConcurrencyQueueFull { .. } => ErrorKind::Busy,
             CoreError::AlreadyOpen { .. } => ErrorKind::AlreadyOpen,
             CoreError::Internal(_) | CoreError::TransactionFinished | CoreError::Transaction(_) => {
                 ErrorKind::Other
@@ -313,6 +317,14 @@ pub struct Options {
     sst_file_manager: Option<SstFileManager>,
     /// rust-rocksdb `disable_auto_compactions`.
     pub disable_auto_compactions: bool,
+    /// Compaction I/O rate limit in bytes/sec (RFC-0274 Pillar I; 0 = unconstrained).
+    pub compaction_rate_bytes_per_sec: u64,
+    /// Pending compaction soft debt limit in bytes (RFC-0274 Pillar III).
+    pub pending_compaction_soft_bytes: u64,
+    /// Pending compaction hard debt limit in bytes (RFC-0274 Pillar III).
+    pub pending_compaction_hard_bytes: u64,
+    /// Maximum concurrent in-flight submissions before queue backpressure (RFC-0274 Pillar VI).
+    pub max_in_flight_writers: usize,
 }
 
 type CompactionFilterFn =
@@ -392,6 +404,10 @@ impl Default for Options {
             env: None,
             sst_file_manager: None,
             disable_auto_compactions: false,
+            compaction_rate_bytes_per_sec: 0,
+            pending_compaction_soft_bytes: pedradb_core::backpressure_kernel::DEFAULT_PENDING_COMPACTION_SOFT_BYTES,
+            pending_compaction_hard_bytes: pedradb_core::backpressure_kernel::DEFAULT_PENDING_COMPACTION_HARD_BYTES,
+            max_in_flight_writers: pedradb_core::backpressure_kernel::DEFAULT_MAX_IN_FLIGHT_WRITERS,
         }
     }
 }
@@ -521,8 +537,21 @@ impl Options {
     pub fn set_memtable_prefix_bloom_ratio(&mut self, _r: f64) {}
     pub fn set_compression_per_level(&mut self, _c: &[DBCompressionType]) {}
     pub fn set_compaction_style(&mut self, _s: DBCompactionStyle) {}
-    pub fn set_level_compaction_dynamic_level_bytes(&mut self, _v: bool) {}
     pub fn set_bytes_per_sync(&mut self, _n: u64) {}
+    pub fn set_ratelimiter(&mut self, rate_bytes_per_sec: i64, _refill_period_us: i64, _fairness: i32) {
+        if rate_bytes_per_sec > 0 {
+            self.compaction_rate_bytes_per_sec = rate_bytes_per_sec as u64;
+        }
+    }
+    pub fn set_soft_pending_compaction_bytes_limit(&mut self, limit: u64) {
+        self.pending_compaction_soft_bytes = limit;
+    }
+    pub fn set_hard_pending_compaction_bytes_limit(&mut self, limit: u64) {
+        self.pending_compaction_hard_bytes = limit;
+    }
+    pub fn set_max_in_flight_writers(&mut self, limit: usize) {
+        self.max_in_flight_writers = limit;
+    }
     pub fn set_max_write_buffer_number(&mut self, _n: i32) {}
     pub fn set_min_write_buffer_number_to_merge(&mut self, _n: i32) {}
     pub fn set_level_zero_file_num_compaction_trigger(&mut self, _n: i32) {}
@@ -2371,6 +2400,22 @@ impl<E: PedraEnv> DB<E> {
         // the F20 keep-everything default.
         db.set_fold_version_gc(true);
         db.set_physical_cfs(names.clone());
+
+        // Unified backpressure configuration (RFC-0274)
+        let mut bp_cfg = pedradb_core::BackpressureConfig::default();
+        if opts.compaction_rate_bytes_per_sec > 0 {
+            bp_cfg.compaction_rate_bytes_per_sec = opts.compaction_rate_bytes_per_sec;
+        }
+        if opts.pending_compaction_soft_bytes > 0 {
+            bp_cfg.pending_compaction_soft_bytes = opts.pending_compaction_soft_bytes;
+        }
+        if opts.pending_compaction_hard_bytes > 0 {
+            bp_cfg.pending_compaction_hard_bytes = opts.pending_compaction_hard_bytes;
+        }
+        if opts.max_in_flight_writers > 0 {
+            bp_cfg.max_in_flight_writers = opts.max_in_flight_writers;
+        }
+        db.set_backpressure_config(bp_cfg);
         // F185: frozen flag from the registry — not derived from `names`
         // (a reopen with a different supplied list must not flip the codec).
         let codec = KeyCodec { default_raw };

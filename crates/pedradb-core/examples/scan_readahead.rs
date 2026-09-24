@@ -51,13 +51,13 @@ fn main() {
         &dir_bounded,
         OpenOptions {
             sst_payload_budget_bytes: Some(1),
-            sst_warm_cap_bytes: 1,
             auto_flush_bytes: None,
             ..OpenOptions::default()
         },
         StdEnv,
     )
     .unwrap();
+    db.set_sst_warm_cap_bytes(1);
     let rows = drive(&db);
     println!("bounded leg scanned {rows} rows");
     println!("bounded leg line (latch unset): {:?}", db.io_advise_line());
@@ -74,13 +74,13 @@ fn main() {
     let db = ConcurrentDb::open_with_env_bounded(
         &dir_fitting,
         OpenOptions {
-            sst_warm_cap_bytes: u64::MAX,
             auto_flush_bytes: None,
             ..OpenOptions::default()
         },
         StdEnv,
     )
     .unwrap();
+    db.set_sst_warm_cap_bytes(u64::MAX);
     let rows = drive(&db);
     println!("fitting leg scanned {rows} rows");
     println!(

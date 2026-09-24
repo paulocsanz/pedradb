@@ -1419,10 +1419,23 @@ impl<'a, E: Env> LevelRunStream<'a, E> {
         snapshot: SequenceNumber,
         resolve_values: bool,
     ) -> Self {
+        let next_file = match start {
+            Bound::Unbounded => 0,
+            Bound::Included(s) => files_by_lo.partition_point(|&fi| {
+                db.ssts[fi]
+                    .largest_user_key()
+                    .is_some_and(|hi| hi.as_ref() < s)
+            }),
+            Bound::Excluded(s) => files_by_lo.partition_point(|&fi| {
+                db.ssts[fi]
+                    .largest_user_key()
+                    .is_some_and(|hi| hi.as_ref() <= s)
+            }),
+        };
         Self {
             db,
             files_by_lo,
-            next_file: 0,
+            next_file,
             start: crate::merge::bound_to_owned(start),
             end: crate::merge::bound_to_owned(end),
             snapshot,
@@ -1451,6 +1464,19 @@ impl<'a, E: Env> Iterator for LevelRunStream<'a, E> {
                     crate::merge::bound_as_ref(&self.start),
                     crate::merge::bound_as_ref(&self.end),
                 );
+                // Strict-disjoint run: files are sorted by lo ascending and hi[i-1] < lo[i].
+                // If this file's smallest key is already past end, no subsequent file can overlap.
+                if let Bound::Included(e) = end {
+                    if table.smallest_user_key().is_some_and(|lo| lo.as_ref() > e) {
+                        self.next_file = self.files_by_lo.len();
+                        break;
+                    }
+                } else if let Bound::Excluded(e) = end {
+                    if table.smallest_user_key().is_some_and(|lo| lo.as_ref() >= e) {
+                        self.next_file = self.files_by_lo.len();
+                        break;
+                    }
+                }
                 if !table.overlaps_user_range(start, end) {
                     continue;
                 }
@@ -1837,6 +1863,12 @@ pub struct Db<E: Env = StdEnv> {
     ram_pressure_throttle_count: u64,
     /// Open [`SnapshotPin`]s: pin id → sequence (open-items §2.1).
     snapshot_pins: std::collections::BTreeMap<u64, SequenceNumber>,
+    /// Creation timestamps for open [`SnapshotPin`]s: pin id → unix seconds (RFC-0274).
+    snapshot_pin_times: std::collections::BTreeMap<u64, u64>,
+    /// Unified backpressure configuration (RFC-0274).
+    backpressure_config: crate::backpressure_kernel::BackpressureConfig,
+    /// Compaction I/O rate limiter (RFC-0274 Pillar I).
+    compaction_pacer: crate::backpressure_kernel::CompactionIoPacer,
     /// Next pin id (monotonic; never reused for this process open).
     next_snapshot_pin_id: u64,
     /// Version-GC watermark: snapshots with `seq < earliest_readable_seq` are
@@ -3001,7 +3033,12 @@ impl<E: Env> Db<E> {
         let seq = self.visible_sequence();
         let id = self.next_snapshot_pin_id;
         self.next_snapshot_pin_id = id.saturating_add(1);
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         self.snapshot_pins.insert(id, seq);
+        self.snapshot_pin_times.insert(id, now_secs);
         SnapshotPin { id, seq }
     }
 
@@ -3010,6 +3047,86 @@ impl<E: Env> Db<E> {
     /// Unknown ids are ignored (idempotent).
     pub fn release_snapshot_pin(&mut self, pin: SnapshotPin) {
         self.snapshot_pins.remove(&pin.id);
+        self.snapshot_pin_times.remove(&pin.id);
+    }
+
+    /// Evict all snapshot pins older than `max_snapshot_age_secs` (RFC-0274 Pillar IV).
+    ///
+    /// Returns the number of expired pins that were evicted, unblocking version GC.
+    pub fn evict_expired_snapshots(&mut self) -> usize {
+        let max_age = self.backpressure_config.max_snapshot_age_secs;
+        if max_age == 0 {
+            return 0;
+        }
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let expired_ids: Vec<u64> = self
+            .snapshot_pin_times
+            .iter()
+            .filter(|(_, &created_secs)| {
+                matches!(
+                    crate::backpressure_kernel::evaluate_snapshot_pin(
+                        created_secs,
+                        now_secs,
+                        max_age,
+                        0,
+                        0,
+                        0,
+                        false,
+                    ),
+                    crate::backpressure_kernel::SnapshotPinVerdict::Expired { .. }
+                )
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        let count = expired_ids.len();
+        for id in expired_ids {
+            self.snapshot_pins.remove(&id);
+            self.snapshot_pin_times.remove(&id);
+        }
+        count
+    }
+
+    /// Estimated pending compaction debt in bytes across all LSM levels (RFC-0274 Pillar III).
+    #[must_use]
+    pub fn pending_compaction_bytes(&self) -> u64 {
+        let mut debt = 0u64;
+        let l0_count = self.level_file_count(0);
+        if l0_count > L0_COMPACTION_TRIGGER {
+            let excess = (l0_count - L0_COMPACTION_TRIGGER) as u64;
+            let target_file_size = self.compact_target_file_bytes.max(2 * 1024 * 1024);
+            debt = debt.saturating_add(excess.saturating_mul(target_file_size));
+        }
+        for lvl in 1..MAX_LSM_LEVEL {
+            let lvl_files = self.sst_levels.iter().filter(|&&l| l == lvl).count();
+            let target_files = 10usize.saturating_pow(lvl as u32);
+            if lvl_files > target_files {
+                let excess = (lvl_files - target_files) as u64;
+                let target_file_size = self.compact_target_file_bytes.max(2 * 1024 * 1024);
+                debt = debt.saturating_add(excess.saturating_mul(target_file_size));
+            }
+        }
+        debt
+    }
+
+    /// Unified backpressure configuration (RFC-0274).
+    #[must_use]
+    pub fn backpressure_config(&self) -> &crate::backpressure_kernel::BackpressureConfig {
+        &self.backpressure_config
+    }
+
+    /// Update unified backpressure configuration (RFC-0274).
+    pub fn set_backpressure_config(&mut self, config: crate::backpressure_kernel::BackpressureConfig) {
+        self.backpressure_config = config;
+        self.compaction_pacer.set_rate(config.compaction_rate_bytes_per_sec);
+    }
+
+    /// Set compaction I/O write rate limit in bytes/sec (RFC-0274 Pillar I; 0 = unconstrained).
+    pub fn set_compaction_rate_bytes_per_sec(&mut self, rate: u64) {
+        self.backpressure_config.compaction_rate_bytes_per_sec = rate;
+        self.compaction_pacer.set_rate(rate);
     }
 
     /// Minimum sequence among open pins, if any.
@@ -4764,6 +4881,15 @@ impl<E: Env> Db<E> {
                 if !table.overlaps_user_range(start, end) {
                     continue;
                 }
+                if let (Bound::Included(sk), Bound::Included(ek)) = (start, end) {
+                    if sk == ek && !table.has_range_tombstones() && !table.key_may_match(sk) {
+                        continue;
+                    }
+                }
+                let overlapping = table.blocks_overlapping_range(start, end);
+                if overlapping.is_empty() {
+                    continue;
+                }
                 self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
                 let cache = &self.block_cache;
                 // Hash the path once per stream, not once per block fetch, and
@@ -4779,7 +4905,6 @@ impl<E: Env> Db<E> {
                         0
                     };
                 let db = self;
-                let overlapping = table.blocks_overlapping_range(start, end);
                 let spans: Vec<(u64, u64)> = overlapping
                     .iter()
                     .copied()
@@ -4902,7 +5027,7 @@ impl<E: Env> Db<E> {
     ) -> crate::merge::LayerStream<'static> {
         let mut stream: Vec<(InternalKey, Bytes)> = Vec::new();
         let mut last: Option<Bytes> = None;
-        for (k, v) in table.iter_internal() {
+        for (k, v) in table.iter_internal_range(start, end) {
             if !crate::merge::user_key_in_range(k.user_key.as_ref(), start, end) {
                 continue;
             }
@@ -4935,12 +5060,11 @@ impl<E: Env> Db<E> {
         resolve_values: bool,
     ) -> crate::merge::LayerStream<'a> {
         if table.has_range_tombstones() {
-            // Range-tombstone layout walks the full table (no cursor
-            // bounds) — keep the materialized shape; range deletes are
-            // rare and this path is correctness-first.
+            // Range-tombstone layout walks the bounded table — keep the
+            // materialized shape; range deletes are rare and this path is correctness-first.
             let mut stream: Vec<(InternalKey, Bytes)> = Vec::new();
             let mut last: Option<Bytes> = None;
-            for (k, v) in table.iter_internal() {
+            for (k, v) in table.iter_internal_range(start, end) {
                 if !crate::merge::user_key_in_range(k.user_key.as_ref(), start, end) {
                     continue;
                 }
@@ -6891,9 +7015,14 @@ impl<E: Env> Db<E> {
     /// installs L0s faster than compaction drains them, so the
     /// clear-on-L0-empty hook alone would let this cache grow with
     /// everything written (25M-hydrate OOM, second head).
-    fn retired_cache_cap(&self) -> usize {
+    pub fn retired_cache_cap(&self) -> usize {
+        if let Ok(v) = std::env::var("PEDRA_RETIRED_CACHE_BYTES") {
+            if let Ok(cap) = v.parse::<usize>() {
+                return cap;
+            }
+        }
         self.auto_flush_bytes
-            .map_or(16 * 1024 * 1024, |b| 4usize.saturating_mul(b))
+            .map_or(16 * 1024 * 1024, |b| (4usize.saturating_mul(b)).min(64 * 1024 * 1024))
     }
 
     /// Drop oldest retired layers until the pending pile fits the cap.
@@ -6906,12 +7035,15 @@ impl<E: Env> Db<E> {
             .iter()
             .map(|m| m.approx_memory_usage())
             .fold(0, usize::saturating_add);
-        while total > cap && self.retired_pending.len() > 1 {
+        while total > cap && !self.retired_pending.is_empty() {
             // Push-ordered: front is the oldest.
             if let Some(m) = self.retired_pending.first() {
                 total = total.saturating_sub(m.approx_memory_usage());
             }
             self.retired_pending.remove(0);
+        }
+        if self.retired_fold.approx_memory_usage() > cap {
+            self.retired_fold = MemTable::new();
         }
     }
 
@@ -8431,6 +8563,21 @@ impl<E: Env> Db<E> {
             self.table_cache.insert(Arc::new(t.clone()));
         }
         self.next_file_num = num + new_tables.len() as u64;
+
+        // Compaction I/O rate limiter check (RFC-0274 Pillar I)
+        if self.backpressure_config.compaction_rate_bytes_per_sec > 0 {
+            let now_nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0);
+            let mut total_bytes = 0u64;
+            for t in &new_tables {
+                total_bytes = total_bytes.saturating_add(self.env.metadata_len(t.path()).unwrap_or(0));
+            }
+            if let Some(delay) = self.compaction_pacer.request_pacing_delay(total_bytes, now_nanos) {
+                std::thread::sleep(delay);
+            }
+        }
 
         let old_paths: Vec<PathBuf> = input_idxs
             .iter()
@@ -10819,16 +10966,73 @@ impl<E: Env> Db<E> {
                 ) {
                     crate::write_admission_kernel::WriteAdmit::StallL0 => {
                         self.write_stall_count = self.write_stall_count.saturating_add(1);
-                        Err(CoreError::WriteStall {
+                        return Err(CoreError::WriteStall {
                             l0_files: l0,
                             limit: l0_limit,
-                        })
+                        });
                     }
-                    _ => Ok(()),
+                    _ => {}
                 }
             }
-            _ => Ok(()),
+            _ => {}
         }
+
+        // Global pending compaction debt stall check (RFC-0274 Pillar III)
+        let pending_bytes = self.pending_compaction_bytes();
+        let debt_verdict = crate::backpressure_kernel::evaluate_compaction_debt(
+            pending_bytes,
+            self.backpressure_config.pending_compaction_soft_bytes,
+            self.backpressure_config.pending_compaction_hard_bytes,
+        );
+        if let crate::backpressure_kernel::CompactionDebtVerdict::StallCompaction {
+            pending_bytes,
+            hard_bytes,
+        } = debt_verdict
+        {
+            return Err(CoreError::WriteStallCompactionDebt {
+                pending_bytes,
+                limit: hard_bytes,
+            });
+        }
+
+        // Active snapshot pin bloat protection (RFC-0274 Pillar IV)
+        if let Some(oldest_seq) = self.oldest_pinned_sequence() {
+            let last_seq = self.last_sequence();
+            let is_reclaiming = self.disk_pressure_log.load(Ordering::Relaxed) > 0;
+            let pin_verdict = crate::backpressure_kernel::evaluate_snapshot_pin(
+                0,
+                0,
+                self.backpressure_config.max_snapshot_age_secs,
+                oldest_seq,
+                last_seq,
+                self.backpressure_config.snapshot_pin_hard_lag,
+                is_reclaiming,
+            );
+            if let crate::backpressure_kernel::SnapshotPinVerdict::RefuseWrites { lag, hard_lag } = pin_verdict {
+                return Err(CoreError::SnapshotPinDebt { lag, hard_lag });
+            }
+        }
+
+        // Smooth dynamic write pacing (RFC-0274 Pillar II)
+        if crate::backpressure_kernel::smooth_pacing_due(self.backpressure_config.smooth_pacing_enabled) {
+            let l0_count = measure_l0(self) as u64;
+            let l0_soft = self.write_pressure_l0.unwrap_or(0) as u64;
+            let l0_hard = self.write_stall_l0.unwrap_or(0) as u64;
+            if let Some(delay) = crate::backpressure_kernel::calculate_smooth_pacing_delay(
+                l0_count,
+                l0_soft,
+                l0_hard,
+                pending_bytes,
+                self.backpressure_config.pending_compaction_soft_bytes,
+                self.backpressure_config.pending_compaction_hard_bytes,
+                self.backpressure_config.min_pace_micros,
+                self.backpressure_config.max_pace_micros,
+            ) {
+                std::thread::sleep(delay);
+            }
+        }
+
+        Ok(())
     }
 
     /// RFC-0217 P2.7: `Ok(true)` = this commit did flush work (a CF flush,
