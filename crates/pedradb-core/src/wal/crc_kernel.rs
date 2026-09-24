@@ -162,7 +162,7 @@ mod tests {
     fn crc_mismatch_is_not_ok() {
         assert!(crc_match_ok(1, 1));
         assert!(!crc_match_ok(1, 2));
-        assert!(crc_match_ok_as_is(1, 2), "AS-IS tooth: ignore mismatch");
+        assert!(crc_match_ok_as_is(1, 2), "AS-IS dente: ignore mismatch");
     }
 
     /// RFC-0076 P2.2: equality of checksums is not a collision theorem.
@@ -171,7 +171,7 @@ mod tests {
         assert!(!crc_collision_admitted());
         assert!(
             crc_collision_admitted_as_is(),
-            "AS-IS tooth: matching CRC looks collision-free"
+            "AS-IS dente: matching CRC looks collision-free"
         );
         assert!(
             crc_match_ok(1, 1),

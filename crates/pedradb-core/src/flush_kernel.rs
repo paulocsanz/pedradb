@@ -1,11 +1,11 @@
 //! Pure flush-pipeline decisions (RFC-0056 P0.2 / RFC-0174 P0.3).
 //!
 //! **Single artifact:** this file is what `rustc` links *and* what Verus
-//! proves (`cfg(verus_keep_ghost)`). No twin copy.
+//! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
 //!
 //!   ./scripts/verus_flush_decision.sh
 //!
-//! Production [`crate::db::Db::flush`] and [`crate::db::Db::try_rotate_wal`] route
+//! Production [`crate::Db::flush`] and [`crate::Db::try_rotate_wal`] route
 //! their decisions through this kernel. Data-fate: the WAL may only be
 //! rotated once every copy of acked keys lives in an installed SST.
 //!
@@ -186,7 +186,7 @@ pub fn manifest_publish_plan(sst_durable: bool) -> ManifestPublishPlan {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: publishes while an SST is still unsynced (CURRENT names a
-/// torn file after crash — tooth).
+/// torn file after crash — dente).
 #[must_use]
 pub fn manifest_publish_plan_as_is(_sst_durable: bool) -> ManifestPublishPlan {
     ManifestPublishPlan::PublishManifest
@@ -217,7 +217,7 @@ pub fn cf_flush_plan(mem_bytes: u64, limit: u64) -> CfFlushPlan {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: skips every family (armed CFs over the limit keep growing —
-/// tooth).
+/// dente).
 #[must_use]
 pub fn cf_flush_plan_as_is(_mem_bytes: u64, _limit: u64) -> CfFlushPlan {
     CfFlushPlan::CfNotDueSkip
@@ -263,10 +263,32 @@ pub fn dominant_family_stage_plan(fam_bytes: u64, total_bytes: u64) -> FamilyFlu
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: always partitions the family out in-commit (the O(n)
-/// `take_family` under the write lock — tooth).
+/// `take_family` under the write lock — dente).
 #[must_use]
 pub fn dominant_family_stage_plan_as_is(_fam_bytes: u64, _total_bytes: u64) -> FamilyFlushMode {
     FamilyFlushMode::PartitionFamily
+}
+
+
+#[cfg(not(verus_keep_ghost))]
+/// Default virtual flush threshold in bytes (RFC-0265 P0.1).
+/// Memtables smaller than 64 KiB under rapid flush() calls are rotated in-memory
+/// without forcing an immediate SST write and Manifest fsync, since the active WAL
+/// already guarantees durability.
+pub const DEFAULT_VIRTUAL_FLUSH_THRESHOLD_BYTES: usize = 64 * 1024;
+
+#[cfg(not(verus_keep_ghost))]
+/// Pure decision whether a flush plan should execute a Virtual Flush (RFC-0265 P0.1).
+#[must_use]
+pub fn should_virtual_flush(mem_bytes: usize, threshold: usize, wal_is_durable: bool) -> bool {
+    wal_is_durable && mem_bytes > 0 && mem_bytes < threshold
+}
+
+#[cfg(not(verus_keep_ghost))]
+/// AS-IS: never virtual flush (always forces full Manifest fsync per micro-flush).
+#[must_use]
+pub fn should_virtual_flush_as_is(_mem_bytes: usize, _threshold: usize, _wal_is_durable: bool) -> bool {
+    false
 }
 
 #[cfg(not(verus_keep_ghost))]
@@ -298,7 +320,7 @@ pub fn flusher_gate_plan(attached: bool) -> FlusherGate {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: treats a workerless Db as drained — writers park on debt/stall
-/// with nobody to drain them (unbounded sleep — tooth plantado).
+/// with nobody to drain them (unbounded sleep — dente plantado).
 #[must_use]
 pub fn flusher_gate_plan_as_is(_attached: bool) -> FlusherGate {
     FlusherGate::WorkerDrains
@@ -332,7 +354,7 @@ pub fn parked_debt_plan(parked: u64, cap: u64) -> ParkedDebtPlan {
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: never throttles — a lone fast writer parks tables faster than
 /// the worker materializes them and the mem layer grows without bound
-/// (the 25M slipstream OOM, v11–v15 — tooth plantado).
+/// (the 25M slipstream OOM, v11–v15 — dente plantado).
 #[must_use]
 pub fn parked_debt_plan_as_is(_parked: u64, _cap: u64) -> ParkedDebtPlan {
     ParkedDebtPlan::NoDebtBelowCap
@@ -495,7 +517,7 @@ pub fn parked_pair_plan(parked_len: u64) -> ParkedPairPlan {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: hand out regardless — a queue shorter than the pair loses or
-/// mangles the single parked table (parked-pipeline data-loss tooth).
+/// mangles the single parked table (parked-pipeline data-loss dente).
 #[must_use]
 pub fn parked_pair_plan_as_is(_parked_len: u64) -> ParkedPairPlan {
     ParkedPairPlan::HandOutOldestPair
@@ -526,7 +548,7 @@ pub fn auto_flush_gate(global_under: bool, cf_under: bool) -> AutoFlushGate {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: never skip the scan — SST writes fire even when both axes are
-/// under (pointless flush churn tooth).
+/// under (pointless flush churn dente).
 #[must_use]
 pub fn auto_flush_gate_as_is(_global_under: bool, _cf_under: bool) -> AutoFlushGate {
     AutoFlushGate::ScanColumnFamilies
@@ -556,7 +578,7 @@ pub fn mem_auto_flush_plan(mem_bytes: u64, armed: bool, limit: u64) -> MemAutoFl
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: never flush — the armed limit is ignored and the memtable
-/// grows until the host stalls (unbounded-mem tooth).
+/// grows until the host stalls (unbounded-mem dente).
 #[must_use]
 pub fn mem_auto_flush_plan_as_is(_mem_bytes: u64, _armed: bool, _limit: u64) -> MemAutoFlushPlan {
     MemAutoFlushPlan::NotDueKeepMem
@@ -1050,7 +1072,7 @@ mod tests {
         assert!(!may_publish_manifest(false));
         assert!(
             may_publish_manifest_as_is(false),
-            "AS-IS tooth: MANIFEST names unsynced SST"
+            "AS-IS dente: MANIFEST names unsynced SST"
         );
         assert!(may_publish_manifest(true));
     }
@@ -1070,7 +1092,7 @@ mod tests {
         assert_eq!(
             manifest_publish_plan_as_is(false),
             ManifestPublishPlan::PublishManifest,
-            "AS-IS tooth: publishes with unsynced SST"
+            "AS-IS dente: publishes with unsynced SST"
         );
         let pm = named_fn_src(include_str!("db_kernel.rs"), "persist_manifest")
             .expect("persist_manifest");
@@ -1118,13 +1140,13 @@ mod tests {
         // RFC-0219 P2.2: park/assist/workerless-submit regimes are decided
         // by flusher_gate_plan — a workerless Db never sleeps on a drain
         // nobody runs. AS-IS says WorkerDrains always (workerless writers
-        // park forever — tooth).
+        // park forever — dente).
         assert_eq!(flusher_gate_plan(true), FlusherGate::WorkerDrains);
         assert_eq!(flusher_gate_plan(false), FlusherGate::Workerless);
         assert_eq!(
             flusher_gate_plan_as_is(false),
             FlusherGate::WorkerDrains,
-            "AS-IS tooth: workerless Db parks on a drain nobody runs"
+            "AS-IS dente: workerless Db parks on a drain nobody runs"
         );
         let cc = include_str!("concurrent_kernel.rs");
         for (name, field) in [
@@ -1151,14 +1173,14 @@ mod tests {
         // RFC-0219 P2.2: debt is real EXACTLY when parked-unflushed bytes
         // reach one table's worth — the writer throttles (park/assist).
         // AS-IS never throttles (mem layer grows without bound — the 25M
-        // slipstream OOM — tooth).
+        // slipstream OOM — dente).
         assert_eq!(parked_debt_plan(255, 256), ParkedDebtPlan::NoDebtBelowCap);
         assert_eq!(parked_debt_plan(256, 256), ParkedDebtPlan::DebtAtCap);
         assert_eq!(parked_debt_plan(1 << 30, 256), ParkedDebtPlan::DebtAtCap);
         assert_eq!(
             parked_debt_plan_as_is(1 << 30, 256),
             ParkedDebtPlan::NoDebtBelowCap,
-            "AS-IS tooth: a table's worth of parked debt never throttles"
+            "AS-IS dente: a table's worth of parked debt never throttles"
         );
         let cc = include_str!("concurrent_kernel.rs");
         let afd = named_fn_src(cc, "await_flush_debt").expect("await_flush_debt");
@@ -1233,14 +1255,14 @@ mod tests {
     fn cf_flush_plan_on_live_over_limit_flushes() {
         // RFC-0219 P2.1: inside the armed scan, a family at/over its
         // limit flushes now; below the limit skips. AS-IS skips every
-        // family (armed CFs keep growing — tooth).
+        // family (armed CFs keep growing — dente).
         assert_eq!(cf_flush_plan(10, 10), CfFlushPlan::FlushCfNow);
         assert_eq!(cf_flush_plan(11, 10), CfFlushPlan::FlushCfNow);
         assert_eq!(cf_flush_plan(9, 10), CfFlushPlan::CfNotDueSkip);
         assert_eq!(
             cf_flush_plan_as_is(10, 10),
             CfFlushPlan::CfNotDueSkip,
-            "AS-IS tooth: armed family over the limit never flushes"
+            "AS-IS dente: armed family over the limit never flushes"
         );
         let maf = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_flush")
             .expect("maybe_auto_flush");
@@ -1261,7 +1283,7 @@ mod tests {
         assert!(!occ_snap_uses_published(false));
         assert!(
             !occ_snap_uses_published_as_is(true),
-            "AS-IS tooth: last_seq while inflight"
+            "AS-IS dente: last_seq while inflight"
         );
         let src = include_str!("concurrent_kernel.rs");
         assert!(
@@ -1291,7 +1313,7 @@ mod tests {
         );
         assert!(
             !occ_snap_lock_order_as_is(false, true),
-            "AS-IS tooth: last_seq while write lock held"
+            "AS-IS dente: last_seq while write lock held"
         );
         let snap = include_str!("concurrent_kernel.rs")
             .split("fn occ_snapshot(")
@@ -1316,7 +1338,7 @@ mod tests {
         assert_eq!(
             wal_rotate_decision_as_is_ignore_pin(s),
             WalRotateAction::RotateWal,
-            "AS-IS tooth: rotate while pin live"
+            "AS-IS dente: rotate while pin live"
         );
     }
 
@@ -1325,7 +1347,7 @@ mod tests {
         assert!(wal_segment_is_empty(0));
         assert!(
             !wal_segment_is_empty_as_is(0),
-            "AS-IS tooth: rotate empty segment"
+            "AS-IS dente: rotate empty segment"
         );
         assert!(!wal_segment_is_empty(1));
         let rot = include_str!("db_kernel.rs")
@@ -1363,7 +1385,7 @@ mod tests {
         assert!(auto_flush_due(100, true, 50));
         assert!(
             !auto_flush_due_as_is(100, true, 50),
-            "AS-IS tooth: never fires"
+            "AS-IS dente: never fires"
         );
         assert!(!auto_flush_due(10, true, 50));
         assert!(!auto_flush_due(100, false, 50), "unarmed never fires");
@@ -1378,7 +1400,7 @@ mod tests {
         assert!(!l0_compact_due(3, 4));
         assert!(
             !l0_compact_due_as_is(4, 4),
-            "AS-IS tooth: never compacta L0"
+            "AS-IS dente: never compacta L0"
         );
         assert!(!l0_compact_due_as_is(773, 4));
         let mac = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_compact")
@@ -1449,7 +1471,7 @@ mod tests {
         assert_eq!(
             parked_pair_plan_as_is(1),
             ParkedPairPlan::HandOutOldestPair,
-            "AS-IS tooth: pair handed out of a short queue"
+            "AS-IS dente: pair handed out of a short queue"
         );
         let popa = named_fn_src(include_str!("db_kernel.rs"), "parked_oldest_pair_arcs")
             .expect("parked_oldest_pair_arcs");
@@ -1480,7 +1502,7 @@ mod tests {
         assert_eq!(
             auto_flush_gate_as_is(true, true),
             AutoFlushGate::ScanColumnFamilies,
-            "AS-IS tooth: scan even when both axes are under"
+            "AS-IS dente: scan even when both axes are under"
         );
         let maf = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_flush")
             .expect("maybe_auto_flush");
@@ -1516,7 +1538,7 @@ mod tests {
         assert_eq!(
             dominant_family_stage_plan_as_is(99, 100),
             FamilyFlushMode::PartitionFamily,
-            "AS-IS tooth: always partitions in-commit"
+            "AS-IS dente: always partitions in-commit"
         );
         let maf = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_flush")
             .expect("maybe_auto_flush");
@@ -1547,7 +1569,7 @@ mod tests {
         assert_eq!(
             mem_auto_flush_plan_as_is(100, true, 50),
             MemAutoFlushPlan::NotDueKeepMem,
-            "AS-IS tooth: armed limit ignored, mem grows unbounded"
+            "AS-IS dente: armed limit ignored, mem grows unbounded"
         );
         let maf = named_fn_src(include_str!("db_kernel.rs"), "maybe_auto_flush")
             .expect("maybe_auto_flush");
@@ -1556,4 +1578,17 @@ mod tests {
             "maybe_auto_flush must match mem_auto_flush_plan on the mem gate"
         );
     }
+
+    #[test]
+    fn theorem_should_virtual_flush() {
+        let cap = DEFAULT_VIRTUAL_FLUSH_THRESHOLD_BYTES;
+        assert!(should_virtual_flush(1024, cap, true));
+        assert!(should_virtual_flush(cap - 1, cap, true));
+        assert!(!should_virtual_flush(cap, cap, true));
+        assert!(!should_virtual_flush(cap + 1024, cap, true));
+        assert!(!should_virtual_flush(0, cap, true));
+        assert!(!should_virtual_flush(1024, cap, false));
+        assert!(!should_virtual_flush_as_is(1024, cap, true));
+    }
 }
+

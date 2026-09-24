@@ -352,6 +352,8 @@ pub struct SstTable {
     range_tombstones: Vec<(InternalKey, Bytes)>,
     /// Header entry count (or materialized length for v1).
     num_entries: usize,
+    /// Number of tombstones (point deletions and range deletions) in this SST (RFC-0265 P0.2).
+    tombstone_count: usize,
     max_sequence: SequenceNumber,
     /// Sparse index (v2+); empty for v1.
     index: Vec<BlockHandle>,
@@ -373,6 +375,22 @@ impl SstTable {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Number of tombstones (point deletions and range deletions) in this SST (RFC-0265 P0.2).
+    #[must_use]
+    pub fn tombstone_count(&self) -> usize {
+        self.tombstone_count
+    }
+
+    /// Whether this SST exceeds the Lethe tombstone trigger threshold (RFC-0265 P0.2).
+    #[must_use]
+    pub fn is_tombstone_compaction_due(&self, threshold_pct: u64) -> bool {
+        crate::compact_kernel::tombstone_compaction_due(
+            self.tombstone_count as u64,
+            self.num_entries as u64,
+            threshold_pct,
+        )
     }
 
     /// Number of internal key versions stored.
@@ -492,6 +510,44 @@ impl SstTable {
     #[must_use]
     pub fn cached_entries_count(&self) -> usize {
         self.entries.lock().as_ref().map_or(0, Vec::len)
+    }
+
+    /// Evict decoded-entries materialization cache for lazy tables.
+    /// Safe under concurrency: future readers or scans will decode blocks on demand.
+    pub fn clear_entries_cache(&self) {
+        if self.is_lazy() {
+            *self.entries.lock() = None;
+        }
+    }
+
+    /// Approximate bytes consumed by cached decoded entries in this SST.
+    #[must_use]
+    pub fn cached_entries_bytes(&self) -> usize {
+        self.entries.lock().as_ref().map_or(0, |entries| {
+            let overhead = entries
+                .capacity()
+                .saturating_mul(std::mem::size_of::<(InternalKey, Bytes)>());
+            let payload: usize = entries
+                .iter()
+                .map(|(k, v)| k.user_key.len().saturating_add(v.len()))
+                .fold(0, usize::saturating_add);
+            overhead.saturating_add(payload)
+        })
+    }
+
+    /// Estimate approximate memory usage in bytes of this SST's in-memory metadata.
+    #[must_use]
+    pub fn metadata_memory_usage(&self) -> usize {
+        let index_bytes = self.index.len().saturating_mul(std::mem::size_of::<BlockHandle>());
+        let rt_bytes = self.range_tombstones.len().saturating_mul(std::mem::size_of::<(InternalKey, Bytes)>());
+        let bloom_bytes = (self.bloom.bit_count() as usize).div_ceil(8);
+        let keys_bytes = self.smallest_user_key.as_ref().map_or(0, |k| k.len())
+            .saturating_add(self.largest_user_key.as_ref().map_or(0, |k| k.len()));
+        std::mem::size_of::<Self>()
+            .saturating_add(index_bytes)
+            .saturating_add(rt_bytes)
+            .saturating_add(bloom_bytes)
+            .saturating_add(keys_bytes)
     }
 
     /// Append range tombstones visible at `snapshot` into `out` (no full materialize).
@@ -929,36 +985,42 @@ impl SstTable {
         self.bloom.may_contain(user_key)
     }
 
+    /// Point lookup at `snapshot` returning sequence and lookup result.
+    #[must_use]
+    pub fn get_entry(
+        &self,
+        user_key: &[u8],
+        snapshot: SequenceNumber,
+    ) -> Option<(SequenceNumber, Lookup)> {
+        if let (Some(lo), Some(hi)) = (
+            self.smallest_user_key.as_deref(),
+            self.largest_user_key.as_deref(),
+        ) {
+            if user_key < lo {
+                return None;
+            }
+            let _ = hi;
+        }
+
+        if self.bloom.may_contain(user_key) || self.has_range_tombstones() {
+            if let Some((seq, look)) = self.point_in_blocks(user_key, snapshot, &mut |bi| {
+                self.decode_block(bi).ok().map(Arc::new)
+            }) {
+                return Some((seq, look));
+            }
+        }
+        None
+    }
+
     /// Point lookup at `snapshot` (same semantics as [`MemTable::get`]).
     ///
     /// Lazy tables load **one** data block (plus open-time range tombstones).
     #[must_use]
     pub fn get(&self, user_key: &[u8], snapshot: SequenceNumber) -> Lookup {
-        // Bounds prune only (bloom can miss keys covered solely by a range tombstone
-        // whose start key differs from `user_key`).
-        if let (Some(lo), Some(hi)) = (
-            self.smallest_user_key.as_deref(),
-            self.largest_user_key.as_deref(),
-        ) {
-            // Range tombstone end may extend past largest point key; still probe if
-            // any range del could cover (start <= key). Conservative: skip only
-            // when key < lo (no start can cover) — ends may be > hi.
-            if user_key < lo {
-                return Lookup::NotFound;
-            }
-            let _ = hi;
-        }
-
-        let mut point = Lookup::NotFound;
-        let mut point_seq = 0u64;
-        if self.bloom.may_contain(user_key) || self.has_range_tombstones() {
-            if let Some((seq, look)) = self.point_in_blocks(user_key, snapshot, &mut |bi| {
-                self.decode_block(bi).ok().map(Arc::new)
-            }) {
-                point_seq = seq;
-                point = look;
-            }
-        }
+        let (point_seq, point) = match self.get_entry(user_key, snapshot) {
+            Some((seq, look)) => (seq, look),
+            None => (0, Lookup::NotFound),
+        };
 
         match point {
             Lookup::Found(v) => {
@@ -1564,6 +1626,7 @@ impl SstTable {
         // Verify blocks + collect range tombstones and key bounds without retaining
         // every point entry (lazy steady-state memory).
         let mut range_tombstones = Vec::new();
+        let mut tombstone_count = 0usize;
         let mut smallest_user_key: Option<Bytes> = None;
         let mut largest_user_key: Option<Bytes> = None;
         let mut decoded_n = 0usize;
@@ -1586,6 +1649,9 @@ impl SstTable {
                     smallest_user_key = Some(uk.clone());
                 }
                 largest_user_key = Some(uk);
+                if ikey.kind == ValueType::Deletion || ikey.kind == ValueType::RangeDeletion {
+                    tombstone_count += 1;
+                }
                 if ikey.kind == ValueType::RangeDeletion {
                     range_tombstones.push((ikey, value));
                 }
@@ -1636,6 +1702,7 @@ impl SstTable {
             kit: Arc::new(RwLock::new(None)),
             range_tombstones,
             num_entries: n,
+            tombstone_count,
             max_sequence,
             index,
             key_cp,
@@ -1662,6 +1729,10 @@ impl SstTable {
             .filter(|(k, _)| k.kind == ValueType::RangeDeletion)
             .cloned()
             .collect();
+        let tombstone_count = entries
+            .iter()
+            .filter(|(k, _)| k.kind == ValueType::Deletion || k.kind == ValueType::RangeDeletion)
+            .count();
         let num_entries = entries.len();
         let cf = crate::cf_kernel::infer_sst_cf(
             smallest_user_key.as_deref(),
@@ -1682,6 +1753,7 @@ impl SstTable {
             kit: Arc::new(RwLock::new(None)),
             range_tombstones,
             num_entries,
+            tombstone_count,
             max_sequence,
             index,
             key_cp,
@@ -1690,6 +1762,7 @@ impl SstTable {
             largest_user_key,
             cf,
         }
+
     }
 
     /// All internal versions in sorted order (materializes lazy tables).
@@ -2971,10 +3044,9 @@ pub fn write_sst_bulk_arrays(
     keys: &[Bytes],
     vals: &[Bytes],
     seqs: &[SequenceNumber],
-    kinds: &[ValueType],
     sync: bool,
 ) -> Result<SstTable> {
-    write_sst_bulk_arrays_body(env, path.as_ref(), keys, vals, seqs, kinds, sync)
+    write_sst_bulk_arrays_body(env, path.as_ref(), keys, vals, seqs, sync)
 }
 
 const BULK_SST_HEADER_LEN: usize = 40;
@@ -2987,10 +3059,9 @@ fn write_sst_bulk_arrays_body(
     keys: &[Bytes],
     vals: &[Bytes],
     seqs: &[SequenceNumber],
-    kinds: &[ValueType],
     sync: bool,
 ) -> Result<SstTable> {
-    if keys.len() != vals.len() || keys.len() != seqs.len() || keys.len() != kinds.len() {
+    if keys.len() != vals.len() || keys.len() != seqs.len() {
         return Err(CoreError::Internal(
             "bulk SST keys/vals/seqs length mismatch".into(),
         ));
@@ -3046,7 +3117,7 @@ fn write_sst_bulk_arrays_body(
         ) {
             block_first_user = Some(keys[i].clone());
         }
-        append_bulk_entry(&mut staged, k, seq, kinds[i], v);
+        append_bulk_entry(&mut staged, k, seq, v);
     }
     if !crate::write_admission_kernel::batch_is_empty(
         staged.len().saturating_sub(block_start) as u64
@@ -3120,6 +3191,7 @@ fn write_sst_bulk_arrays_body(
         kit: Arc::new(RwLock::new(None)),
         range_tombstones: Vec::new(),
         num_entries: n_entries,
+        tombstone_count: 0,
         max_sequence,
         index,
         key_cp,
@@ -3168,19 +3240,13 @@ fn finish_staged_block(
 }
 
 #[inline]
-fn append_bulk_entry(
-    buf: &mut Vec<u8>,
-    k: &[u8],
-    seq: SequenceNumber,
-    kind: ValueType,
-    v: &[u8],
-) {
+fn append_bulk_entry(buf: &mut Vec<u8>, k: &[u8], seq: SequenceNumber, v: &[u8]) {
     // Hydrate keys/vals are tens/hundreds of bytes; skip try_from / Result.
     let ikey_len = (k.len() + 8) as u32;
     let val_len = v.len() as u32;
     buf.extend_from_slice(&ikey_len.to_le_bytes());
     buf.extend_from_slice(k);
-    buf.extend_from_slice(&pack_sequence_and_type(seq, kind).to_be_bytes());
+    buf.extend_from_slice(&pack_sequence_and_type(seq, ValueType::Value).to_be_bytes());
     buf.extend_from_slice(&val_len.to_le_bytes());
     buf.extend_from_slice(v);
 }
@@ -3368,6 +3434,7 @@ fn write_sst_try_sorted_body(
     let mut prev_ikey: Option<InternalKey> = None;
     let mut smallest_user_key: Option<Bytes> = None;
     let mut range_tombstones: Vec<(InternalKey, Bytes)> = Vec::new();
+    let mut tombstone_count: usize = 0;
     let mut block_user_keys: Vec<Bytes> = Vec::new();
     let mut block_restart_uk: Option<Bytes> = None;
     let mut block_entry_i: usize = 0;
@@ -3390,9 +3457,13 @@ fn write_sst_try_sorted_body(
         if smallest_user_key.is_none() {
             smallest_user_key = Some(ikey.user_key.clone());
         }
+        if ikey.kind == ValueType::Deletion || ikey.kind == ValueType::RangeDeletion {
+            tombstone_count = tombstone_count.saturating_add(1);
+        }
         if ikey.kind == ValueType::RangeDeletion {
             range_tombstones.push((ikey.clone(), value.clone()));
         }
+
         let uk = ikey.user_key.as_ref();
         // Same-user as the previous entry (block split + bloom distinct).
         // `prev_ikey` already owns that key — do not clone it per entry.
@@ -3581,6 +3652,7 @@ fn write_sst_try_sorted_body(
         kit: Arc::new(RwLock::new(None)),
         range_tombstones,
         num_entries: n_entries,
+        tombstone_count,
         max_sequence,
         index,
         key_cp,
@@ -3887,15 +3959,7 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(
-            &StdEnv,
-            &path,
-            &keys,
-            &vals,
-            &seqs,
-            &vec![ValueType::Value; keys.len()],
-            true,
-        ).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         assert!(!table.compressed_blocks);
         assert!(table.block_crc);
         assert!(!table.has_bloom());
@@ -3926,15 +3990,7 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        write_sst_bulk_arrays(
-            &StdEnv,
-            &path,
-            &keys,
-            &vals,
-            &seqs,
-            &vec![ValueType::Value; keys.len()],
-            true,
-        ).unwrap();
+        write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         let orig = std::fs::read(&path).unwrap();
         assert!(orig.len() > BULK_SST_HEADER_LEN + 8);
 
@@ -3972,15 +4028,7 @@ mod tests {
             .collect();
         let vals: Vec<Bytes> = (0..n).map(|_| Bytes::from(vec![b'v'; 80])).collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(
-            &StdEnv,
-            &path,
-            &keys,
-            &vals,
-            &seqs,
-            &vec![ValueType::Value; keys.len()],
-            true,
-        ).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         let blocks = table.data_block_count();
         // ~160 KiB of values at 4 KiB → tens of blocks (not one 256 KiB).
         assert!(
@@ -4019,15 +4067,7 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(
-            &StdEnv,
-            &path,
-            &keys,
-            &vals,
-            &seqs,
-            &vec![ValueType::Value; keys.len()],
-            true,
-        ).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         assert!(!table.payload_resident());
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1 << 20)));
@@ -4077,15 +4117,7 @@ mod tests {
             .collect();
         let vals: Vec<Bytes> = (0..n).map(|_| Bytes::from(vec![b'v'; 80])).collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(
-            &StdEnv,
-            &path,
-            &keys,
-            &vals,
-            &seqs,
-            &vec![ValueType::Value; keys.len()],
-            true,
-        ).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
         pool.arm();
@@ -4114,15 +4146,7 @@ mod tests {
             .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
             .collect();
         let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(
-            &StdEnv,
-            &path,
-            &keys,
-            &vals,
-            &seqs,
-            &vec![ValueType::Value; keys.len()],
-            true,
-        ).unwrap();
+        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
         pool.arm();
@@ -4159,7 +4183,7 @@ mod tests {
         assert_eq!(
             crate::sst::sst_crc_fate_as_is(1, 2, 100),
             crate::sst::SstCrcFate::StripTrailer,
-            "AS-IS tooth: mismatch still strips"
+            "AS-IS dente: mismatch still strips"
         );
         let mut mem = MemTable::new();
         mem.put(b"k".as_slice(), 1, b"sst-crc-trailer-0152".as_slice());
@@ -4224,7 +4248,7 @@ mod tests {
         assert!(!crate::sst::sst_block_crc_ok(1, 2));
         assert!(
             crate::sst::sst_block_crc_ok_as_is(1, 2),
-            "AS-IS tooth: ignore block mismatch"
+            "AS-IS dente: ignore block mismatch"
         );
         let mut mem = MemTable::new();
         // Repetitive payload: the writer's first-block probe must keep lz4
@@ -4563,6 +4587,7 @@ mod tests {
             kit: Arc::new(parking_lot::RwLock::new(None)),
             range_tombstones: Vec::new(),
             num_entries: 5,
+            tombstone_count: 0,
             max_sequence: 5,
             index,
             key_cp: 0,
@@ -4646,6 +4671,7 @@ mod tests {
                 kit: Arc::new(parking_lot::RwLock::new(None)),
                 range_tombstones: Vec::new(),
                 num_entries: 0,
+                tombstone_count: 0,
                 max_sequence: 0,
                 index,
                 key_cp,

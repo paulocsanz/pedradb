@@ -386,6 +386,22 @@ impl SstPayloadPool {
             g.total = g.total.saturating_sub(entry.bytes);
         }
     }
+
+    /// Evict all resident payload bodies from registered tables (RAM pressure).
+    /// Only evicts when the pool is armed (tables have a file source attached and can reload).
+    pub fn evict_all(&self) {
+        let mut g = self.inner.lock();
+        if !g.armed {
+            return;
+        }
+        for (_, entry) in g.map.drain() {
+            if let Some(slot) = entry.slot.upgrade() {
+                *slot.write() = ResidentBody::empty();
+            }
+        }
+        g.total = 0;
+        self.total.store(0, Ordering::Relaxed);
+    }
 }
 
 /// Block cache for decompressed SST blocks (keyed by absolute path + block index).
@@ -618,6 +634,7 @@ impl BlockCache {
 #[derive(Debug, Default)]
 pub struct AnswerCache<V> {
     inner: Mutex<AnswerCacheInner<V>>,
+    is_frozen: std::sync::atomic::AtomicBool,
 }
 
 /// Latest-snapshot point get (`None` = cached absence).
@@ -765,6 +782,7 @@ impl<V: Clone> AnswerCache<V> {
                 gen: 0,
                 epoch: 0,
             }),
+            is_frozen: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -783,6 +801,9 @@ impl<V: Clone> AnswerCache<V> {
 
     /// Store a latest-snapshot answer.
     pub fn insert(&self, key: &[u8], value: V) {
+        if self.is_frozen.load(Ordering::Relaxed) {
+            return;
+        }
         let mut g = self.inner.lock();
         if crate::write_admission_kernel::batch_is_empty(g.capacity as u64) {
             return;
@@ -798,6 +819,7 @@ impl<V: Clone> AnswerCache<V> {
             // over 25M keys: FIFO evict + `Bytes` copy on every miss was
             // the fill tax (8192-cap never hits). Zipf's hot set fits in
             // 8192 so the first fill stays; writes `clear()`.
+            self.is_frozen.store(true, Ordering::Relaxed);
             return;
         }
         let epoch = g.epoch;
@@ -809,6 +831,7 @@ impl<V: Clone> AnswerCache<V> {
 
     /// Invalidate every entry without walking the map (write path).
     pub fn clear(&self) {
+        self.is_frozen.store(false, Ordering::Relaxed);
         let mut g = self.inner.lock();
         g.gen = g.gen.wrapping_add(1);
         if g.gen == 0 {
@@ -820,12 +843,14 @@ impl<V: Clone> AnswerCache<V> {
 
     /// Drop one key so other latest-snapshot hits stay (YCSB B/D 95/5).
     pub fn invalidate(&self, key: &[u8]) {
+        self.is_frozen.store(false, Ordering::Relaxed);
         self.inner.lock().map.remove(key);
     }
 
     /// Drop several keys under **one** lock (publish path: one acquire per
     /// written batch instead of one per key).
     pub fn invalidate_many(&self, keys: &[Bytes]) {
+        self.is_frozen.store(false, Ordering::Relaxed);
         let mut g = self.inner.lock();
         for k in keys {
             g.map.remove(k);

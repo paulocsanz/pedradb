@@ -214,8 +214,20 @@ fn map_property_int<E: PedraEnv>(db: &ConcurrentDb<E>, name: &str) -> Option<u64
         properties::NUM_RUNNING_COMPACTIONS | properties::NUM_RUNNING_FLUSHES => Some(0),
         properties::BLOCK_CACHE_USAGE => Some(s.block_cache_bytes),
         properties::BLOCK_CACHE_PINNED_USAGE => Some(0),
-        properties::ESTIMATE_TABLE_READERS_MEM => {
-            Some(s.table_cache_hits.saturating_add(s.table_cache_misses))
+        properties::ESTIMATE_TABLE_READERS_MEM => Some(db.total_ram_bytes() as u64),
+        "pedradb.total-ram-bytes" => Some(db.total_ram_bytes() as u64),
+        "pedradb.max-ram-bytes" => db.max_ram_bytes().map(|b| b as u64),
+        "pedradb.ram-pressure-throttle-count" => Some(db.ram_pressure_throttle_count()),
+        "pedradb.ram-pressure-pct" => {
+            if let Some(max) = db.max_ram_bytes() {
+                if max > 0 {
+                    Some(((db.total_ram_bytes() as u64).saturating_mul(100)) / (max as u64))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
         }
         _ => None,
     }
@@ -299,6 +311,8 @@ pub struct Options {
     env: Option<Env>,
     /// rust-rocksdb / C++ `SstFileManager` (not in crates.io 0.22; we export it).
     sst_file_manager: Option<SstFileManager>,
+    /// rust-rocksdb `disable_auto_compactions`.
+    pub disable_auto_compactions: bool,
 }
 
 type CompactionFilterFn =
@@ -377,6 +391,7 @@ impl Default for Options {
             skip_any: false,
             env: None,
             sst_file_manager: None,
+            disable_auto_compactions: false,
         }
     }
 }
@@ -515,7 +530,9 @@ impl Options {
     pub fn set_level_zero_stop_writes_trigger(&mut self, _n: i32) {}
     pub fn set_max_bytes_for_level_base(&mut self, _n: u64) {}
     pub fn set_max_bytes_for_level_multiplier(&mut self, _n: f64) {}
-    pub fn set_disable_auto_compactions(&mut self, _v: bool) {}
+    pub fn set_disable_auto_compactions(&mut self, v: bool) {
+        self.disable_auto_compactions = v;
+    }
     pub fn set_report_bg_io_stats(&mut self, _v: bool) {}
     pub fn set_optimize_filters_for_hits(&mut self, _v: bool) {}
     pub fn set_enable_blob_files(&mut self, v: bool) {
@@ -1456,10 +1473,10 @@ pub enum IteratorMode<'a> {
 }
 
 /// Page size (RFC-0032 P0.1). Forward refills; never materialises the whole CF.
-/// 512 amortises the per-refill layer-stream setup (tombstone collect over
-/// every overlapping SST + merge heap init) over 8× more rows; long scans
-/// pay it twice per 1000 rows instead of 16 times.
-const ITER_WINDOW: usize = 512;
+/// 2048 amortises the per-refill layer-stream setup (tombstone collect over
+/// every overlapping SST + merge heap init) so standard 1k prefix scans
+/// complete in a single window without paying a second setup.
+const ITER_WINDOW: usize = 2048;
 
 /// `PEDRA_PAGE_DIAG=1`: one aggregate line every 2048 forward refills —
 /// wall ns per `page_forward` call and rows per page. With SCANDIAG (core
@@ -2088,6 +2105,7 @@ impl DB<IoUringEnv> {
             db.auto_resume_transient,
             Arc::clone(&db.fence_recovery),
             opts.background_error_listener.clone(),
+            opts.disable_auto_compactions,
         );
         if th.is_some() {
             db.inner.set_defer_auto_compact(true);
@@ -2156,6 +2174,7 @@ impl DB<StdEnv> {
             db.auto_resume_transient,
             Arc::clone(&db.fence_recovery),
             opts.background_error_listener.clone(),
+            opts.disable_auto_compactions,
         );
         if th.is_some() {
             db.inner.set_defer_auto_compact(true);
@@ -2486,7 +2505,9 @@ impl<E: PedraEnv> DB<E> {
         let got = self
             .codec
             .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
-        LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
+        if got.is_some() {
+            LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
+        }
         Ok(got.map(|b| b.to_vec()))
     }
 
@@ -2504,7 +2525,9 @@ impl<E: PedraEnv> DB<E> {
         let got = self
             .codec
             .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
-        LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
+        if got.is_some() {
+            LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
+        }
         Ok(got.is_some())
     }
 
@@ -2546,7 +2569,9 @@ impl<E: PedraEnv> DB<E> {
             return Ok(hit.map(|b| b.to_vec()));
         }
         let got = self.codec.encode_with(cf, key, |enc| self.inner.get(enc));
-        LAST_CF.with(|slot| slot.borrow_mut().store(epoch, gen, cf, key, got.clone()));
+        if got.is_some() {
+            LAST_CF.with(|slot| slot.borrow_mut().store(epoch, gen, cf, key, got.clone()));
+        }
         Ok(got.map(|b| b.to_vec()))
     }
 
@@ -2562,6 +2587,11 @@ impl<E: PedraEnv> DB<E> {
     fn last_get_is_hot(&self, key: &[u8]) -> bool {
         let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
         LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key).is_some())
+    }
+
+    #[cfg(test)]
+    fn clear_last_get_tls(&self) {
+        LAST_GET.with(|slot| *slot.borrow_mut() = LastGetTable::new());
     }
 
     fn get_at(
@@ -2613,7 +2643,9 @@ impl<E: PedraEnv> DB<E> {
         self.check_cf(&cf.name)?;
         let lo = self.codec.encode(&cf.name, start.as_ref());
         let hi = self.codec.encode(&cf.name, end.as_ref());
-        self.inner.delete_range(lo, hi).map_err(Error::from)
+        self.inner.delete_range(lo, hi).map_err(Error::from)?;
+        LAST_GET.with(|slot| *slot.borrow_mut() = LastGetTable::new());
+        Ok(())
     }
 
     /// Apply a `WriteBatch` atomically (one Pedra batch = one WAL record group).
@@ -3503,6 +3535,7 @@ impl<E: PedraEnv> DB<E> {
             let path = p.as_ref();
             let table = crate::api::open_writer_sst(path)?;
             let mut batch = WriteBatch::new();
+            let mut count = 0usize;
             for (ikey, val) in table.iter_internal() {
                 match ikey.kind {
                     pedradb_core::ValueType::Value => {
@@ -3515,8 +3548,16 @@ impl<E: PedraEnv> DB<E> {
                         batch.delete_range_cf(cf, ikey.user_key.as_ref(), val.as_ref());
                     }
                 }
+                count += 1;
+                if count >= 8192 {
+                    self.write(&batch)?;
+                    batch = WriteBatch::new();
+                    count = 0;
+                }
             }
-            self.write(&batch)?;
+            if count > 0 {
+                self.write(&batch)?;
+            }
             if opts.move_files {
                 let _ = std::fs::remove_file(path);
             }
@@ -4301,6 +4342,7 @@ fn spawn_compact_worker<E>(
     auto_resume_transient: bool,
     fence_sink: Arc<Mutex<Option<pedradb_core::FenceRecovery>>>,
     background_error_listener: Option<BackgroundErrorListener>,
+    disable_auto_compactions: bool,
 ) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>)
 where
     E: PedraEnv + Send + Sync + 'static,
@@ -4362,22 +4404,32 @@ where
                         // recently_multi skip stays (overwrite_mc4 leftover).
                         // Inflight no longer `continue`s past a due compact —
                         // sequential 10M seed kept inflight=1 and piled L0.
-                        let l0 = inner.with_read(|db| db.level_file_count(0));
+                        let l0 = inner.with_read(|db| {
+                            let cfs = db.physical_cfs();
+                            if cfs.is_empty() {
+                                db.level_file_count(0)
+                            } else {
+                                cfs.iter()
+                                    .map(|f| db.level_file_count_cf(f))
+                                    .max()
+                                    .unwrap_or(0)
+                            }
+                        });
                         let l0_due = pedradb_core::flush_kernel::l0_compact_due(
                             l0 as u64,
                             pedradb_core::L0_COMPACTION_TRIGGER as u64,
                         );
+                        let tombstone_due = inner.with_read(|db| db.has_tombstone_compaction_due());
                         let inflight = inner.with_read(|db| {
                             !pedradb_core::write_admission_kernel::batch_is_empty(
                                 db.commit_inflight() as u64,
                             )
                         });
-                        // At-trigger even while inflight (10M seed). Leftover
-                        // L0 (< trigger) drains as soon as commits are idle
-                        // — a full-range remnant is every short scan (P1.3).
-                        let drain_l0 = (l0_due || (l0 > 0 && !inflight))
+                        // At-trigger or tombstone-trigger (Lethe RFC-0265 P0.2) even while inflight.
+                        let drain_l0 = (l0_due || (tombstone_due && l0 > 0))
                             && !inner.recently_multi(fold_multi_hold);
-                        if drain_l0 {
+
+                        if drain_l0 && !disable_auto_compactions {
                             while compat_compact_once(&inner, &gate) {}
                             wait = poll;
                             if inflight {
@@ -4415,7 +4467,9 @@ where
                             while inner.materialize_parked_once() {}
                             let _ = inner.persist_unsynced_l0s_off_lock();
                             let _ = inner.rotate_wal_if_writers_idle();
-                            while compat_compact_once(&inner, &gate) {}
+                            if !disable_auto_compactions {
+                                while compat_compact_once(&inner, &gate) {}
+                            }
                             wait = poll;
                         } else {
                             wait = poll;
@@ -5208,11 +5262,11 @@ mod tests {
         let d = tmp("iter-bounds-win");
         let db = DB::open(&Options::new(), &d).unwrap();
         for i in 0..10 * ITER_WINDOW {
-            db.put(format!("k{i:04}").as_bytes(), [1]).unwrap();
+            db.put(format!("k{i:06}").as_bytes(), [1]).unwrap();
         }
         let mut ro = ReadOptions::default();
-        let lo = format!("k{:04}", 3 * ITER_WINDOW);
-        let hi = format!("k{:04}", 7 * ITER_WINDOW);
+        let lo = format!("k{:06}", 3 * ITER_WINDOW);
+        let hi = format!("k{:06}", 7 * ITER_WINDOW);
         ro.set_iterate_lower_bound(lo.clone().into_bytes());
         ro.set_iterate_upper_bound(hi.into_bytes());
         let got: Vec<String> = db
@@ -5222,7 +5276,7 @@ mod tests {
             .collect();
         assert_eq!(got.len(), 4 * ITER_WINDOW, "bounded window count");
         assert_eq!(got.first().map(String::as_str), Some(lo.as_str()));
-        let want_last = format!("k{:04}", 7 * ITER_WINDOW - 1);
+        let want_last = format!("k{:06}", 7 * ITER_WINDOW - 1);
         assert_eq!(got.last().map(String::as_str), Some(want_last.as_str()));
         // Distinct and strictly ascending across window refills.
         assert!(got.windows(2).all(|w| w[0] < w[1]));
@@ -7655,13 +7709,10 @@ mod tests {
         let db = DB::open(&opts, &dir).unwrap();
         db.put(b"k", b"v").unwrap();
         db.flush().unwrap();
-        // Put warms LAST_GET and does not bump `point_tls_epoch`; a get of
-        // `k` would TLS-hit and never enter ConcurrentDb::get. A decoy put
-        // displaces LAST_GET so this get is a real LSM snapshot lock.
-        db.put(b"decoy", b"x").unwrap();
+        db.clear_last_get_tls();
         assert!(
             !db.last_get_is_hot(b"k"),
-            "decoy put must displace LAST_GET for k"
+            "clear_last_get_tls must clear LAST_GET for k"
         );
         pedradb_core::concurrent::reset_get_lsm_lock_count();
         let got = db.get(b"k").unwrap();
@@ -7777,10 +7828,10 @@ mod tests {
             keys.push(k);
         }
         db.flush().unwrap();
-        db.put(b"decoy", b"x").unwrap();
+        db.clear_last_get_tls();
         assert!(
             !db.last_get_is_hot(&keys[0]),
-            "decoy put must displace LAST_GET"
+            "clear_last_get_tls must clear LAST_GET"
         );
         let got = db.get(&keys[0]).unwrap();
         assert_eq!(got.as_deref(), Some(payload.as_slice()));
@@ -7819,7 +7870,9 @@ mod tests {
     #[test]
     fn compact_range_cf_lock_leaves_default() {
         let dir = tmp("cf-compact-lock");
-        let db = DB::open_cf(&Options::new(), &dir, &["lock"]).unwrap();
+        let mut opts = Options::new();
+        opts.set_disable_auto_compactions(true);
+        let db = DB::open_cf(&opts, &dir, &["lock"]).unwrap();
         let lock = db.cf_handle("lock").unwrap();
         db.put(b"d0", b"0").unwrap();
         db.put_cf(&lock, b"l0", b"0").unwrap();
@@ -7956,7 +8009,7 @@ mod tests {
         assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
         assert!(
             pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: any CFREG crc would match"
+            "AS-IS dente: any CFREG crc would match"
         );
         let dir = tmp("cfreg-0090");
         let opts = g1_opts();
@@ -8019,6 +8072,14 @@ mod tests {
             .property_int_value("rocksdb.num-files-at-level0")
             .unwrap();
         assert!(l0.is_some());
+        assert!(db
+            .property_int_value("pedradb.total-ram-bytes")
+            .unwrap()
+            .is_some());
+        assert!(db
+            .property_int_value("pedradb.ram-pressure-throttle-count")
+            .unwrap()
+            .is_some());
         assert!(db
             .property_int_value("rocksdb.no-such-property")
             .unwrap()

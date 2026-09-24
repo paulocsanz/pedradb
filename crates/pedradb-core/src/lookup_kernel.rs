@@ -173,7 +173,7 @@ pub fn point_tombstone_plan(range_hidden: bool) -> PointTombstonePlan {
 
 #[cfg(not(verus_keep_ghost))]
 /// AS-IS: never shadow — a range-deleted point scans as live
-/// (resurrection; RFC-0150 tooth).
+/// (resurrection; RFC-0150 dente).
 #[must_use]
 pub fn point_tombstone_plan_as_is(_range_hidden: bool) -> PointTombstonePlan {
     PointTombstonePlan::ValueVisible
@@ -352,7 +352,7 @@ mod tests {
         assert!(snap_is_empty(0));
         assert!(
             !snap_is_empty_as_is(0),
-            "AS-IS tooth: empty snap treated live"
+            "AS-IS dente: empty snap treated live"
         );
         assert!(!snap_is_empty(1));
         let body =
@@ -399,7 +399,7 @@ mod tests {
         assert!(snap_below_watermark(3, 5));
         assert!(
             !snap_below_watermark_as_is(3, 5),
-            "AS-IS tooth: never below watermark"
+            "AS-IS dente: never below watermark"
         );
         assert!(!snap_below_watermark(5, 5));
         assert!(!snap_below_watermark(7, 5));
@@ -421,7 +421,7 @@ mod tests {
         assert!(mem_point_decides(true));
         assert!(
             !mem_point_decides_as_is(true),
-            "AS-IS tooth: mem never wins"
+            "AS-IS dente: mem never wins"
         );
         assert!(!mem_point_decides(false));
     }
@@ -432,7 +432,7 @@ mod tests {
         assert!(!vlog_ptr_orphaned(false));
         assert!(
             !vlog_ptr_orphaned_as_is(true),
-            "AS-IS tooth: closed vlog still serves the pointer"
+            "AS-IS dente: closed vlog still serves the pointer"
         );
         let body = named_fn_src(include_str!("db_kernel.rs"), "resolve_stored_value")
             .expect("resolve_stored_value");
@@ -453,7 +453,7 @@ mod tests {
         assert!(!prefer_newer_seq(true, 2, 4));
         assert!(
             prefer_newer_seq_as_is(true, 2, 4),
-            "AS-IS tooth: first candidate always wins"
+            "AS-IS dente: first candidate always wins"
         );
         let src = include_str!("sst/table_kernel.rs");
         let body = src
@@ -476,7 +476,7 @@ mod tests {
         assert_eq!(
             point_cache_validity_as_is(7, 6),
             PointCachePlan::CacheCurrent,
-            "AS-IS tooth: stale pre-publish answer cached indefinitely"
+            "AS-IS dente: stale pre-publish answer cached indefinitely"
         );
         // Live: all three gates match the kernel plan; the raw seq
         // equality left the trampoline.
@@ -522,7 +522,7 @@ mod tests {
         assert_eq!(
             point_tombstone_plan_as_is(true),
             PointTombstonePlan::ValueVisible,
-            "AS-IS tooth: range-deleted point scans as live"
+            "AS-IS dente: range-deleted point scans as live"
         );
         // Live: the four point gates match the kernel plan; the inline
         // visible_at(Value, ..) gate left the trampoline.
@@ -681,3 +681,33 @@ mod tests {
             || cond.contains("vlog_ptr_orphaned(")
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    #[kani::proof]
+    fn kani_point_cache_validity_strict_invalidation() {
+        let published: u64 = kani::any();
+        let answer: u64 = kani::any();
+        let plan = point_cache_validity(published, answer);
+        if published == answer {
+            assert_eq!(plan, PointCachePlan::CacheCurrent);
+        } else {
+            assert_eq!(plan, PointCachePlan::PublishAdvanced);
+        }
+    }
+
+    #[kani::proof]
+    fn kani_point_tombstone_shadowing_iff() {
+        let hidden: bool = kani::any();
+        let plan = point_tombstone_plan(hidden);
+        if hidden {
+            assert_eq!(plan, PointTombstonePlan::ShadowedDeleted);
+        } else {
+            assert_eq!(plan, PointTombstonePlan::ValueVisible);
+        }
+    }
+}
+
+

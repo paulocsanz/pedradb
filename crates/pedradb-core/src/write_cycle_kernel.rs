@@ -3,7 +3,7 @@
 //! Twin of [`crate::scale_kernel`] for the **write** path: rank the
 //! structural cut from measured WRITEPHASE slices, predict lock-wait
 //! under serialized leaders, and forecast QPS if `write()` leaves the
-//! wal mutex. The AS-IS tooth is the fire-120 generator: always
+//! wal mutex. The AS-IS dente is the fire-120 generator: always
 //! `LockHold` (500 ns static), independent of the slices.
 
 #![forbid(unsafe_code)]
@@ -179,7 +179,7 @@ pub fn name_cut(p: WritePhaseNs) -> WriteCut {
     best
 }
 
-/// AS-IS tooth: always `LockHold` (fire 120), even when guard is 2.23 µs.
+/// AS-IS dente: always `LockHold` (fire 120), even when guard is 2.23 µs.
 #[must_use]
 pub fn name_cut_as_is(_p: WritePhaseNs) -> WriteCut {
     WriteCut::LockHold

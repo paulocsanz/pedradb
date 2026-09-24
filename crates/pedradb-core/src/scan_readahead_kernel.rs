@@ -133,6 +133,110 @@ pub const fn scan_readahead_pair_budget() -> usize {
     MAX_WINDOW_PAIRS
 }
 
+/// Double-buffered sliding window readahead pipeline (RFC-0266 P0.2).
+///
+/// Dispatches async prefetch across two alternate 256 KiB staging buffers,
+/// overlapping disk I/O with iterator consumption and eliminating bounded-cache scan stalls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsyncReadaheadPipeline {
+    /// Maximum capacity in bytes for each prefetch window (default: 256 KiB).
+    pub capacity_bytes: u64,
+    /// Currently prefetched active window.
+    pub active_window: ScanReadaheadWindow,
+    /// Next prefetched pending window in the pipeline (double buffer).
+    pub pending_window: ScanReadaheadWindow,
+    /// Bytes consumed from active window by the iterator.
+    pub consumed_bytes: u64,
+    /// Whether double-buffering is active.
+    pub double_buffered: bool,
+}
+
+impl AsyncReadaheadPipeline {
+    /// Construct a new async readahead pipeline with specified capacity.
+    #[must_use]
+    pub fn new(capacity_bytes: u64) -> Self {
+        Self {
+            capacity_bytes,
+            active_window: ScanReadaheadWindow::NONE,
+            pending_window: ScanReadaheadWindow::NONE,
+            consumed_bytes: 0,
+            double_buffered: true,
+        }
+    }
+
+    /// Construct a standard 256 KiB double-buffered pipeline.
+    #[must_use]
+    pub fn standard() -> Self {
+        Self::new(SCAN_READAHEAD_CAP_BYTES)
+    }
+
+    /// Check if offset is already prefetched in the active or pending window.
+    #[must_use]
+    pub fn is_prefetched(&self, offset: u64) -> bool {
+        let in_active = self.active_window.len > 0
+            && offset >= self.active_window.offset
+            && offset < self.active_window.offset.saturating_add(self.active_window.len);
+        let in_pending = self.pending_window.len > 0
+            && offset >= self.pending_window.offset
+            && offset < self.pending_window.offset.saturating_add(self.pending_window.len);
+        in_active || in_pending
+    }
+
+    /// Advance pipeline given block list and iterator cursor.
+    /// Returns any new `ScanReadaheadWindow` that should be scheduled for async I/O.
+    pub fn advance(
+        &mut self,
+        blocks: &[(u64, u64)],
+        cursor: usize,
+        bounded_cache: bool,
+    ) -> Option<ScanReadaheadWindow> {
+        if !bounded_cache {
+            return None;
+        }
+
+        // If active window is exhausted or uninitialized, promote pending or build new window
+        if self.active_window.len == 0 || self.consumed_bytes >= self.active_window.len {
+            if self.pending_window.len > 0 {
+                self.active_window = self.pending_window;
+                self.pending_window = ScanReadaheadWindow::NONE;
+                self.consumed_bytes = 0;
+            } else {
+                let w = scan_readahead_window(blocks, cursor, bounded_cache);
+                if w.len > 0 {
+                    self.active_window = w;
+                    self.consumed_bytes = 0;
+                    return Some(w);
+                }
+            }
+        }
+
+        // If double buffering is enabled and active buffer is at least 50% consumed,
+        // prefetch the next pending window ahead of the stream.
+        if self.double_buffered && self.pending_window.len == 0 && self.consumed_bytes >= (self.active_window.len / 2) {
+            let next_cursor = cursor.saturating_add(self.active_window.blocks as usize);
+            let next_w = scan_readahead_window(blocks, next_cursor, bounded_cache);
+            if next_w.len > 0 && next_w.offset != self.active_window.offset {
+                self.pending_window = next_w;
+                return Some(next_w);
+            }
+        }
+
+        None
+    }
+
+    /// Record consumption of bytes by the forward scan cursor.
+    pub fn record_consumed(&mut self, bytes: u64) {
+        self.consumed_bytes = self.consumed_bytes.saturating_add(bytes);
+    }
+
+    /// Reset pipeline state.
+    pub fn reset(&mut self) {
+        self.active_window = ScanReadaheadWindow::NONE;
+        self.pending_window = ScanReadaheadWindow::NONE;
+        self.consumed_bytes = 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,4 +355,31 @@ mod tests {
         assert!(scan_readahead_bounded(cap + 1, cap), "above: bounded");
         assert!(!scan_readahead_bounded(0, cap), "empty store: hot");
     }
+
+    #[test]
+    fn async_readahead_pipeline_double_buffering() {
+        let blocks = adjacent_run(128, 4 * KIB);
+        let mut pipe = AsyncReadaheadPipeline::standard();
+        assert_eq!(pipe.capacity_bytes, SCAN_READAHEAD_CAP_BYTES);
+
+        // First advance schedules the initial 256 KiB window
+        let first = pipe.advance(&blocks, 0, true);
+        assert!(first.is_some());
+        let w1 = first.unwrap();
+        assert_eq!(w1.len, SCAN_READAHEAD_CAP_BYTES);
+        assert_eq!(w1.blocks, 64);
+        assert!(pipe.is_prefetched(4 * KIB));
+
+        // Consume half of the active window
+        pipe.record_consumed(SCAN_READAHEAD_CAP_BYTES / 2);
+
+        // Next advance triggers prefetch of the next chunk ahead
+        let second = pipe.advance(&blocks, 0, true);
+        assert!(second.is_some());
+        let w2 = second.unwrap();
+        assert!(w2.len > 0);
+        assert!(w2.offset > w1.offset);
+        assert!(pipe.is_prefetched(w2.offset));
+    }
 }
+

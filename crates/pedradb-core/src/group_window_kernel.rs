@@ -397,14 +397,14 @@ mod tests {
         assert!(herd_full(4));
         assert!(!herd_full(3));
         assert_eq!(herd_collect_us_as_is(8, 1), 0, "AS-IS seals immediately");
-        assert!(!herd_full_as_is(4), "AS-IS tooth: frame never full");
+        assert!(!herd_full_as_is(4), "AS-IS dente: frame never full");
         assert_eq!(post_group_grace_us(4, 1), HERD_COLLECT_US);
         assert_eq!(post_group_grace_us(1, 1), 0, "after a lone group, no grace");
         assert_eq!(post_group_grace_us(4, 4), 0, "already full");
         assert_eq!(
             post_group_grace_us_as_is(4, 1),
             0,
-            "AS-IS tooth: never grace-spin"
+            "AS-IS dente: never grace-spin"
         );
         assert!(join_complete(4, 1), "herd full");
         assert!(join_complete(3, 3), "everyone in submit is in the frame");
@@ -662,7 +662,7 @@ mod tests {
         assert_eq!(
             flight_capped_window_us_as_is(1_000, 2, true),
             1_000,
-            "AS-IS tooth: cap_to_flight still pays the flat 1000µs window"
+            "AS-IS dente: cap_to_flight still pays the flat 1000µs window"
         );
         assert_eq!(
             flight_capped_window_us(1_000, 2, true),

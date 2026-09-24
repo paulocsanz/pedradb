@@ -112,7 +112,7 @@ pub struct Wal<F: EnvFile = <StdEnv as Env>::File> {
     /// RFC-0233: positional off-lock write when the Env supports it.
     /// Test opt-out: `PEDRA_WAL_PWRITE=0`.
     pwrite: bool,
-    inflight: AtomicUsize,
+    inflight: Arc<AtomicUsize>,
 }
 
 /// Off-lock positional write (RFC-0193). The meta lock is not held.
@@ -120,6 +120,8 @@ pub(crate) struct PwriteJob<F: EnvFile> {
     buf: Vec<u8>,
     ticket: u64,
     file: Arc<F>,
+    inflight: Arc<AtomicUsize>,
+    done: bool,
 }
 
 impl<F: EnvFile> PwriteJob<F> {
@@ -131,9 +133,26 @@ impl<F: EnvFile> PwriteJob<F> {
     /// # Errors
     /// Underlying positional / mmap write.
     pub(crate) fn run(self) -> Result<(u64, u64)> {
-        let len = self.buf.len() as u64;
-        self.file.write_wal_at_shared(&self.buf, self.ticket)?;
-        Ok((self.ticket, len))
+        let mut this = self;
+        let len = this.buf.len() as u64;
+        let ticket = this.ticket;
+        let r = this.file.write_wal_at_shared(&this.buf, ticket);
+        this.drop_inflight();
+        r?;
+        Ok((ticket, len))
+    }
+
+    fn drop_inflight(&mut self) {
+        if !self.done {
+            self.done = true;
+            self.inflight.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+}
+
+impl<F: EnvFile> Drop for PwriteJob<F> {
+    fn drop(&mut self) {
+        self.drop_inflight();
     }
 }
 
@@ -189,7 +208,7 @@ impl<F: EnvFile> Wal<F> {
             prealloc_to: 0,
             full_fsync: false,
             pwrite: wal_pwrite_enabled(),
-            inflight: AtomicUsize::new(0),
+            inflight: Arc::new(AtomicUsize::new(0)),
         };
         // Fjall `set_len(64 MiB)` at journal create, not on the first put.
         // `upcoming=1` so the first write's `pos+len+CHUNK` is already
@@ -217,7 +236,7 @@ impl<F: EnvFile> Wal<F> {
             prealloc_to: 0,
             full_fsync: false,
             pwrite: wal_pwrite_enabled(),
-            inflight: AtomicUsize::new(0),
+            inflight: Arc::new(AtomicUsize::new(0)),
         };
         wal.reserve_space(1);
         Ok(wal)
@@ -357,6 +376,8 @@ impl<F: EnvFile> Wal<F> {
             buf: frame,
             ticket,
             file,
+            inflight: self.inflight.clone(),
+            done: false,
         }))
     }
 
@@ -395,18 +416,18 @@ impl<F: EnvFile> Wal<F> {
             buf: frame,
             ticket,
             file,
+            inflight: self.inflight.clone(),
+            done: false,
         }))
     }
 
     /// Record a completed off-lock pwrite: move the written frontier to
-    /// `ticket+len` (not at reserve) and drop the inflight count.
-    /// `len == 0` is the I/O-failure path — inflight still drops, position
-    /// stays at the last committed byte.
+    /// `ticket+len` (not at reserve).
+    /// `len == 0` is the I/O-failure path — position stays at the last committed byte.
     pub(crate) fn finish_pwrite(&mut self, ticket: u64, len: u64) {
         if !crate::write_admission_kernel::batch_is_empty(len) {
             self.writer.commit_pwrite(ticket, len);
         }
-        self.inflight.fetch_sub(1, Ordering::AcqRel);
     }
 
     fn wait_inflight(&self) {
@@ -813,7 +834,7 @@ mod probe_tests {
     /// file path produces a byte-identical segment in both modes — with
     /// `PEDRA_WAL_BUFFER=1` and a 300-byte cap several size-flushes fire
     /// mid-sequence plus a partial drain at close. Staging changes WHEN
-    /// bytes reach the file, never the bytes (`cmp`-identical after close).
+    /// bytes reach the file, never the bytes (`cmp`-identical pós-close).
     #[test]
     fn rfc0209_buffered_wal_byte_identical_after_close() {
         let _env_axis = RFC0209_ENV_AXIS.lock().unwrap_or_else(|e| e.into_inner());

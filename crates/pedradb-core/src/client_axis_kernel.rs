@@ -25,7 +25,7 @@ pub const PIPELINE_DRAIN_MAX_MEMBERS: usize = 256;
 
 /// AS-IS twin: the cap the async pipeline shipped before RFC-0201
 /// (`ASYNC_GROUP_MAX_MEMBERS`, born from the uncapped-herd measurement of
-/// 0044 in the dead WriteThread-merge shape). Kept as the named tooth the
+/// 0044 in the dead WriteThread-merge shape). Kept as the named dente the
 /// tests pin — the WriteThread multi-op merge still uses it.
 pub const PIPELINE_DRAIN_CAP_AS_IS: usize = 8;
 
@@ -158,7 +158,7 @@ mod tests {
         );
     }
 
-    /// RFC-0201 P0.1 tooth: the AS-IS twin pins the 0044-era cap-8 convoy
+    /// RFC-0201 P0.1 dente: the AS-IS twin pins the 0044-era cap-8 convoy
     /// math the cut removes (mc50 = 7 serial convoys vs 1).
     #[test]
     fn rfc0201_drain_convoy_count_as_is_vs_full() {
@@ -200,8 +200,8 @@ mod tests {
         assert_eq!(oversubscription_spin_policy(10, 10), SpinDecision::Spin);
     }
 
-    /// RFC-0201 P0.2 tooth: the 0189 spin never parks by policy — the
-    /// blindness the cut names.
+    /// RFC-0201 P0.2 dente: the 0189 spin never parks by policy — the
+    /// cegueira the cut names.
     #[test]
     fn rfc0201_spin_policy_as_is_always_spins() {
         assert_eq!(
@@ -242,7 +242,7 @@ mod tests {
         );
     }
 
-    /// RFC-0201 P0.3 tooth: the 0044-era default is env-only — the auto
+    /// RFC-0201 P0.3 dente: the 0044-era default is env-only — the auto
     /// axis does not exist.
     #[test]
     fn rfc0201_async_merge_policy_as_is_env_only() {

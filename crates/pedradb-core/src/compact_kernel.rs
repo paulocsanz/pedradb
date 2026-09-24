@@ -271,6 +271,22 @@ pub fn gc_oldest_from_pin_as_is(_oldest_pin: Option<u64>, last_seq: u64, visible
     last_seq.min(visible_seq)
 }
 
+/// Default tombstone percentage threshold to trigger Lethe compaction (RFC-0265 P0.2).
+pub const DEFAULT_LETHE_TOMBSTONE_THRESHOLD_PCT: u64 = 20;
+
+/// Pure Lethe tombstone compaction trigger (RFC-0265 P0.2).
+/// Returns true when the ratio of tombstones to total keys reaches or exceeds the threshold percentage.
+#[must_use]
+pub fn tombstone_compaction_due(tombstone_count: u64, total_keys: u64, threshold_pct: u64) -> bool {
+    total_keys > 0 && tombstone_count.saturating_mul(100) >= total_keys.saturating_mul(threshold_pct)
+}
+
+/// AS-IS: ignore tombstones (tombstones accumulate in L0/L1 and degrade scans).
+#[must_use]
+pub fn tombstone_compaction_due_as_is(_tombstone_count: u64, _total_keys: u64, _threshold_pct: u64) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,7 +452,7 @@ mod tests {
         assert_eq!(
             point_version_fate(1, Some(8), as_is),
             VersionFate::Drop,
-            "AS-IS tooth: ignore pin ⇒ drop the pinned version"
+            "AS-IS dente: ignore pin ⇒ drop the pinned version"
         );
         assert_eq!(gc_oldest_from_pin(None, last, vis), last.min(vis));
     }
@@ -450,7 +466,7 @@ mod tests {
         assert_eq!(
             point_version_fate(1, Some(8), gc_oldest_from_pin_as_is(Some(pin), 10, 9)),
             VersionFate::Drop,
-            "AS-IS tooth: compact over pin"
+            "AS-IS dente: compact over pin"
         );
     }
 
@@ -463,7 +479,7 @@ mod tests {
         assert_eq!(
             compact_pick_as_is(Some(0), false, false, 3),
             CompactPlan::NoOp,
-            "AS-IS tooth: skip merge"
+            "AS-IS dente: skip merge"
         );
     }
 
@@ -474,7 +490,7 @@ mod tests {
         assert_eq!(
             point_version_fate_as_is_drop_under_snapshot(1, Some(8), 5),
             VersionFate::Drop,
-            "AS-IS tooth: drop a version a snapshot still reads"
+            "AS-IS dente: drop a version a snapshot still reads"
         );
     }
 
@@ -502,11 +518,23 @@ mod tests {
         assert!(compact_should_split_at(1_024, 1_024));
         assert!(
             !compact_should_split_as_is(u64::MAX),
-            "AS-IS tooth: fixed-target mutant never splits — one giant file past the target"
+            "AS-IS dente: fixed-target mutant never splits — one giant file past the target"
         );
         assert!(
             !compact_should_split_at_as_is(u64::MAX, 1),
-            "AS-IS tooth: explicit-target mutant never splits either"
+            "AS-IS dente: explicit-target mutant never splits either"
         );
     }
+
+    #[test]
+    fn theorem_tombstone_compaction_due() {
+        let pct = DEFAULT_LETHE_TOMBSTONE_THRESHOLD_PCT; // 20%
+        assert!(!tombstone_compaction_due(0, 100, pct));
+        assert!(!tombstone_compaction_due(19, 100, pct));
+        assert!(tombstone_compaction_due(20, 100, pct));
+        assert!(tombstone_compaction_due(25, 100, pct));
+        assert!(!tombstone_compaction_due(0, 0, pct));
+        assert!(!tombstone_compaction_due_as_is(50, 100, pct));
+    }
 }
+

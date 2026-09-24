@@ -79,3 +79,51 @@ mod tests {
         assert!(!pwrite_off_lock_as_is(true, true));
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    #[kani::proof]
+    fn kani_reserve_frame_monotonic_and_partition() {
+        let reserved_to: u64 = kani::any();
+        let len: u64 = kani::any();
+        let (ticket, new_reserved) = reserve_frame(reserved_to, len);
+        assert_eq!(ticket, reserved_to);
+        if len == 0 {
+            assert_eq!(new_reserved, reserved_to);
+        } else {
+            assert!(new_reserved >= reserved_to);
+            if reserved_to <= u64::MAX - len {
+                assert_eq!(new_reserved, reserved_to + len);
+            }
+        }
+    }
+
+    #[kani::proof]
+    fn kani_reserve_frame_two_steps_continuous() {
+        let r0: u64 = kani::any();
+        let l1: u64 = kani::any();
+        let l2: u64 = kani::any();
+        let (t1, r1) = reserve_frame(r0, l1);
+        let (t2, r2) = reserve_frame(r1, l2);
+        assert_eq!(t1, r0);
+        assert_eq!(t2, r1);
+        if l1 > 0 && r0 <= u64::MAX - l1 {
+            assert_eq!(t2, t1 + l1);
+        }
+        if l2 > 0 && r1 <= u64::MAX - l2 {
+            assert_eq!(r2, t2 + l2);
+        }
+    }
+
+    #[kani::proof]
+    fn kani_pwrite_off_lock_matches_truth_table() {
+        let want: bool = kani::any();
+        let can: bool = kani::any();
+        let decision = pwrite_off_lock(want, can);
+        assert_eq!(decision, want && can);
+        let as_is = pwrite_off_lock_as_is(want, can);
+        assert!(!as_is);
+    }
+}

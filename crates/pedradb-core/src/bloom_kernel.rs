@@ -835,7 +835,7 @@ mod tests {
         assert!(!bloom_header_ok(64, u32::MAX, 8, 8));
         assert!(
             bloom_header_ok_as_is(64, u32::MAX, 8, 8),
-            "AS-IS tooth: no k bound, accepts u32::MAX probes"
+            "AS-IS dente: no k bound, accepts u32::MAX probes"
         );
         let mut buf = Vec::new();
         buf.extend_from_slice(&64u32.to_le_bytes());
@@ -859,7 +859,7 @@ mod tests {
         as_is.insert_as_is(key);
         assert!(
             !as_is.may_contain(key),
-            "AS-IS tooth: skipped insert is a false negative"
+            "AS-IS dente: skipped insert is a false negative"
         );
         let n = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -867,7 +867,7 @@ mod tests {
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("pedra-bloom-ins-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut db = crate::db::Db::open_with(
+        let mut db = crate::Db::open_with(
             &dir,
             crate::OpenOptions {
                 wal_full_fsync: true,
@@ -910,7 +910,7 @@ mod tests {
         }
         assert!(
             teeth,
-            "AS-IS tooth: extra probe must false-negative at least one inserted key"
+            "AS-IS dente: extra probe must false-negative at least one inserted key"
         );
         let key = b"rfc0152-bloom-mc";
         let n = std::time::SystemTime::now()
@@ -919,7 +919,7 @@ mod tests {
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("pedra-bloom-mc-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut db = crate::db::Db::open_with(
+        let mut db = crate::Db::open_with(
             &dir,
             crate::OpenOptions {
                 wal_full_fsync: true,
