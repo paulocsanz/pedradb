@@ -37,7 +37,7 @@ pub use snapshot_fjall::{FjallConfig, FjallReader, FjallSnapshot};
 #[cfg(feature = "pedradb")]
 pub use snapshot_pedradb::{PedraDbConfig, PedraDbReader, PedraDbSnapshot};
 #[cfg(feature = "pedradb")]
-mod diagnose;
+pub mod diagnose;
 #[cfg(feature = "pedradb")]
 pub use diagnose::{classify_measured, diagnose_line, eprint_get, eprint_get_from_criterion};
 pub use snapshot::SnapshotStore;
