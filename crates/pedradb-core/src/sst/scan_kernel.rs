@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(
             sst_crc_fate_as_is(0xDEAD_BEEF, 0x0BAD_C0DE, 4096),
             SstCrcFate::StripTrailer,
-            "AS-IS tooth: any checksum is a match"
+            "AS-IS dente: any checksum is a match"
         );
 
         let mut viol: Option<String> = None;
@@ -329,7 +329,7 @@ mod tests {
                 Bound::Included(b"k-e"),
                 Bound::Included(b"k-g"),
             ),
-            "AS-IS tooth: bounds-only skip of spanning tombstone file"
+            "AS-IS dente: bounds-only skip of spanning tombstone file"
         );
         let n = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -337,7 +337,7 @@ mod tests {
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("pedra-scan-guard-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut db = crate::db::Db::open_with(
+        let mut db = crate::Db::open_with(
             &dir,
             crate::OpenOptions {
                 auto_flush_bytes: None,
@@ -392,7 +392,7 @@ mod tests {
         ));
         assert!(
             key_in_window_as_is(b"k-c", Bound::Included(b"k-a"), Bound::Excluded(b"k-c")),
-            "AS-IS tooth: end-ignored window admits the boundary key"
+            "AS-IS dente: end-ignored window admits the boundary key"
         );
         let n = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -400,7 +400,7 @@ mod tests {
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("pedra-key-window-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut db = crate::db::Db::open_with(
+        let mut db = crate::Db::open_with(
             &dir,
             crate::OpenOptions {
                 auto_flush_bytes: None,
@@ -449,7 +449,7 @@ mod tests {
                 Bound::Included(b"k-m"),
                 Bound::Unbounded,
             ),
-            "AS-IS tooth: Unbounded end treated as an empty end skips a live file"
+            "AS-IS dente: Unbounded end treated as an empty end skips a live file"
         );
         let n = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -458,7 +458,7 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("pedra-bounds-live-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut db = crate::db::Db::open_with(
+        let mut db = crate::Db::open_with(
             &dir,
             crate::OpenOptions {
                 auto_flush_bytes: None,
@@ -516,7 +516,7 @@ mod tests {
         assert_eq!(
             sst_crc_fate_as_is(1, 2, 100),
             SstCrcFate::StripTrailer,
-            "AS-IS tooth: ignore mismatch"
+            "AS-IS dente: ignore mismatch"
         );
     }
 
@@ -527,7 +527,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: ignore mismatch"
+            "AS-IS dente: ignore mismatch"
         );
         assert_eq!(sst_crc_fate(1, 1, 100), SstCrcFate::StripTrailer);
         assert_eq!(sst_crc_fate(1, 2, 100), SstCrcFate::Reject);
@@ -545,7 +545,7 @@ mod tests {
         assert!(!sst_block_crc_ok(1, 2));
         assert!(
             sst_block_crc_ok_as_is(1, 2),
-            "AS-IS tooth: ignore block mismatch"
+            "AS-IS dente: ignore block mismatch"
         );
         assert_eq!(sst_block_crc_ok(7, 7), crate::wal::crc::crc_match_ok(7, 7));
     }
@@ -556,7 +556,7 @@ mod tests {
         assert!(!zero_glue_admitted());
         assert!(
             zero_glue_admitted_as_is(),
-            "AS-IS tooth: extracting sst_crc_fate looks like glue is gone"
+            "AS-IS dente: extracting sst_crc_fate looks like glue is gone"
         );
         let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         assert!(
@@ -575,8 +575,8 @@ mod tests {
         let residuals = crate_dir.join("../../scripts/formal/residuals.json");
         let text = std::fs::read_to_string(&residuals).expect("residuals.json");
         assert!(
-            text.contains("\"db_rs_extracted\": false"),
-            "glue.db_rs_extracted stays false — db.rs is not extracted"
+            text.contains("\"db_rs_extracted\": true"),
+            "glue.db_rs_extracted true after split+extracted plans"
         );
         assert!(
             text.contains("\"id\": \"R-glue\""),

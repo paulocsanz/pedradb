@@ -42,7 +42,7 @@ fn record_event<E: Env>(env: &E, dir: &Path, kind: &str, offset: u64) -> std::io
 }
 
 /// Number of events in the journal (0 when absent/unreadable-but-existing).
-fn count_events<E: Env>(env: &E, dir: &Path) -> std::io::Result<u32> {
+pub fn count_events<E: Env>(env: &E, dir: &Path) -> std::io::Result<u32> {
     let path = dir.join(CORRUPTLOG_NAME);
     if !env.exists(&path) {
         return Ok(0);

@@ -7,7 +7,7 @@
 //!
 //!   ./scripts/aeneas_manifest.sh --required
 //!
-//! Production `recover_ssts` (called by [`crate::db::Db::open_with_env`])
+//! Production `recover_ssts` (called by [`crate::Db::open_with_env`])
 //! routes every decision through this kernel: given what `manifest::load`
 //! observed (absent inventory / committed inventory / damaged
 //! CURRENT-or-MANIFEST) and whether every listed SST file is on disk, the
@@ -346,7 +346,7 @@ mod tests {
         assert_eq!(
             sst_recover_action_as_is_scan_on_damage(ManifestObs::Inventory, ListedSst::Missing(1)),
             SstRecoverAction::ScanAndInstall,
-            "AS-IS tooth: missing SST silently scanned"
+            "AS-IS dente: missing SST silently scanned"
         );
     }
 
@@ -386,7 +386,7 @@ mod tests {
         assert_eq!(
             bulk_manifest_persist_fate_as_is(true),
             BulkManifestFate::AmortizeDebt,
-            "AS-IS tooth: sync mode amortizes forever (publish window open)"
+            "AS-IS dente: sync mode amortizes forever (publish window open)"
         );
     }
 

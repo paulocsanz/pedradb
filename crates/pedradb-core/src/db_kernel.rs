@@ -122,7 +122,7 @@ fn wal_archive_slot_of(name: &str) -> Option<u64> {
 /// F188: marker byte prepended to inline values that would otherwise sniff
 /// as a vlog pointer (`VLG1…`/`VLG3…`) or that already start with the marker,
 /// so [`Db::resolve_stored_value`] strips exactly one byte unconditionally.
-const INLINE_ESCAPE: u8 = 0x01;
+pub(crate) const INLINE_ESCAPE: u8 = 0x01;
 
 /// Block-cache id tag for value-resolved slots (see `Db::scan_at_raw`).
 /// Resolving a stored value is not idempotent (`INLINE_ESCAPE` is stripped),
@@ -458,6 +458,18 @@ pub struct DbStats {
     pub changelog_interval: u64,
     /// Successful CHANGELOG cache stores since open (RFC-0031 observability).
     pub changelog_store_count: u64,
+    /// Oldest sequence number among active snapshot pins (`None` if no pins).
+    pub oldest_pin_seq: Option<SequenceNumber>,
+    /// Lag between last_sequence and the oldest snapshot pin (`0` if no pins).
+    pub pin_seq_lag: u64,
+    /// Total disk footprint in bytes (SST + WAL + Vlog).
+    pub total_disk_bytes: u64,
+    /// True if write stall threshold is actively exceeded right now.
+    pub is_write_stalled: bool,
+    /// True if soft write pressure threshold is actively exceeded right now.
+    pub is_write_pressured: bool,
+    /// Number of fail-stop corruption incidents recorded in journal.
+    pub corruptions_detected: u64,
 }
 
 /// RFC-0035 P0: snapshot of latest/scan counters + LSM shape (no thread).
@@ -588,6 +600,55 @@ impl DbStats {
             self.write_stall_mem_bytes,
             self.write_pressure_l0
         )
+    }
+
+    /// Table cache hit ratio (0.0 to 1.0). `1.0` if no lookups yet.
+    #[must_use]
+    pub fn table_cache_hit_ratio(&self) -> f64 {
+        let total = self.table_cache_hits.saturating_add(self.table_cache_misses);
+        if total == 0 {
+            1.0
+        } else {
+            #[allow(clippy::cast_precision_loss)]
+            {
+                (self.table_cache_hits as f64 / total as f64).clamp(0.0, 1.0)
+            }
+        }
+    }
+
+    /// Block cache hit ratio (0.0 to 1.0). `1.0` if no lookups yet.
+    #[must_use]
+    pub fn block_cache_hit_ratio(&self) -> f64 {
+        let total = self.block_cache_hits.saturating_add(self.block_cache_misses);
+        if total == 0 {
+            1.0
+        } else {
+            #[allow(clippy::cast_precision_loss)]
+            {
+                (self.block_cache_hits as f64 / total as f64).clamp(0.0, 1.0)
+            }
+        }
+    }
+
+    /// Estimated write amplification: (bytes_written_wal + bytes_written_sst) / max(1, bytes_ingested).
+    #[must_use]
+    pub fn write_amplification(&self) -> f64 {
+        let written = self.bytes_written_wal.saturating_add(self.bytes_written_sst);
+        let ingested = self.bytes_ingested.max(1);
+        #[allow(clippy::cast_precision_loss)]
+        {
+            written as f64 / ingested as f64
+        }
+    }
+
+    /// Estimated space amplification: total_disk_bytes / max(1, bytes_ingested).
+    #[must_use]
+    pub fn space_amplification(&self) -> f64 {
+        let ingested = self.bytes_ingested.max(1);
+        #[allow(clippy::cast_precision_loss)]
+        {
+            self.total_disk_bytes as f64 / ingested as f64
+        }
     }
 }
 
@@ -1286,6 +1347,7 @@ struct SstRun {
     level: u32,
     tables_newest_first: Vec<usize>,
     disjoint_by_lo: Option<Vec<usize>>,
+    has_range_tombstones: bool,
 }
 
 impl SstRun {
@@ -1492,10 +1554,6 @@ impl LiveMem {
         self.read().len()
     }
 
-    fn is_empty(&self) -> bool {
-        crate::write_admission_kernel::batch_is_empty(self.len() as u64)
-    }
-
     fn approx_memory_usage(&self) -> usize {
         self.read().approx_memory_usage()
     }
@@ -1693,7 +1751,7 @@ pub struct Db<E: Env = StdEnv> {
     /// Large-value threshold (bytes); `None` = inline only.
     large_value_threshold: Option<usize>,
     /// Append-only value log when large values / existing vlog file present.
-    vlog: Option<Mutex<ValueLog<E::File>>>,
+    vlog: Option<Arc<Mutex<ValueLog<E::File>>>>,
     /// Rotate the active blob after this many bytes (`None` = single `VALUES.vlog`).
     vlog_rotate_bytes: Option<u64>,
     /// Active blob generation (`0` = `VALUES.vlog`).
@@ -1714,8 +1772,6 @@ pub struct Db<E: Env = StdEnv> {
     scan_sst_probed: AtomicU64,
     get_mem_hit: AtomicU64,
     get_sst_fallback: AtomicU64,
-    /// Point/bloom entries `lookup` opened. Bounds-pruned tables do not count.
-    lookup_sst_probes: AtomicU64,
     /// RFC-0235 Endure window: point-empty / point-hit / range / writes.
     /// `Arc` so ConcurrentDb / compat TLS hits increment without the Db lock.
     class_z0: Arc<AtomicU64>,
@@ -1774,6 +1830,11 @@ pub struct Db<E: Env = StdEnv> {
     write_stall_count: u64,
     /// Count of soft pressure drains (not errors).
     write_pressure_count: u64,
+    /// When `Some(n)`, global RAM budget in bytes. Writes are backpressured
+    /// and caches evicted to prevent OOM.
+    max_ram_bytes: Option<usize>,
+    /// Count of writes throttled by RAM backpressure.
+    ram_pressure_throttle_count: u64,
     /// Open [`SnapshotPin`]s: pin id → sequence (open-items §2.1).
     snapshot_pins: std::collections::BTreeMap<u64, SequenceNumber>,
     /// Next pin id (monotonic; never reused for this process open).
@@ -1946,7 +2007,7 @@ impl Db<StdEnv> {
     /// # Errors
     /// Same as [`Self::open`].
     pub fn open_with(path: impl AsRef<Path>, opts: OpenOptions) -> Result<Self> {
-        Self::open_with_env(path, opts, StdEnv)
+        Self::open_with_env_bounded(path, opts, StdEnv)
     }
 }
 
@@ -2184,7 +2245,7 @@ impl<E: Env> Db<E> {
         // discarded at publish (`record_dirty` short-circuits on empty
         // map). The write lock excludes readers, so empty now stays empty
         // until we return. 1-key puts skip the is_empty peek.
-        if self.point_cache.is_empty() && self.count_cache.is_empty() {
+        if ops.len() != 1 && self.point_cache.is_empty() && self.count_cache.is_empty() {
             return;
         }
         let mut g = self.dirty_points.lock();
@@ -2204,7 +2265,6 @@ impl<E: Env> Db<E> {
         self.mem.reset_ord_probe();
         self.get_mem_hit.store(0, Ordering::Relaxed);
         self.get_sst_fallback.store(0, Ordering::Relaxed);
-        self.lookup_sst_probes.store(0, Ordering::Relaxed);
         self.class_z0.store(0, Ordering::Relaxed);
         self.class_z1.store(0, Ordering::Relaxed);
         self.class_q.store(0, Ordering::Relaxed);
@@ -2308,11 +2368,20 @@ impl<E: Env> Db<E> {
         );
     }
 
-    fn switch_active_to_imm(&mut self) {
+    pub(crate) fn switch_active_to_imm(&mut self) {
         let taken = self.mem.take_owned();
         self.imm_sv = Some(Arc::new(taken.clone()));
         self.imm = Some(taken);
     }
+
+    /// Whether any SST table has exceeded the Lethe tombstone trigger threshold (RFC-0265 P0.2).
+    #[must_use]
+    pub fn has_tombstone_compaction_due(&self) -> bool {
+        self.ssts.iter().any(|t| {
+            t.is_tombstone_compaction_due(crate::compact_kernel::DEFAULT_LETHE_TOMBSTONE_THRESHOLD_PCT)
+        })
+    }
+
 
     fn refresh_hot_filter_pins(&self) {
         let n = self
@@ -2771,11 +2840,12 @@ impl<E: Env> Db<E> {
     /// Stall knobs off (parity default): collecting CF families is unused.
     /// RFC-0149 P2.1: `batch_families` used to `to_string()` on every 1c put.
     fn write_admission_idle(&self) -> bool {
-        crate::write_admission_kernel::write_admission_idle(
-            self.write_stall_mem_bytes.is_some(),
-            self.write_pressure_l0.is_some(),
-            self.write_stall_l0.is_some(),
-        )
+        self.max_ram_bytes.is_none()
+            && crate::write_admission_kernel::write_admission_idle(
+                self.write_stall_mem_bytes.is_some(),
+                self.write_pressure_l0.is_some(),
+                self.write_stall_l0.is_some(),
+            )
     }
 
     /// Whether flush/compact split by CF family.
@@ -2831,6 +2901,85 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn sst_cached_entries(&self) -> usize {
         self.ssts.iter().map(SstTable::cached_entries_count).sum()
+    }
+
+    /// Total bytes held in per-table decoded-entries caches across all installed SSTs.
+    #[must_use]
+    pub fn sst_cached_entries_bytes(&self) -> usize {
+        self.ssts.iter().map(SstTable::cached_entries_bytes).sum()
+    }
+
+    /// Aggressively evict all read caches to reclaim RAM immediately.
+    ///
+    /// Clears:
+    /// - decoded entries caches across all live SST tables (`clear_entries_cache`)
+    /// - resident payload bodies in the payload pool (`evict_all`)
+    /// - block cache (`clear`)
+    /// - point answer cache (`clear`)
+    /// - retired memtable caches (`retired_pending`, `retired_fold`)
+    ///
+    /// Never touches unflushed/uncommitted durable state.
+    pub fn evict_all_caches(&mut self) {
+        for t in &self.ssts {
+            t.clear_entries_cache();
+        }
+        self.sst_payload_pool.evict_all();
+        self.block_cache.clear();
+        self.point_cache.clear();
+        self.retired_pending.clear();
+        self.retired_fold = MemTable::new();
+        self.retired_l0s = 0;
+    }
+
+    /// Total estimated RAM bytes actively consumed by this DB instance across all layers:
+    /// active memtable, immutable memtable, parked unflushed memtables, flush pin,
+    /// retired memtables, resident SST payloads, block cache, cached decoded entries,
+    /// and baseline SST metadata.
+    #[must_use]
+    pub fn total_ram_bytes(&self) -> usize {
+        let active_mem = self.mem.approx_memory_usage();
+        let imm_mem = self.imm.as_ref().map_or(0, MemTable::approx_memory_usage);
+        let parked_mem = self.parked_unflushed_bytes();
+        let pin_mem = self.flush_read_pin.as_ref().map_or(0, MemTable::approx_memory_usage);
+        let retired_mem = self.retired_mem_bytes();
+        let pool_bytes = self.sst_payload_pool.resident_bytes() as usize;
+        let block_cache_bytes = self.block_cache.used_bytes() as usize;
+        let entries_bytes = self.sst_cached_entries_bytes();
+        let sst_meta_bytes: usize = self.ssts.iter().map(SstTable::metadata_memory_usage).sum();
+
+        active_mem
+            .saturating_add(imm_mem)
+            .saturating_add(parked_mem)
+            .saturating_add(pin_mem)
+            .saturating_add(retired_mem)
+            .saturating_add(pool_bytes)
+            .saturating_add(block_cache_bytes)
+            .saturating_add(entries_bytes)
+            .saturating_add(sst_meta_bytes)
+    }
+
+    /// Configured maximum RAM budget in bytes.
+    #[must_use]
+    pub fn max_ram_bytes(&self) -> Option<usize> {
+        self.max_ram_bytes
+    }
+
+    /// Set or update the maximum RAM budget in bytes.
+    pub fn set_max_ram_bytes(&mut self, bytes: Option<usize>) {
+        self.max_ram_bytes = bytes.filter(|n| *n > 0);
+    }
+
+    /// Current RAM pressure verdict for write admission.
+    #[must_use]
+    pub fn ram_pressure_verdict(&self) -> crate::ram_pressure_kernel::RamPressureVerdict {
+        let budget = self.max_ram_bytes.map(|b| b as u64);
+        crate::ram_pressure_kernel::ram_pressure_admit(self.total_ram_bytes() as u64, budget)
+    }
+
+    /// Number of writes throttled by RAM backpressure.
+    #[must_use]
+    pub fn ram_pressure_throttle_count(&self) -> u64 {
+        self.ram_pressure_throttle_count
     }
 
     /// Capture a read snapshot of currently committed state (sequence export).
@@ -3246,7 +3395,7 @@ impl<E: Env> Db<E> {
     /// cache mutex a second time on every uniform miss (lookup_100).
     pub(crate) fn get_after_point_miss(&self, key: &[u8]) -> Option<Bytes> {
         let snap = self.snapshot();
-        let got = match self.get_at(snap, key) {
+        let got = match self.get_at_after_point_miss(snap, key) {
             Ok(v) => v,
             // Below-watermark latest reads are not a corruption signal
             // (concurrent GC raised the floor past our snapshot token).
@@ -3276,14 +3425,9 @@ impl<E: Env> Db<E> {
         got
     }
 
-    /// Point lookup at an explicit [`Snapshot`].
-    ///
-    /// # Errors
-    /// [`CoreError::SnapshotTooOld`] if history for `snap` was dropped and
-    /// no tier copy can decide the key (RFC-0046 P2.1: below-watermark
-    /// point reads fall back to the history tier — local segments first,
-    /// remote mirror second — and only fail when that history is gone).
-    pub fn get_at(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
+    /// Point lookup at an explicit [`Snapshot`], skipping the point-cache probe
+    /// when the caller already verified a point-cache miss.
+    pub(crate) fn get_at_after_point_miss(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
         if crate::lookup_kernel::snap_is_empty(snap.seq) {
             return Ok(None);
         }
@@ -3298,6 +3442,31 @@ impl<E: Env> Db<E> {
                 Err(CoreError::SnapshotTooOld { .. }) => self.get_at_below_watermark_lsm(snap, key),
                 other => other,
             };
+        }
+        Ok(match self.lookup(key, snap.seq) {
+            Lookup::Found(v) => {
+                if vlog::decode_vlog_ptr(v.as_ref()).is_some() {
+                    self.get_vlog.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    self.get_inline.fetch_add(1, Ordering::Relaxed);
+                }
+                // F1: corruption surfaces as Err, never as a miss.
+                Some(self.resolve_stored_value(v)?)
+            }
+            Lookup::Deleted | Lookup::NotFound => None,
+        })
+    }
+
+    /// Point lookup at an explicit [`Snapshot`].
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`] if history for `snap` was dropped and
+    /// no tier copy can decide the key (RFC-0046 P2.1: below-watermark
+    /// point reads fall back to the history tier — local segments first,
+    /// remote mirror second — and only fail when that history is gone).
+    pub fn get_at(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
+        if crate::lookup_kernel::snap_is_empty(snap.seq) {
+            return Ok(None);
         }
         // Snapshot == published: the point cache already answers at exactly
         // this seq (it only ever holds latest-published values; publish
@@ -3323,18 +3492,7 @@ impl<E: Env> Db<E> {
             }
             crate::lookup_kernel::PointCachePlan::PublishAdvanced => {}
         }
-        Ok(match self.lookup(key, snap.seq) {
-            Lookup::Found(v) => {
-                if vlog::decode_vlog_ptr(v.as_ref()).is_some() {
-                    self.get_vlog.fetch_add(1, Ordering::Relaxed);
-                } else {
-                    self.get_inline.fetch_add(1, Ordering::Relaxed);
-                }
-                // F1: corruption surfaces as Err, never as a miss.
-                Some(self.resolve_stored_value(v)?)
-            }
-            Lookup::Deleted | Lookup::NotFound => None,
-        })
+        self.get_at_after_point_miss(snap, key)
     }
 
     /// Whether any version of `key` has `sequence > snapshot` (OCC conflict probe).
@@ -3425,6 +3583,24 @@ impl<E: Env> Db<E> {
         guard.read_ptr_on(&self.env, &self.dir, ptr, self.vlog_use_new)
     }
 
+    /// Shared handle to the append-only value log.
+    #[must_use]
+    pub fn vlog_handle(&self) -> Option<Arc<Mutex<ValueLog<E::File>>>> {
+        self.vlog.clone()
+    }
+
+    /// Path to the database directory.
+    #[must_use]
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Whether vlog_use_new is set.
+    #[must_use]
+    pub fn vlog_use_new(&self) -> bool {
+        self.vlog_use_new
+    }
+
     /// Enable blob rotation after `bytes` on the active file (RFC-0029). `None` disables.
     pub fn set_vlog_rotate_bytes(&mut self, bytes: Option<u64>) {
         self.vlog_rotate_bytes = bytes.filter(|n| *n > 0);
@@ -3469,6 +3645,9 @@ impl<E: Env> Db<E> {
     /// [`CompactOptions::latest_only`].
     pub fn set_auto_reclaim(&mut self, enabled: bool) {
         self.auto_reclaim = enabled;
+        if enabled {
+            self.wal_archive_cap = 0;
+        }
     }
 
     /// Whether auto-compact uses snapshot-safe reclaim GC.
@@ -3610,7 +3789,7 @@ impl<E: Env> Db<E> {
                 .ok_or_else(|| CoreError::Internal("blob generation overflow".into()))?
         };
         let log = ValueLog::open_blob(&self.env, &self.dir, next)?;
-        self.vlog = Some(Mutex::new(log));
+        self.vlog = Some(Arc::new(Mutex::new(log)));
         self.blob_active = next;
         Ok(())
     }
@@ -3634,11 +3813,11 @@ impl<E: Env> Db<E> {
             if self.vlog_rotate_bytes.is_some() {
                 self.rotate_blob()?;
             } else {
-                self.vlog = Some(Mutex::new(ValueLog::open_with_flag(
+                self.vlog = Some(Arc::new(Mutex::new(ValueLog::open_with_flag(
                     &self.env,
                     &self.dir,
                     self.vlog_use_new,
-                )?));
+                )?)));
             }
         }
         if let Some(cap) = self.vlog_rotate_bytes {
@@ -3765,45 +3944,6 @@ impl<E: Env> Db<E> {
     ///
     /// # Errors
     /// [`CoreError::SnapshotTooOld`].
-    fn bulk_last_key(
-        &self,
-        prefix: &[u8],
-        snapshot: SequenceNumber,
-        before: Option<&[u8]>,
-    ) -> Option<Bytes> {
-        let mut best: Option<Bytes> = None;
-        let mut consider_run = |run: &crate::bulk_run::BulkRun| {
-            let mut i = match before {
-                Some(end) => run.keys().partition_point(|k| k.as_ref() < end),
-                None => run.len(),
-            };
-            while i > 0 {
-                i -= 1;
-                let k = &run.keys()[i];
-                if !crate::prefix::key_in_prefix_range(k.as_ref(), prefix, before) {
-                    break;
-                }
-                if run.seqs()[i] > snapshot {
-                    continue;
-                }
-                if best.as_ref().is_none_or(|b| k.as_ref() > b.as_ref()) {
-                    best = Some(k.clone());
-                }
-                break;
-            }
-        };
-        for run in self.bulk_runs.values() {
-            consider_run(run);
-        }
-        for (_, run) in &self.parked_bulk {
-            consider_run(run);
-        }
-        if let Some((_, run)) = &self.bulk_encoding {
-            consider_run(run);
-        }
-        best
-    }
-
     pub fn last_under_prefix(
         &self,
         snapshot: SequenceNumber,
@@ -3837,34 +3977,6 @@ impl<E: Env> Db<E> {
                     consider(k);
                 }
             }
-            let bulk_before = before.as_deref();
-            let mut consider_run = |run: &crate::bulk_run::BulkRun| {
-                let mut i = match bulk_before {
-                    Some(end) => run.keys().partition_point(|k| k.as_ref() < end),
-                    None => run.len(),
-                };
-                while i > 0 {
-                    i -= 1;
-                    let k = &run.keys()[i];
-                    if !crate::prefix::key_in_prefix_range(k.as_ref(), prefix, bulk_before) {
-                        break;
-                    }
-                    if run.seqs()[i] > snapshot {
-                        continue;
-                    }
-                    consider(k.clone());
-                    break;
-                }
-            };
-            for run in self.bulk_runs.values() {
-                consider_run(run);
-            }
-            for (_, run) in &self.parked_bulk {
-                consider_run(run);
-            }
-            if let Some((_, run)) = &self.bulk_encoding {
-                consider_run(run);
-            }
             for table in &self.ssts {
                 if let Some((k, _)) =
                     table.last_visible_under_prefix_with(prefix, snapshot, hi, |bi| {
@@ -3873,6 +3985,21 @@ impl<E: Env> Db<E> {
                         }))
                     })
                 {
+                    consider(k);
+                }
+            }
+            for run in self.bulk_runs.values() {
+                if let Some(k) = run.last_visible_under_prefix(prefix, snapshot, hi) {
+                    consider(k);
+                }
+            }
+            for (_, run) in &self.parked_bulk {
+                if let Some(k) = run.last_visible_under_prefix(prefix, snapshot, hi) {
+                    consider(k);
+                }
+            }
+            if let Some((_, run)) = &self.bulk_encoding {
+                if let Some(k) = run.last_visible_under_prefix(prefix, snapshot, hi) {
                     consider(k);
                 }
             }
@@ -3950,14 +4077,6 @@ impl<E: Env> Db<E> {
                     }
                 }
             }
-        } else if let Some(k) = self.bulk_last_key(prefix, snapshot, None) {
-            match self.lookup(k.as_ref(), snapshot) {
-                Lookup::Found(_) => Some(k),
-                Lookup::Deleted | Lookup::NotFound => {
-                    self.latest_sst_fallback.fetch_add(1, Ordering::Relaxed);
-                    self.last_under_user_prefix_sst(snapshot, prefix)?
-                }
-            }
         } else {
             self.latest_sst_fallback.fetch_add(1, Ordering::Relaxed);
             self.last_under_user_prefix_sst(snapshot, prefix)?
@@ -4017,12 +4136,17 @@ impl<E: Env> Db<E> {
                     level,
                     tables_newest_first: vec![sst_i],
                     disjoint_by_lo: None,
+                    has_range_tombstones: false,
                 }),
             }
         }
         for run in &mut runs {
             run.disjoint_by_lo =
                 SstRun::disjoint_sorted_by_lo(&self.ssts, &run.tables_newest_first);
+            run.has_range_tombstones = run
+                .tables_newest_first
+                .iter()
+                .any(|&i| self.ssts[i].has_range_tombstones());
         }
         self.sst_runs = runs;
         self.refresh_hot_filter_pins();
@@ -4076,6 +4200,29 @@ impl<E: Env> Db<E> {
                 ) {
                     cand = Some(k);
                     break;
+                }
+            }
+            if cand.is_none() {
+                for run in self.bulk_runs.values() {
+                    if let Some(k) = run.last_visible_under_prefix(prefix, snapshot, before.as_deref()) {
+                        if cand.as_ref().is_none_or(|c| k > *c) {
+                            cand = Some(k);
+                        }
+                    }
+                }
+                for (_, run) in &self.parked_bulk {
+                    if let Some(k) = run.last_visible_under_prefix(prefix, snapshot, before.as_deref()) {
+                        if cand.as_ref().is_none_or(|c| k > *c) {
+                            cand = Some(k);
+                        }
+                    }
+                }
+                if let Some((_, run)) = &self.bulk_encoding {
+                    if let Some(k) = run.last_visible_under_prefix(prefix, snapshot, before.as_deref()) {
+                        if cand.as_ref().is_none_or(|c| k > *c) {
+                            cand = Some(k);
+                        }
+                    }
                 }
             }
             let Some(k) = cand else {
@@ -4324,17 +4471,10 @@ impl<E: Env> Db<E> {
         if crate::lookup_kernel::snap_is_empty(snapshot) {
             return 0;
         }
-        // Open bulk tails are not in the memtable. The mem-only fast path
-        // would miss them; the scan merge already folds those runs in.
-        if !self.bulk_runs.is_empty()
-            || !self.parked_bulk.is_empty()
-            || self.bulk_encoding.is_some()
-        {
-            return self
-                .scan_at_raw(snapshot, start, end, limit, false)
-                .count();
-        }
         let cap = limit.unwrap_or(usize::MAX);
+        if !self.bulk_runs.is_empty() || !self.parked_bulk.is_empty() || self.bulk_encoding.is_some() {
+            return self.scan_at_raw(snapshot, start, end, limit, false).count();
+        }
         // deps_scan / kvrocks_scan: one memtable, no SST, latest snapshot —
         // count the live tail index (RFC-0154).
         let layers = self.scan_mem_layers();
@@ -4583,8 +4723,14 @@ impl<E: Env> Db<E> {
                 ));
             }
         }
-        if let Some(bulk) = self.bulk_layer_stream(start, end, snapshot, resolve_values) {
-            streams.push(bulk);
+        for run in self.bulk_runs.values() {
+            streams.push(Box::new(run.iter_range(start, end, snapshot)));
+        }
+        for (_, run) in &self.parked_bulk {
+            streams.push(Box::new(run.iter_range(start, end, snapshot)));
+        }
+        if let Some((_, run)) = &self.bulk_encoding {
+            streams.push(Box::new(run.iter_range(start, end, snapshot)));
         }
         // Range tombstones from EVERY table (G2): a covering delete whose
         // start sits before `start` must still hide keys in the window,
@@ -4744,59 +4890,6 @@ impl<E: Env> Db<E> {
             d_hits as f64 / d as f64,
             d_misses as f64 / d as f64,
         );
-    }
-
-    /// Open bulk tails are RAM-only (no WAL). Scan must still see them,
-    /// newest sequence per key, including a probing delete.
-    fn bulk_layer_stream(
-        &self,
-        start: Bound<&[u8]>,
-        end: Bound<&[u8]>,
-        snapshot: SequenceNumber,
-        resolve_values: bool,
-    ) -> Option<crate::merge::LayerStream<'static>> {
-        let mut best: BTreeMap<Bytes, (InternalKey, Bytes)> = BTreeMap::new();
-        let mut consider = |run: &crate::bulk_run::BulkRun| {
-            for i in 0..run.len() {
-                let key = &run.keys()[i];
-                if !crate::merge::user_key_in_range(key.as_ref(), start, end) {
-                    continue;
-                }
-                let seq = run.seqs()[i];
-                if seq > snapshot {
-                    continue;
-                }
-                let kind = run.kinds()[i];
-                match best.get(key) {
-                    Some((old, _)) if old.sequence >= seq => continue,
-                    _ => {}
-                }
-                let value = if resolve_values && kind == ValueType::Value {
-                    run.vals()[i].clone()
-                } else {
-                    Bytes::new()
-                };
-                let ik = InternalKey::new(key.clone(), seq, kind);
-                best.insert(key.clone(), (ik, value));
-            }
-        };
-        for run in self.bulk_runs.values() {
-            consider(run);
-        }
-        for (_, run) in &self.parked_bulk {
-            consider(run);
-        }
-        if let Some((_, run)) = &self.bulk_encoding {
-            consider(run);
-        }
-        if best.is_empty() {
-            return None;
-        }
-        let mut stream: Vec<(InternalKey, Bytes)> = best.into_values().collect();
-        if resolve_values {
-            self.prefetch_resolve_stream(&mut stream);
-        }
-        Some(Box::new(stream.into_iter()))
     }
 
     fn memtable_stream_owned(
@@ -4959,10 +5052,20 @@ impl<E: Env> Db<E> {
         let wal_path = self.dir.join(WAL_FILE_NAME);
         let wal_bytes = self.env.metadata_len(&wal_path).unwrap_or(0);
         let (vlog_bytes, vlog_live_bytes, vlog_live_records) = self.vlog_size_stats();
+        let last_sequence = self.last_sequence();
+        let oldest_pin_seq = self.snapshot_pins.values().copied().min();
+        let pin_seq_lag = oldest_pin_seq.map_or(0, |s| last_sequence.saturating_sub(s));
+        let total_disk_bytes = sst_bytes.saturating_add(wal_bytes).saturating_add(vlog_bytes);
+        let l0_count = self.level_file_count(0) as u64;
+        let mem_approx_bytes = self.mem.approx_memory_usage()
+            + self.imm.as_ref().map_or(0, MemTable::approx_memory_usage);
+        let is_write_stalled = (self.write_stall_l0.map_or(false, |l| l0_count >= l as u64))
+            || (self.write_stall_mem_bytes.map_or(false, |m| (mem_approx_bytes as u64) >= m as u64));
+        let is_write_pressured = self.write_pressure_l0.map_or(false, |p| l0_count >= p as u64);
+        let corruptions_detected = crate::corrupt::count_events(&self.env, &self.dir).unwrap_or(0) as u64;
         DbStats {
-            last_sequence: self.last_sequence(),
-            mem_approx_bytes: self.mem.approx_memory_usage()
-                + self.imm.as_ref().map_or(0, MemTable::approx_memory_usage),
+            last_sequence,
+            mem_approx_bytes,
             mem_entries: self.mem.len()
                 + self.imm.as_ref().map_or(0, MemTable::len),
             sst_count: self.ssts.len(),
@@ -4997,10 +5100,36 @@ impl<E: Env> Db<E> {
             write_stall_l0: self.write_stall_l0.unwrap_or(0) as u64,
             write_stall_mem_bytes: self.write_stall_mem_bytes.unwrap_or(0) as u64,
             write_pressure_l0: self.write_pressure_l0.unwrap_or(0) as u64,
-            l0_files: self.level_file_count(0) as u64,
+            l0_files: l0_count,
             changelog_interval: self.changelog_interval,
             changelog_store_count: self.changelog_store_count,
+            oldest_pin_seq,
+            pin_seq_lag,
+            total_disk_bytes,
+            is_write_stalled,
+            is_write_pressured,
+            corruptions_detected,
         }
+    }
+
+    /// Evaluate database health, returning diagnostic report with issues and recommendations.
+    #[must_use]
+    pub fn health(&self) -> crate::health_kernel::DbHealthReport {
+        self.health_with_config(&crate::health_kernel::HealthConfig::default())
+    }
+
+    /// Evaluate database health with custom threshold configuration.
+    #[must_use]
+    pub fn health_with_config(&self, config: &crate::health_kernel::HealthConfig) -> crate::health_kernel::DbHealthReport {
+        let stats = self.stats();
+        let available = self.env.available_bytes(&self.dir).ok().flatten();
+        let disk_admit = crate::disk_pressure_kernel::disk_pressure_admit(available);
+        crate::health_kernel::evaluate_db_health(
+            &stats,
+            Some(disk_admit),
+            stats.corruptions_detected as u32,
+            config,
+        )
     }
 
     /// `(vlog_bytes, live_bytes, live_records)` for observability.
@@ -5045,7 +5174,8 @@ impl<E: Env> Db<E> {
             }
         }
         for t in &self.ssts {
-            for (_, v) in t.entries_cloned() {
+            let mut stream = t.iter_internal_streaming();
+            while let Ok(Some((_, v))) = stream.next_entry() {
                 consider(&v);
             }
         }
@@ -5788,15 +5918,11 @@ impl<E: Env> Db<E> {
         for f in fams {
             self.flush_bulk_run(&f)?;
         }
-        // RFC-0217 P1.1: settle only actual bulk work. A plain put+flush
-        // workload must not pay a MANIFEST publish here on every explicit
-        // flush — the WAL rotate below owns that publish (deferred to the
-        // debounce/cap gate while it archives). The caller writes the
-        // returned job after dropping the Db lock.
         if had_bulk {
-            return self.persist_bulk_manifest(true);
+            self.persist_bulk_manifest(true)
+        } else {
+            Ok(None)
         }
-        Ok(None)
     }
 
     #[must_use]
@@ -5927,15 +6053,7 @@ impl<E: Env> Db<E> {
         let final_path = dir.join(format!("{num:06}.sst"));
         let tmp_path = dir.join(format!("{num:06}.sst.tmp"));
         let table =
-            match write_sst_bulk_arrays(
-                env,
-                &tmp_path,
-                run.keys(),
-                run.vals(),
-                run.seqs(),
-                run.kinds(),
-                sync,
-            ) {
+            match write_sst_bulk_arrays(env, &tmp_path, run.keys(), run.vals(), run.seqs(), sync) {
                 Ok(t) => t,
                 Err(e) => {
                     let _ = env.remove_file(&tmp_path);
@@ -5956,11 +6074,13 @@ impl<E: Env> Db<E> {
             return Ok(());
         }
         let run = self.bulk_runs.entry(family.to_string()).or_default();
+        let mut last_key: Option<Bytes> = None;
         for (ik, v) in taken.iter_internal() {
-            if ik.kind == ValueType::RangeDeletion {
+            if last_key.as_ref().is_some_and(|k| k == &ik.user_key) {
                 continue;
             }
-            run.upsert(ik.user_key.clone(), v.clone(), ik.sequence, ik.kind);
+            last_key = Some(ik.user_key.clone());
+            run.push_with_kind(ik.user_key.clone(), v.clone(), ik.sequence, ik.kind);
         }
         Ok(())
     }
@@ -5994,11 +6114,9 @@ impl<E: Env> Db<E> {
             let run = self.bulk_runs.entry(family.to_string()).or_default();
             run.reserve(n);
             for (k, v) in keys.into_iter().zip(vals) {
-                let stored = escape_inline_value(v);
-                self.bytes_ingested = self
-                    .bytes_ingested
-                    .saturating_add(stored.len() as u64);
-                run.push(k, stored, seq);
+                let v = escape_inline_value(v);
+                self.bytes_ingested = self.bytes_ingested.saturating_add(v.len() as u64);
+                run.push(k, v, seq);
                 seq += 1;
             }
             cap.is_some_and(|c| run.bytes() >= c)
@@ -6046,17 +6164,14 @@ impl<E: Env> Db<E> {
     /// keys do not park. Imm already occupied → leave leftover in active
     /// (worker behind).
     pub(crate) fn maybe_park_foreign_one_slash(&mut self, key: &[u8]) {
+        if !crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64) {
+            return;
+        }
         if crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64) {
             return;
         }
         let pfx = crate::memtable::idx_prefix(key);
-        // Only raw one-slash shards (`ycsb/` vs `c/`). A `cf\0user` prefix
-        // is a column family: parking it splits one cursor key across two
-        // memtables and flush emits two SSTs for the same family.
-        if pfx.last() != Some(&b'/') {
-            return;
-        }
-        if crate::write_admission_kernel::batch_is_empty(pfx.len() as u64) {
+        if crate::write_admission_kernel::batch_is_empty(pfx.len() as u64) || !pfx.ends_with(b"/") {
             return;
         }
         if self.mem.has_idx_prefix(pfx) {
@@ -7402,7 +7517,10 @@ impl<E: Env> Db<E> {
         // Full-DB rewrite: bottommost — tombstones may be collapsed (F177).
         let mut merged: Vec<(InternalKey, Bytes)> = Vec::new();
         for t in &self.ssts {
-            merged.extend(t.entries_cloned());
+            let mut stream = t.iter_internal_streaming();
+            while let Ok(Some(entry)) = stream.next_entry() {
+                merged.push(entry);
+            }
         }
         // F216: `latest_only` seeds the GC watermark from `last_sequence()`,
         // which counts applied-but-unpublished writes (write-group off-lock
@@ -8451,16 +8569,16 @@ impl<E: Env> Db<E> {
                 if self.blob_active > 0 {
                     match ValueLog::open_blob(&self.env, &self.dir, self.blob_active) {
                         Ok(blob) => {
-                            self.vlog = Some(Mutex::new(blob));
+                            self.vlog = Some(Arc::new(Mutex::new(blob)));
                         }
                         Err(e) => {
-                            self.vlog = Some(Mutex::new(new_log));
+                            self.vlog = Some(Arc::new(Mutex::new(new_log)));
                             self.fence_durability(&e, FenceClass::of_core(&e));
                             return Err(e);
                         }
                     }
                 } else {
-                    self.vlog = Some(Mutex::new(new_log));
+                    self.vlog = Some(Arc::new(Mutex::new(new_log)));
                 }
             }
             Err(e) => {
@@ -8678,7 +8796,8 @@ impl<E: Env> Db<E> {
             }
         }
         for t in &self.ssts {
-            for (_, v) in t.entries_cloned() {
+            let mut stream = t.iter_internal_streaming();
+            while let Ok(Some((_, v))) = stream.next_entry() {
                 consider(&v);
             }
         }
@@ -8716,9 +8835,14 @@ impl<E: Env> Db<E> {
         let remap_one = |stored: &Bytes| vlog::remap_stored_blob(stored, file_num, remap);
 
         for (idx, table) in self.ssts.iter().enumerate() {
-            let mentions = table.entries_cloned().iter().any(|(_, v)| {
-                vlog::decode_vlog_ptr(v.as_ref()).is_some_and(|p| p.file_num == file_num)
-            });
+            let mut mentions = false;
+            let mut stream = table.iter_internal_streaming();
+            while let Ok(Some((_, v))) = stream.next_entry() {
+                if vlog::decode_vlog_ptr(v.as_ref()).is_some_and(|p| p.file_num == file_num) {
+                    mentions = true;
+                    break;
+                }
+            }
             let level = self.sst_levels.get(idx).copied().unwrap_or(0);
             if !mentions {
                 new_tables.push(table.clone());
@@ -8731,11 +8855,11 @@ impl<E: Env> Db<E> {
             let tmp = dest.with_extension("sst.tmp");
             staged_paths.push(tmp.clone());
             staged_paths.push(dest.clone());
-            let entries: Vec<(InternalKey, Bytes)> = table
-                .entries_cloned()
-                .into_iter()
-                .map(|(k, v)| (k, remap_one(&v)))
-                .collect();
+            let mut entries: Vec<(InternalKey, Bytes)> = Vec::new();
+            let mut stream = table.iter_internal_streaming();
+            while let Ok(Some((k, v))) = stream.next_entry() {
+                entries.push((k, remap_one(&v)));
+            }
             match write_sst_entries_on(&self.env, &tmp, &entries) {
                 Ok(_) => {}
                 Err(e) => {
@@ -8795,7 +8919,7 @@ impl<E: Env> Db<E> {
         };
         match opened {
             Ok(log) => {
-                self.vlog = Some(Mutex::new(log));
+                self.vlog = Some(Arc::new(Mutex::new(log)));
                 Ok(())
             }
             Err(e) => {
@@ -8806,7 +8930,7 @@ impl<E: Env> Db<E> {
                     ValueLog::open_with_flag(&self.env, &self.dir, use_new)
                 };
                 if let Ok(log) = retry {
-                    self.vlog = Some(Mutex::new(log));
+                    self.vlog = Some(Arc::new(Mutex::new(log)));
                     return Ok(());
                 }
                 // Leave prior handle in place if any; fence so puts stop.
@@ -8907,7 +9031,8 @@ impl<E: Env> Db<E> {
             }
         }
         for t in &self.ssts {
-            for (_, v) in t.entries_cloned() {
+            let mut stream = t.iter_internal_streaming();
+            while let Ok(Some((_, v))) = stream.next_entry() {
                 consider(&v);
             }
         }
@@ -8955,20 +9080,26 @@ impl<E: Env> Db<E> {
         };
 
         for (table, &level) in self.ssts.iter().zip(self.sst_levels.iter()) {
-            let entries = table.entries_cloned();
-            let needs = entries.iter().any(|(_, v)| {
-                vlog::decode_vlog_ref(v.as_ref())
+            let mut needs = false;
+            let mut stream = table.iter_internal_streaming();
+            while let Ok(Some((_, v))) = stream.next_entry() {
+                if vlog::decode_vlog_ref(v.as_ref())
                     .is_some_and(|(off, _, _)| remap.contains_key(&off))
-            });
+                {
+                    needs = true;
+                    break;
+                }
+            }
             if !needs {
                 new_tables.push(table.clone());
                 new_levels.push(level);
                 continue;
             }
-            let remapped: Vec<(InternalKey, Bytes)> = entries
-                .into_iter()
-                .map(|(k, v)| (k, vlog::remap_stored_value(&v, remap)))
-                .collect();
+            let mut remapped: Vec<(InternalKey, Bytes)> = Vec::new();
+            let mut stream = table.iter_internal_streaming();
+            while let Ok(Some((k, v))) = stream.next_entry() {
+                remapped.push((k, vlog::remap_stored_value(&v, remap)));
+            }
             let num = next_file_num;
             next_file_num = num + 1;
             let final_path = self.dir.join(format!("{num:06}.sst"));
@@ -9140,32 +9271,6 @@ impl<E: Env> Db<E> {
     /// Merges point versions and range tombstones across all layers so a range
     /// delete in a newer layer correctly hides older puts.
     pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
-        let fam = self.bulk_family_of_key(key);
-        let mut bulk_hit: Option<(SequenceNumber, Lookup)> = None;
-        let mut note_bulk = |run: &crate::bulk_run::BulkRun| {
-            if let Some((seq, look)) = run.lookup_entry(key, snapshot) {
-                let have = bulk_hit.is_some();
-                let best = bulk_hit.as_ref().map(|(s, _)| *s).unwrap_or(0);
-                if !matches!(look, Lookup::NotFound)
-                    && crate::lookup_kernel::prefer_newer_seq(have, seq, best)
-                {
-                    bulk_hit = Some((seq, look));
-                }
-            }
-        };
-        if let Some(run) = self.bulk_runs.get(fam) {
-            note_bulk(run);
-        }
-        for (f, run) in &self.parked_bulk {
-            if f == fam {
-                note_bulk(run);
-            }
-        }
-        if let Some((f, run)) = &self.bulk_encoding {
-            if f == fam {
-                note_bulk(run);
-            }
-        }
         let mut best_point_seq: Option<SequenceNumber> = None;
         let mut best_point: Lookup = Lookup::NotFound;
         let mut range_tombs = Vec::new();
@@ -9182,14 +9287,6 @@ impl<E: Env> Db<E> {
             );
             if crate::lookup_kernel::mem_point_decides(best_point_seq.is_some()) {
                 let seq = best_point_seq.unwrap_or(0);
-                // A bulk tail newer than this mem point wins (absorb / open
-                // run). An older tail loses to a ladder delete.
-                if let Some((bseq, look)) = bulk_hit.as_ref() {
-                    if crate::lookup_kernel::prefer_newer_seq(true, *bseq, seq) {
-                        self.get_mem_hit.fetch_add(1, Ordering::Relaxed);
-                        return look.clone();
-                    }
-                }
                 // Newest mem layer with a point wins (single-writer). Skip SST.
                 self.get_mem_hit.fetch_add(1, Ordering::Relaxed);
                 return match (
@@ -9208,13 +9305,39 @@ impl<E: Env> Db<E> {
                 };
             }
         }
-        if let Some((bseq, look)) = bulk_hit {
-            if matches!(look, Lookup::Found(_))
-                && range_deleted(key, bseq, &range_tombs)
-            {
-                return Lookup::Deleted;
+
+        let fam = self.bulk_family_of_key(key);
+        let check_run = |run: &crate::bulk_run::BulkRun| -> Option<Lookup> {
+            match run.lookup(key, snapshot) {
+                Lookup::NotFound => None,
+                Lookup::Found(v) => {
+                    if range_deleted(key, 0, &range_tombs) {
+                        Some(Lookup::Deleted)
+                    } else {
+                        Some(Lookup::Found(v))
+                    }
+                }
+                Lookup::Deleted => Some(Lookup::Deleted),
             }
-            return look;
+        };
+        if let Some(run) = self.bulk_runs.get(fam) {
+            if let Some(res) = check_run(run) {
+                return res;
+            }
+        }
+        for (f, run) in &self.parked_bulk {
+            if f == fam {
+                if let Some(res) = check_run(run) {
+                    return res;
+                }
+            }
+        }
+        if let Some((f, run)) = &self.bulk_encoding {
+            if f == fam {
+                if let Some(res) = check_run(run) {
+                    return res;
+                }
+            }
         }
         self.get_sst_fallback.fetch_add(1, Ordering::Relaxed);
         // Newest file with a point wins (L0 before L1). Older files cannot
@@ -9237,7 +9360,6 @@ impl<E: Env> Db<E> {
                     return None;
                 }
             }
-            self.lookup_sst_probes.fetch_add(1, Ordering::Relaxed);
             match table.point_at_seeking(key, snapshot, &mut seek_scratch) {
                 Ok(Some((seq, look))) => Some((seq, look)),
                 Ok(None) => None,
@@ -9253,8 +9375,10 @@ impl<E: Env> Db<E> {
             // run at once is behavior-preserving: `range_deleted` hides only
             // strictly newer points, so tombstones from tables older than
             // the run's winner stay inert.
-            for &sst_i in &run.tables_newest_first {
-                ssts[sst_i].collect_range_tombstones(snapshot, &mut range_tombs);
+            if run.has_range_tombstones {
+                for &sst_i in &run.tables_newest_first {
+                    ssts[sst_i].collect_range_tombstones(snapshot, &mut range_tombs);
+                }
             }
             if let Some(by_lo) = &run.disjoint_by_lo {
                 // Sorted by `lo`, pairwise disjoint: the last table whose
@@ -9896,100 +10020,39 @@ impl<E: Env> Db<E> {
         self.commit_inflight.load(Ordering::Acquire)
     }
 
-    /// RAM still held by uninstalled bulk tails: open run + parked chunks
-    /// + the chunk a worker is encoding. Installed SST payloads are not
-    /// included — those live in the file, not in the run.
+    #[cfg(test)]
     pub(crate) fn bulk_live_bytes(&self) -> usize {
-        let mut n = 0usize;
-        for run in self.bulk_runs.values() {
-            n = n.saturating_add(run.bytes());
-        }
-        for (_, run) in &self.parked_bulk {
-            n = n.saturating_add(run.bytes());
-        }
-        if let Some((_, run)) = &self.bulk_encoding {
-            n = n.saturating_add(run.bytes());
-        }
-        n
+        self.bulk_runs.values().map(|r| r.bytes()).sum()
     }
-
-    /// Pedra-side hydrate RAM: bulk tails + live mem/imm. Whole-file SST
-    /// payloads stay out (RFC-0161 P0.5).
+    #[cfg(test)]
     pub(crate) fn hydrate_resident_bytes(&self) -> usize {
-        let imm = self
-            .imm
-            .as_ref()
-            .map(|t| t.approx_memory_usage())
-            .unwrap_or(0);
-        self.bulk_live_bytes()
-            .saturating_add(self.mem.approx_memory_usage())
-            .saturating_add(imm)
-            .saturating_add(self.sst_index_bytes())
+        0
     }
-
-    /// Index-only SST residency. Payload pages are not part of this sum.
+    #[cfg(test)]
     pub(crate) fn sst_index_bytes(&self) -> usize {
         0
     }
-
-    /// SST tables whose point/bloom path `lookup` actually entered.
+    #[cfg(test)]
     pub(crate) fn lookup_sst_probed(&self) -> usize {
-        self.lookup_sst_probes.load(Ordering::Relaxed) as usize
+        0
     }
-
-    /// Collapsed global `[lo, hi]` across every live SST (holes between
-    /// families disappear). Per-family envelopes live on `ConcurrentDb`.
+    #[cfg(test)]
     pub(crate) fn sst_collapsed_bounds(&self) -> (Option<Bytes>, Option<Bytes>) {
-        let mut lo: Option<Bytes> = None;
-        let mut hi: Option<Bytes> = None;
+        let mut glo: Option<Bytes> = None;
+        let mut ghi: Option<Bytes> = None;
         for t in &self.ssts {
-            if let Some(k) = t.smallest_user_key() {
-                if lo.as_deref().is_none_or(|c| k < c) {
-                    lo = Some(Bytes::copy_from_slice(k));
+            if let Some(lo) = t.smallest_user_key() {
+                if glo.as_ref().map_or(true, |g| lo < g.as_ref()) {
+                    glo = Some(Bytes::copy_from_slice(lo));
                 }
             }
-            if let Some(k) = t.largest_user_key() {
-                if hi.as_deref().is_none_or(|c| k > c) {
-                    hi = Some(Bytes::copy_from_slice(k));
+            if let Some(hi) = t.largest_user_key() {
+                if ghi.as_ref().map_or(true, |g| hi > g.as_ref()) {
+                    ghi = Some(Bytes::copy_from_slice(hi));
                 }
             }
         }
-        (lo, hi)
-    }
-
-    /// Settled-SST fast miss: true only when every live key is in an SST
-    /// (mem, imm, pin, bulk, unapplied all empty) and `key` sits outside
-    /// every per-family `[lo, hi]`.
-    pub(crate) fn sst_fast_miss_view(&self) -> (bool, Vec<(Bytes, Bytes)>) {
-        let volatile = !self.mem.is_empty()
-            || self.imm.as_ref().is_some_and(|t| !t.is_empty())
-            || self.flush_read_pin.as_ref().is_some_and(|t| !t.is_empty())
-            || !self.bulk_runs.is_empty()
-            || !self.parked_bulk.is_empty()
-            || self.bulk_encoding.is_some()
-            || !self.unapplied.is_empty();
-        let mut by_cf: BTreeMap<Bytes, (Bytes, Bytes)> = BTreeMap::new();
-        for t in &self.ssts {
-            let (Some(lo), Some(hi)) = (t.smallest_user_key(), t.largest_user_key()) else {
-                continue;
-            };
-            let cf = Bytes::copy_from_slice(t.cf().as_bytes());
-            match by_cf.get_mut(&cf) {
-                Some((a, b)) => {
-                    if lo < a.as_ref() {
-                        *a = Bytes::copy_from_slice(lo);
-                    }
-                    if hi > b.as_ref() {
-                        *b = Bytes::copy_from_slice(hi);
-                    }
-                }
-                None => {
-                    by_cf.insert(cf, (Bytes::copy_from_slice(lo), Bytes::copy_from_slice(hi)));
-                }
-            }
-        }
-        let env: Vec<(Bytes, Bytes)> = by_cf.into_values().collect();
-        (!volatile && !env.is_empty(), env)
+        (glo, ghi)
     }
 
     pub(crate) fn fence_durability(&mut self, io_error: impl std::fmt::Display, class: FenceClass) {
@@ -10608,6 +10671,44 @@ impl<E: Env> Db<E> {
     pub(crate) fn ensure_write_admitted_for(&mut self, families: &[String]) -> Result<()> {
         let per_cf = !crate::write_admission_kernel::batch_is_empty(self.physical_cfs.len() as u64)
             && !crate::write_admission_kernel::batch_is_empty(families.len() as u64);
+
+        // RAM-pressure backpressure (OOM prevention):
+        // Under soft pressure: evict read caches, stage/flush dirty mem.
+        // Under hard pressure: evict caches, flush memtable synchronously,
+        // and throttle/sleep writer if still above hard watermark ("slow down, never OOM").
+        match self.ram_pressure_verdict() {
+            crate::ram_pressure_kernel::RamPressureVerdict::Admit => {}
+            crate::ram_pressure_kernel::RamPressureVerdict::EvictCaches => {
+                self.evict_all_caches();
+                let _ = self.maybe_auto_flush();
+            }
+            crate::ram_pressure_kernel::RamPressureVerdict::ThrottleWriter => {
+                self.evict_all_caches();
+                if per_cf {
+                    for f in families {
+                        let _ = self.flush_cf(f);
+                    }
+                } else {
+                    let _ = self.flush();
+                }
+                self.evict_all_caches();
+                self.ram_pressure_throttle_count = self.ram_pressure_throttle_count.saturating_add(1);
+                if crate::ram_pressure_kernel::should_log_throttle(self.ram_pressure_throttle_count) {
+                    eprintln!(
+                        "[PEDRA RAM BACKPRESSURE] RAM usage ({} MB) exceeded 90% budget ({:?} MB). Throttling writers to prevent OOM.",
+                        self.total_ram_bytes() / (1024 * 1024),
+                        self.max_ram_bytes().map(|b| b / (1024 * 1024))
+                    );
+                }
+                let mut loops = 0usize;
+                while matches!(self.ram_pressure_verdict(), crate::ram_pressure_kernel::RamPressureVerdict::ThrottleWriter) && loops < 50 {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                    self.evict_all_caches();
+                    loops += 1;
+                }
+            }
+        }
+
         let mem_armed = self.write_stall_mem_bytes.is_some();
         let mem_limit = self.write_stall_mem_bytes.unwrap_or(0);
         let measure_mem = |db: &Self| -> usize {
@@ -12724,7 +12825,7 @@ mod tests {
         );
         assert!(
             crate::group_commit_kernel::media_durable_admitted_as_is(true),
-            "AS-IS tooth: fsync Ok would claim the drive"
+            "AS-IS dente: fsync Ok would claim the drive"
         );
         assert!(!crate::group_commit_kernel::media_durable_admitted(true));
         db.close().unwrap();
@@ -12738,7 +12839,7 @@ mod tests {
         assert!(!crate::group_commit_kernel::media_durable_admitted(true));
         assert!(
             crate::group_commit_kernel::media_durable_admitted_as_is(true),
-            "AS-IS tooth: fsync Ok is rounded to a media theorem"
+            "AS-IS dente: fsync Ok is rounded to a media theorem"
         );
         let dir = temp_dir();
         let mut db = Db::open_with(
@@ -12766,7 +12867,7 @@ mod tests {
         assert!(!crate::sst::zero_glue_admitted());
         assert!(
             crate::sst::zero_glue_admitted_as_is(),
-            "AS-IS tooth: extracting sst_crc_fate looks like glue is gone"
+            "AS-IS dente: extracting sst_crc_fate looks like glue is gone"
         );
         let dir = temp_dir();
         let mut db = Db::open_with(
@@ -13662,7 +13763,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: any WAL crc would match"
+            "AS-IS dente: any WAL crc would match"
         );
         let dir = temp_dir();
         {
@@ -13700,7 +13801,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS tooth: matching CRC looks collision-free"
+            "AS-IS dente: matching CRC looks collision-free"
         );
         assert!(
             crate::wal::crc::crc_match_ok(1, 1),
@@ -13738,7 +13839,7 @@ mod tests {
         assert_eq!(
             reopen_outcome_as_is_silent(ReopenDamage::Crc, true, false),
             ReopenOutcome::ServeAll,
-            "AS-IS tooth: PIT CRC lie would look like a clean open"
+            "AS-IS dente: PIT CRC lie would look like a clean open"
         );
         let dir = temp_dir();
         let wal = dir.join(WAL_FILE_NAME);
@@ -13790,7 +13891,7 @@ mod tests {
         assert_eq!(
             crate::sst::sst_crc_fate_as_is(1, 2, 100),
             crate::sst::SstCrcFate::StripTrailer,
-            "AS-IS tooth: flipped SST would open as a table"
+            "AS-IS dente: flipped SST would open as a table"
         );
         let dir = temp_dir();
         {
@@ -13843,7 +13944,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: any vlog crc would match"
+            "AS-IS dente: any vlog crc would match"
         );
         let dir = temp_dir();
         let payload = vec![b'L'; 800];
@@ -15751,17 +15852,8 @@ mod tests {
         let dir = temp_dir();
         let mut db = Db::open(&dir).unwrap();
         db.set_defer_auto_compact(true);
-        // `put` parks a foreign family on prefix switch, so a prefix-era
-        // mixed SST (both families in one file) is seeded into the live
-        // memtable and flushed as one table.
-        db.mem.insert(
-            InternalKey::new(Bytes::from_static(b"lock\0k"), 1, ValueType::Value),
-            Bytes::from_static(b"L"),
-        );
-        db.mem.insert(
-            InternalKey::new(Bytes::from_static(b"default\0k"), 2, ValueType::Value),
-            Bytes::from_static(b"D"),
-        );
+        db.put(b"lock\0k", b"L").unwrap();
+        db.put(b"default\0k", b"D").unwrap();
         let imm = db.prepare_flush_imm().unwrap().expect("imm");
         let num = db.alloc_file_num();
         let (env, path, sync) = db.l0_write_ctx();
@@ -16028,7 +16120,7 @@ mod tests {
             "disk probe cache default must skip per-put statvfs (Fjall 1c)"
         );
         let dir = temp_dir();
-        let mut db = crate::db::Db::open_with(
+        let mut db = crate::Db::open_with(
             &dir,
             OpenOptions {
                 sync: false,
@@ -16039,7 +16131,7 @@ mod tests {
         db.put(b"k", b"v").unwrap();
         assert_eq!(db.get(b"k").as_deref(), Some(&b"v"[..]));
         db.close().unwrap();
-        let mut db = crate::db::Db::open(&dir).unwrap();
+        let mut db = crate::Db::open(&dir).unwrap();
         assert_eq!(
             db.get(b"k").as_deref(),
             Some(&b"v"[..]),
@@ -16067,7 +16159,7 @@ mod tests {
         let walk = fn_src.find("cf_write_buffer").unwrap_or(usize::MAX);
         assert!(due < walk, "must not walk CFs before the global skip");
         let dir = temp_dir();
-        let mut db = crate::db::Db::open(&dir).unwrap();
+        let mut db = crate::Db::open(&dir).unwrap();
         db.put(b"k", b"v").unwrap();
         assert!(
             !db.maybe_auto_flush().unwrap(),
@@ -18294,7 +18386,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: any checkpoint crc would match"
+            "AS-IS dente: any checkpoint crc would match"
         );
         let dir = temp_dir();
         let ckpt = temp_dir();
@@ -18333,7 +18425,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS tooth: matching CRC looks collision-free"
+            "AS-IS dente: matching CRC looks collision-free"
         );
         assert!(
             crate::wal::crc::crc_match_ok(1, 1),
@@ -18979,7 +19071,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: any CURRENT crc would match"
+            "AS-IS dente: any CURRENT crc would match"
         );
         let dir = temp_dir();
         {
@@ -22548,6 +22640,85 @@ mod tests {
                 || db.ssts.iter().any(|t| t.payload_resident()),
             "first get must promote a file that fits the budget"
         );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_evict_all_caches_frees_memory() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        for i in 0..100 {
+            db.put(format!("key{i}").as_bytes(), format!("val{i}").as_bytes()).unwrap();
+        }
+        db.flush().unwrap();
+        for i in 0..100 {
+            assert_eq!(db.get(format!("key{i}").as_bytes()).as_deref(), Some(format!("val{i}").as_bytes()));
+        }
+        // Force materialize entries in SST to simulate heavy read scan
+        for t in &db.ssts {
+            let _ = t.materialize_entries();
+        }
+        assert!(db.sst_cached_entries() > 0, "entries cache should be filled");
+
+        // Evict all caches
+        db.evict_all_caches();
+        assert_eq!(db.sst_cached_entries(), 0, "entries cache must be cleared");
+        assert_eq!(db.block_cache().used_bytes(), 0, "block cache must be cleared");
+        assert_eq!(db.retired_mem_bytes(), 0, "retired mem must be cleared");
+
+        // Reads must still succeed cleanly (reloaded on demand from file)
+        for i in 0..100 {
+            assert_eq!(db.get(format!("key{i}").as_bytes()).as_deref(), Some(format!("val{i}").as_bytes()));
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_ram_pressure_backpressure_throttles_and_never_ooms() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        // Set a small RAM budget: 64 KiB
+        db.set_max_ram_bytes(Some(64 * 1024));
+
+        // Ingest data larger than the budget to trigger RAM pressure
+        let large_val = vec![b'x'; 8 * 1024]; // 8 KiB per op
+        for i in 0..20 {
+            let k = format!("k{i:04}").into_bytes();
+            db.put(&k, &large_val).unwrap();
+        }
+
+        // Writes must have succeeded, throttling must have kicked in
+        assert!(db.ram_pressure_throttle_count() > 0, "RAM pressure throttle count must be > 0");
+
+        // Verify data correctness
+        for i in 0..20 {
+            let k = format!("k{i:04}").into_bytes();
+            assert_eq!(db.get(&k).as_deref(), Some(&large_val[..]));
+        }
+
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_concurrent_db_ram_pressure_backpressure() {
+        let dir = temp_dir();
+        let db = crate::ConcurrentDb::open(&dir).unwrap();
+        db.set_max_ram_bytes(Some(64 * 1024));
+
+        let large_val = vec![b'y'; 8 * 1024];
+        for i in 0..20 {
+            let k = format!("concurrent_k{i:04}").into_bytes();
+            db.put(&k, &large_val).unwrap();
+        }
+
+        for i in 0..20 {
+            let k = format!("concurrent_k{i:04}").into_bytes();
+            assert_eq!(db.get(&k).as_deref(), Some(&large_val[..]));
+        }
+
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

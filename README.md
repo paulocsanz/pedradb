@@ -64,6 +64,14 @@ are not in this repository, so their proofs are not either.
 The catalog map, what each check refuses, and how to run it:
 [`docs/verification.md`](docs/verification.md).
 
+## Observability & Health
+
+PedraDB provides zero-lock-contention health diagnostics and internal metrics directly from `pedradb-core`:
+- **Tri-State Health Model**: `Healthy`, `Degraded`, and `ActionRequired` evaluations via `db.health()`.
+- **Diagnostic Issues & Remediations**: Automatic detection of L0/memtable write stalls, snapshot pin leaks (analogous to Postgres `datfrozenxid` wraparound risk), cache thrashing, and corruption events, paired with typed remediation recommendations.
+- **Pure Expositions**: OpenMetrics/Prometheus (`format_prometheus_metrics`) and structured JSON (`format_json_status`) formatting without external telemetry dependencies.
+- Detailed guide: [`docs/metrics.md`](docs/metrics.md).
+
 ## Benchmarks
 
 Linux, 4 vCPU on a Threadripper PRO 3975WX. Peers: RocksDB default

@@ -755,7 +755,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS tooth: matching CRC looks collision-free"
+            "AS-IS dente: matching CRC looks collision-free"
         );
         assert!(
             crate::wal::crc::crc_match_ok(1, 1),

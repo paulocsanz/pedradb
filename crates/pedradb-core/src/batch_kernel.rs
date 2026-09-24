@@ -553,7 +553,7 @@ mod tests {
         assert!(!write_record_count_ok(3, 2));
         assert!(
             write_record_count_ok_as_is(3, 2),
-            "AS-IS tooth: silent prefix"
+            "AS-IS dente: silent prefix"
         );
         let mut truncated = encoded.clone();
         truncated.truncate(encoded.len().saturating_sub(4));
@@ -579,7 +579,7 @@ mod tests {
         assert!(!write_record_count_ok(3, 2), "prefix of count is not Ok");
         assert!(
             write_record_count_ok_as_is(3, 2),
-            "AS-IS tooth: silent prefix apply"
+            "AS-IS dente: silent prefix apply"
         );
         // Truncated payload: header count=3 but last op missing → Err, not prefix.
         let mut truncated = encoded.clone();

@@ -185,7 +185,7 @@ mod tests {
     fn as_is_admits_scan_leak() {
         assert!(
             key_in_cf_family_as_is(b"lock\0k", "default"),
-            "AS-IS tooth: foreign-CF key treated as in-family"
+            "AS-IS dente: foreign-CF key treated as in-family"
         );
         assert!(
             !key_in_cf_family(b"lock\0k", "default"),
@@ -202,9 +202,9 @@ mod tests {
         );
         assert!(
             key_in_cf_family_as_is(&lock, "default"),
-            "AS-IS tooth: scan leak"
+            "AS-IS dente: scan leak"
         );
-        let mut db = crate::db::Db::open(
+        let mut db = crate::Db::open(
             std::env::temp_dir().join(format!("pedra-cf-plant-{}", std::process::id())),
         )
         .unwrap();
@@ -250,7 +250,7 @@ mod tests {
         assert!(!compact_rewrites_sst_cf("", "lock"));
         assert!(
             compact_rewrites_sst_cf_as_is("default", "lock"),
-            "AS-IS tooth: lock compact rewrites default"
+            "AS-IS dente: lock compact rewrites default"
         );
     }
 

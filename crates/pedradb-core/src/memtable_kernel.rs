@@ -2193,11 +2193,26 @@ impl MemTable {
     ) -> Option<(Bytes, Bytes)> {
         let prefix_end = crate::prefix::prefix_exclusive_end(prefix);
         let mut before_owned: Option<Bytes> = before.map(Bytes::copy_from_slice);
-        // A `cf\0…` prefix can only live in that CF shard. A prefix with no
-        // NUL cannot pin `one_slash_idx`: `u/03` + a big-endian version has
-        // its first 0x00 inside the suffix, so the key's shard is `u/03`,
-        // not `u/`. Those shards still overlap the prefix.
-        let nul_pin = prefix.iter().position(|&b| b == 0).map(|i| &prefix[..i]);
+        // RFC-0154 P1.1: a `cf\0…` prefix can only live in that CF shard.
+        // RFC-0180 P0.66: a one-slash raw prefix (`ycsb/…`) pins that idx shard.
+        let pin = prefix
+            .iter()
+            .position(|&b| b == 0)
+            .map(|i| &prefix[..i])
+            .or_else(|| {
+                if self.tail_idx.contains_key(prefix) {
+                    Some(prefix)
+                } else {
+                    let p = one_slash_idx(prefix);
+                    if crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
+                        None
+                    } else if self.tail_idx.contains_key(p) {
+                        Some(p)
+                    } else {
+                        None
+                    }
+                }
+            });
         loop {
             let end_b = match (before_owned.as_deref(), prefix_end.as_deref()) {
                 (Some(b), Some(p)) if b < p => Bound::Excluded(b),
@@ -2245,19 +2260,13 @@ impl MemTable {
                     point_pfxs.push(pfx.clone());
                 }
             };
-            if let Some(only) = nul_pin {
+            if let Some(only) = pin {
                 if let Some((pfx, shard)) = self.tail_idx.get_key_value(only) {
                     consider(pfx, shard, &mut cand, &mut point_pfxs);
                 }
             } else {
                 for (pfx, shard) in &self.tail_idx {
-                    let raw = pfx.as_ref();
-                    if raw.is_empty()
-                        || raw.starts_with(prefix)
-                        || prefix.starts_with(raw)
-                    {
-                        consider(pfx, shard, &mut cand, &mut point_pfxs);
-                    }
+                    consider(pfx, shard, &mut cand, &mut point_pfxs);
                 }
             }
             for pfx in point_pfxs {

@@ -387,6 +387,21 @@ pub fn filesystem_available_bytes(path: &Path) -> io::Result<u64> {
     }
 }
 
+/// Total physical RAM bytes available on the machine, or `None` if unsupported/error.
+#[must_use]
+pub fn total_physical_memory_bytes() -> Option<u64> {
+    #[cfg(all(unix, not(miri)))]
+    {
+        // SAFETY: sysconf with POSIX constants has no side effects and returns -1 on error.
+        let pages = unsafe { libc::sysconf(libc::_SC_PHYS_PAGES) };
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        if pages > 0 && page_size > 0 {
+            return Some((pages as u64).saturating_mul(page_size as u64));
+        }
+    }
+    None
+}
+
 /// WAL mmap grow quantum (RFC-0233 P1.3). Remap-per-append was 0.10× vs
 /// Fjall; Fjall pre-sizes the journal to 64 MiB (`PRE_ALLOCATED_BYTES`)
 /// once. One MiB keeps small tests off a 64 MiB `read` while still
@@ -763,14 +778,14 @@ mod tests {
         assert!(fdatasync_rc_ok(0));
         assert!(!fdatasync_rc_ok(-1));
         assert!(!fdatasync_rc_ok(1));
-        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS tooth: ignore rc");
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
         assert!(
             !fdatasync_eintr_retry_admitted(),
             "EINTR must not retry as Ok (RFC-0015 H1)"
         );
         assert!(
             fdatasync_eintr_retry_admitted_as_is(),
-            "AS-IS tooth: swallow EINTR"
+            "AS-IS dente: swallow EINTR"
         );
     }
 
@@ -811,7 +826,7 @@ mod tests {
     #[test]
     fn fdatasync_rc_ok_on_live_posix_is_not_ok() {
         assert!(!fdatasync_rc_ok(-1));
-        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS tooth: ignore rc");
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
         let dir = temp_dir();
         let path = dir.join("wal.bin");
         let mut f = File::create(&path).unwrap();
@@ -851,7 +866,7 @@ mod tests {
         assert!(fdatasync_rc_ok(0));
         assert!(!fdatasync_rc_ok(-1));
         assert!(!fdatasync_rc_ok(1));
-        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS tooth: ignore rc");
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
         let dir = temp_dir();
         let path = dir.join("g1.bin");
         let mut f = File::create(&path).unwrap();
@@ -898,7 +913,7 @@ mod tests {
     #[test]
     fn fsync_and_dirfd_share_rc_gate() {
         assert!(!fdatasync_rc_ok(-1));
-        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS tooth: ignore rc");
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
         let dir = temp_dir();
         let path = dir.join("g1.bin");
         let mut f = File::create(&path).unwrap();
@@ -1053,5 +1068,12 @@ mod tests {
             sites >= 6,
             "expected the 6 known production FFI rc sites, found {sites}"
         );
+    }
+
+    #[test]
+    fn total_physical_memory_bytes_positive() {
+        if let Some(bytes) = total_physical_memory_bytes() {
+            assert!(bytes >= 1024 * 1024 * 1024, "physical RAM should be at least 1 GiB: {bytes}");
+        }
     }
 }

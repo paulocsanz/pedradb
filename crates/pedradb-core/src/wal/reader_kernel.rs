@@ -500,7 +500,7 @@ mod tests {
         assert!(!crc::crc_match_ok(1, 2));
         assert!(
             crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: any checksum matches"
+            "AS-IS dente: any checksum matches"
         );
         let mut writer = WalWriter::new(Cursor::new(Vec::new())).unwrap();
         writer.add_record(b"durable-payload").unwrap();

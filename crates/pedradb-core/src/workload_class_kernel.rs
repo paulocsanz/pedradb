@@ -81,7 +81,7 @@ mod tests {
         assert_eq!(
             workload_class_as_is(0, 0, 10, 0),
             WorkloadClass::Mixed,
-            "AS-IS tooth: scan window still Mixed"
+            "AS-IS dente: scan window still Mixed"
         );
     }
 
