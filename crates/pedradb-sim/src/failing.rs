@@ -550,8 +550,13 @@ mod tests {
     use std::io::Write;
 
     fn tmp() -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let c = COUNTER.fetch_add(1, Ordering::Relaxed);
         let d = std::env::temp_dir().join(format!(
-            "failing-rfc18-{}",
+            "failing-rfc18-{}-{}-{}",
+            std::process::id(),
+            c,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

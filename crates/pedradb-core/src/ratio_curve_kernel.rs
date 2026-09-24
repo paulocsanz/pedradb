@@ -97,7 +97,7 @@ pub const GET_SIDE_ANCHORS_2026_09_10: [GetSideAnchor; 6] = [
         leg: "prefix_scan",
         records: 100_000_000,
         ratio_permille: 1050,
-        label: "contrast big-guest 2026-09-10 (RAM fits; RFC-0195 decomposition)",
+        label: "contrast big-guest 2026-09-10 (RAM fits; RFC-0195 decomposição)",
     },
     GetSideAnchor {
         leg: "get_hit",
@@ -662,7 +662,7 @@ impl RatioCurveTable {
             }
         }
         out.push_str(&format!(
-            "as_is_ratio_permille={} (flat; the smoke 15/15 cannot see this)\n",
+            "as_is_ratio_permille={} (flat; a cegueira do smoke 15/15)\n",
             self.as_is_ratio_permille
         ));
         out
@@ -674,7 +674,7 @@ impl RatioCurveTable {
 /// hiding the missing scales behind silence.
 #[must_use]
 pub fn render_get_side_anchors(anchors: &[GetSideAnchor]) -> String {
-    let mut out = String::from("get-side anchors (RFC-0197 P2.1; 100M ladder on 2 hosts — 10k/2M/15M/25M have no dated measurement)\n");
+    let mut out = String::from("get-side anchors (RFC-0197 P2.1; escada 100M em 2 caixas — 10k/2M/15M/25M SEM medição datada)\n");
     for a in anchors {
         out.push_str(&format!(
             "get_anchor leg={} records={} ratio_permille={} label={}\n",
@@ -841,7 +841,7 @@ mod tests {
         // deferral is structural, not an omission.
         assert_eq!(covered, vec![100_000_000]);
         let render = render_get_side_anchors(&GET_SIDE_ANCHORS_2026_09_10);
-        assert!(render.contains("10k/2M/15M/25M have no dated measurement"));
+        assert!(render.contains("10k/2M/15M/25M SEM medição datada"));
         assert!(render.contains("get_anchor leg=prefix_scan records=100000000 ratio_permille=700"));
         assert!(render.contains("ratio_permille=1050"));
         assert!(render.contains("ratio_permille=1576"));

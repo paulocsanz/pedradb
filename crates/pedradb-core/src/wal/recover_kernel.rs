@@ -557,7 +557,7 @@ mod tests {
         assert_eq!(
             recover_collect_act_as_is(RecoverKind::Crc, 3, true, 0),
             RecoverAct::Resync,
-            "AS-IS tooth: CRC becomes silent resync"
+            "AS-IS dente: CRC becomes silent resync"
         );
     }
 
@@ -573,7 +573,7 @@ mod tests {
         assert_eq!(
             from_record_type_as_is(RecordType::First),
             FragKind::Middle,
-            "AS-IS tooth: FIRST fragment byte decodes as continuation"
+            "AS-IS dente: FIRST fragment byte decodes as continuation"
         );
         // Downstream: the kernel starts the scratch; the misdecode is an
         // orphan Middle with nothing in flight — F14 fail-stop.
@@ -707,5 +707,18 @@ mod kani_proofs {
         // Divergence: AS-IS adds exactly the CRC case.
         let r_as_is = is_length_resyncable_as_is(kind);
         assert!(r_as_is == (r || u == 6));
+    }
+
+    /// RFC-0260: RecoverKind::Record is an absolute invariant: regardless of
+    /// prefix_n, can_skip, skips counter, or in_resync state, a valid record
+    /// MUST always be kept (never FailStop, never Resync, never Stop).
+    #[kani::proof]
+    fn recover_record_is_unconditional_keep() {
+        let prefix_n: u64 = kani::any();
+        let can_skip: bool = kani::any();
+        let skips: u64 = kani::any();
+        let in_resync: bool = kani::any();
+        let act = recover_collect_act(RecoverKind::Record, prefix_n, can_skip, skips, in_resync);
+        assert_eq!(act, RecoverAct::KeepRecord);
     }
 }

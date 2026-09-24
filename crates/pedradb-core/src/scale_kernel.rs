@@ -363,7 +363,7 @@ mod tests {
         assert_eq!(
             scale_forecast_as_is(0, 0).p_best,
             0,
-            "AS-IS tooth: empty walk is 0 files not L0-best probes"
+            "AS-IS dente: empty walk is 0 files not L0-best probes"
         );
         let src = include_str!("scale_kernel.rs");
         let forecast = src

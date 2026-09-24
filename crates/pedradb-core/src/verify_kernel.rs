@@ -376,7 +376,7 @@ pub fn verify_at_rest<E: Env>(env: &E, dir: impl AsRef<Path>) -> VerifyReport {
                 Ok(n) => report.blocks = report.blocks.saturating_add(n),
                 Err((off, msg)) => report.fail(&name, off, msg),
             }
-        } else if name == WAL_FILE_NAME {
+        } else if name == WAL_FILE_NAME || name.starts_with("WAL.arch") {
             report.files = report.files.saturating_add(1);
             match Wal::recover_on(env, &path) {
                 Ok(recs) => report.blocks = report.blocks.saturating_add(recs.len() as u64),
@@ -566,6 +566,7 @@ fn collect_durable_relpaths<E: Env>(env: &E, dir: &Path) -> Vec<String> {
     for n in top {
         if has_ext(&n, "sst")
             || n == WAL_FILE_NAME
+            || n.starts_with("WAL.arch")
             || n == VLOG_FILE_NAME
             || n == VLOG_NEW_NAME
             || parse_blob_name(&n).is_some()
@@ -892,7 +893,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: any changelog crc would match"
+            "AS-IS dente: any changelog crc would match"
         );
         let dir = temp_dir();
         {
@@ -975,7 +976,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_match_ok(1, 2));
         assert!(
             crate::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: any checkpoint crc would match"
+            "AS-IS dente: any checkpoint crc would match"
         );
         let dir = temp_dir();
         seed_closed_db(&dir);
@@ -1016,7 +1017,7 @@ mod tests {
         assert!(!crate::wal::crc::crc_collision_admitted());
         assert!(
             crate::wal::crc::crc_collision_admitted_as_is(),
-            "AS-IS tooth: matching CRC looks collision-free"
+            "AS-IS dente: matching CRC looks collision-free"
         );
         let dir = temp_dir();
         fs::create_dir_all(&dir).unwrap();

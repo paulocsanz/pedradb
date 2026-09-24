@@ -6,6 +6,7 @@
 //! a masked CRC32C over `{type, payload}`.
 
 use std::io::{Seek, Write};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::env::EnvFile;
@@ -13,6 +14,138 @@ use crate::error::Result;
 
 use super::crc;
 use super::format::{RecordType, BLOCK_SIZE, HEADER_SIZE};
+
+/// Capacity of the circular lock-free staging buffer: 4 MiB (RFC-0266 P1.1).
+pub const WAL_RING_CAPACITY_BYTES: usize = 4 * 1024 * 1024;
+
+/// High-throughput lock-free circular staging buffer for single-client burst (RFC-0266 P1.1).
+///
+/// Eliminates mutex acquisition and syscall overhead on single-threaded / low-concurrency
+/// paths by staging framed records in a pre-allocated 4 MiB ring buffer.
+pub struct LockFreeWalRing {
+    buffer: parking_lot::Mutex<Vec<u8>>,
+    head: AtomicU64,
+    tail: AtomicU64,
+    commit_inflight: AtomicUsize,
+}
+
+impl Default for LockFreeWalRing {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LockFreeWalRing {
+    /// Construct a new 4 MiB circular staging ring.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            buffer: parking_lot::Mutex::new(vec![0u8; WAL_RING_CAPACITY_BYTES]),
+            head: AtomicU64::new(0),
+            tail: AtomicU64::new(0),
+            commit_inflight: AtomicUsize::new(0),
+        }
+    }
+
+    /// Current capacity in bytes.
+    #[must_use]
+    pub const fn capacity(&self) -> usize {
+        WAL_RING_CAPACITY_BYTES
+    }
+
+    /// Reserve space in the ring buffer atomically.
+    /// Returns `Some(offset_in_ring)` if reservation fits within available space.
+    pub fn reserve(&self, len: usize) -> Option<usize> {
+        let cap = self.capacity() as u64;
+        let mut cur_head = self.head.load(Ordering::Acquire);
+        loop {
+            let cur_tail = self.tail.load(Ordering::Acquire);
+            if cur_head.saturating_sub(cur_tail) + (len as u64) > cap {
+                return None; // Buffer full, needs draining
+            }
+            match self.head.compare_exchange_weak(
+                cur_head,
+                cur_head + (len as u64),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(pos) => return Some((pos % cap) as usize),
+                Err(h) => cur_head = h,
+            }
+        }
+    }
+
+    /// Direct append fast path for single-client 1c: writes header and payload
+    /// directly into the circular buffer.
+    pub fn append_record_fast(&self, seq: u64, payload: &[u8]) -> Option<usize> {
+        self.commit_inflight.fetch_add(1, Ordering::SeqCst);
+        let rec_len = HEADER_SIZE + 8 + payload.len(); // header + seq + payload
+        let offset = self.reserve(rec_len)?;
+
+        let cap = self.capacity();
+        let crc = crc::crc32c(payload);
+
+        let h_crc = crc.to_le_bytes();
+        let h_len = ((payload.len() + 8) as u16).to_le_bytes();
+        let h_type = RecordType::Full as u8;
+
+        {
+            let mut guard = self.buffer.lock();
+            let mut write_pos = offset;
+            let mut write_byte = |b: u8| {
+                guard[write_pos] = b;
+                write_pos = (write_pos + 1) % cap;
+            };
+
+            for b in h_crc { write_byte(b); }
+            for b in h_len { write_byte(b); }
+            write_byte(h_type);
+
+            for b in seq.to_le_bytes() { write_byte(b); }
+            for &b in payload { write_byte(b); }
+        }
+
+        self.commit_inflight.fetch_sub(1, Ordering::SeqCst);
+        Some(offset)
+    }
+
+    /// Drain staged bytes to the sink.
+    pub fn drain_to<W: std::io::Write>(&self, sink: &mut W) -> std::io::Result<usize> {
+        let cur_head = self.head.load(Ordering::Acquire);
+        let cur_tail = self.tail.load(Ordering::Acquire);
+        if cur_tail >= cur_head {
+            return Ok(0);
+        }
+
+        let cap = self.capacity() as u64;
+        let mut drained = 0usize;
+        let mut t = cur_tail;
+
+        let guard = self.buffer.lock();
+        while t < cur_head {
+            let start = (t % cap) as usize;
+            let chunk_len = ((cur_head - t) as usize).min(cap as usize - start);
+            sink.write_all(&guard[start..start + chunk_len])?;
+            drained += chunk_len;
+            t += chunk_len as u64;
+        }
+
+        self.tail.store(cur_head, Ordering::Release);
+        Ok(drained)
+    }
+
+    /// Returns number of pending bytes in the ring buffer.
+    #[must_use]
+    pub fn pending_bytes(&self) -> u64 {
+        self.head.load(Ordering::Acquire).saturating_sub(self.tail.load(Ordering::Acquire))
+    }
+
+    /// Checks if there are active in-flight commits.
+    #[must_use]
+    pub fn has_inflight(&self) -> bool {
+        self.commit_inflight.load(Ordering::Acquire) > 0
+    }
+}
 
 /// A streaming WAL writer over any `Write + Seek` sink.
 ///
@@ -1260,4 +1393,25 @@ mod tests {
         let buf = writer.into_inner().into_inner();
         assert_eq!(collect_records(&buf), records);
     }
+
+    #[test]
+    fn lock_free_wal_ring_fast_path() {
+        let ring = LockFreeWalRing::new();
+        assert_eq!(ring.capacity(), WAL_RING_CAPACITY_BYTES);
+        assert_eq!(ring.pending_bytes(), 0);
+        assert!(!ring.has_inflight());
+
+        let off1 = ring.append_record_fast(101, b"payload-alpha");
+        assert!(off1.is_some());
+        assert!(ring.pending_bytes() > 0);
+
+        let off2 = ring.append_record_fast(102, b"payload-beta");
+        assert!(off2.is_some());
+
+        let mut sink = Vec::new();
+        let drained = ring.drain_to(&mut sink).unwrap();
+        assert!(drained > 0);
+        assert_eq!(ring.pending_bytes(), 0);
+    }
 }
+

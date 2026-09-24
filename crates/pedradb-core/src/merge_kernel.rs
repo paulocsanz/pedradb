@@ -282,7 +282,7 @@ pub fn sift_step(r_exists: bool, r_lt_l: bool, best_lt_hole: bool) -> SiftStep {
     }
 }
 
-/// AS-IS tooth (three-teeth): the repair never happens — the heap trusts
+/// AS-IS dente (three-teeth): the repair never happens — the heap trusts
 /// slot order and degrades to registration order.
 #[must_use]
 pub fn sift_step_as_is(_r_exists: bool, _r_lt_l: bool, _best_lt_hole: bool) -> SiftStep {
@@ -2214,7 +2214,7 @@ mod tests {
         );
         assert!(
             get_live_as_is(&[ValueType::Deletion], &[true]),
-            "AS-IS tooth: hidden/Deletion surfaces"
+            "AS-IS dente: hidden/Deletion surfaces"
         );
         let src = include_str!("merge_kernel.rs");
         assert!(
@@ -2271,7 +2271,7 @@ mod tests {
         assert_eq!(wal_commit_plan(true, true), WalCommitPlan::AppendSyncFence);
         assert!(
             put_crash_reopen_survives_as_is(1, false, true, true, true, 8, 8, 8, &live, &vis),
-            "AS-IS tooth: fenced put still recovered live"
+            "AS-IS dente: fenced put still recovered live"
         );
         let src = include_str!("merge_kernel.rs");
         let prod = src.split("mod tests").next().expect("tests module");
@@ -2300,7 +2300,7 @@ mod tests {
         assert!(!visible_at(ValueType::RangeDeletion, false));
         assert!(
             visible_at_as_is(ValueType::Deletion, true),
-            "AS-IS tooth: never hides"
+            "AS-IS dente: never hides"
         );
         let entries = vec![
             (ik(b"a", 1, ValueType::Value), Bytes::from_static(b"1")),
@@ -2322,7 +2322,7 @@ mod tests {
         assert!(!visible_at(ValueType::Value, true));
         assert!(
             visible_at_as_is(ValueType::Value, true),
-            "AS-IS tooth: hidden value scans live"
+            "AS-IS dente: hidden value scans live"
         );
         let entries = vec![
             (ik(b"b", 1, ValueType::Value), Bytes::from_static(b"1")),

@@ -829,7 +829,7 @@ impl YcsbRunner {
 
     /// RFC-0043 P2.1 — Quicksilver-inspired mixes (published numbers, not a
     /// production replay): hot working set, negative lookups, batched writes.
-    pub fn run_qs<E: Engine>(&mut self, e: &E) -> Vec<String> {
+    pub fn run_qs<E: Engine>(&mut self, e: &E, only: Option<&str>) -> Vec<String> {
         let records = self.cfg.records;
         let cfg_ops = self.cfg.ops;
         let batch = self.cfg.batch;
@@ -837,17 +837,72 @@ impl YcsbRunner {
         let hot = records.div_ceil(10).max(16).min(records);
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(3);
+        let want = |name: &str| shape_wanted_in(name, only);
 
-        // qs_hot_get — 99% get on the hot 10%, 1% WriteBatch ≥32 on that set.
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut gets, mut writes, mut errors) = (0u64, 0u64, 0u64);
-        let t0 = Instant::now();
-        for i in 0..cfg_ops {
-            let t = Instant::now();
-            if i % 100 == 0 {
+        if want("qs_hot_get") {
+            // qs_hot_get — 99% get on the hot 10%, 1% WriteBatch ≥32 on that set.
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut gets, mut writes, mut errors) = (0u64, 0u64, 0u64);
+            let t0 = Instant::now();
+            for i in 0..cfg_ops {
+                let t = Instant::now();
+                if i % 100 == 0 {
+                    let mut wb = Vec::with_capacity(batch);
+                    for _ in 0..batch {
+                        let u = (xorshift(&mut rng) as usize) % hot;
+                        wb.push(CfWrite::Put {
+                            cf: "default",
+                            k: ykey(u),
+                            v: yval.clone(),
+                        });
+                    }
+                    if e.batch(std::mem::take(&mut wb)) {
+                        writes += batch as u64;
+                    } else {
+                        errors += 1;
+                    }
+                } else {
+                    let u = (xorshift(&mut rng) as usize) % hot;
+                    match e.get(&ykey(u)) {
+                        Ok(_) => gets += 1,
+                        Err(()) => errors += 1,
+                    }
+                }
+                lats.push(ms(t));
+            }
+            blocks.push(summarize("qs_hot_get", cfg_ops, t0.elapsed(), &mut lats));
+            eprintln!("[rocks-parity] qs_hot_get done gets={gets} writes={writes} errors={errors}");
+        }
+
+        if want("qs_neg_lookup") {
+            // qs_neg_lookup — gets past the keyspace (QS: ~10× more misses).
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut misses, mut errors) = (0u64, 0u64);
+            let t0 = Instant::now();
+            for _ in 0..cfg_ops {
+                let t = Instant::now();
+                let u = records + (xorshift(&mut rng) as usize % records.max(1));
+                match e.get(&ykey(u)) {
+                    Ok(None) => misses += 1,
+                    Ok(Some(_)) => {}
+                    Err(()) => errors += 1,
+                }
+                lats.push(ms(t));
+            }
+            blocks.push(summarize("qs_neg_lookup", cfg_ops, t0.elapsed(), &mut lats));
+            eprintln!("[rocks-parity] qs_neg_lookup done misses={misses} errors={errors}");
+        }
+
+        if want("qs_batch_write") {
+            // qs_batch_write — every op is one batched put (QS root write).
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut puts, mut errors) = (0u64, 0u64);
+            let t0 = Instant::now();
+            for _ in 0..cfg_ops {
+                let t = Instant::now();
                 let mut wb = Vec::with_capacity(batch);
                 for _ in 0..batch {
-                    let u = (xorshift(&mut rng) as usize) % hot;
+                    let u = (xorshift(&mut rng) as usize) % records;
                     wb.push(CfWrite::Put {
                         cf: "default",
                         k: ykey(u),
@@ -855,68 +910,20 @@ impl YcsbRunner {
                     });
                 }
                 if e.batch(std::mem::take(&mut wb)) {
-                    writes += batch as u64;
+                    puts += batch as u64;
                 } else {
                     errors += 1;
                 }
-            } else {
-                let u = (xorshift(&mut rng) as usize) % hot;
-                match e.get(&ykey(u)) {
-                    Ok(_) => gets += 1,
-                    Err(()) => errors += 1,
-                }
+                lats.push(ms(t));
             }
-            lats.push(ms(t));
+            blocks.push(summarize(
+                "qs_batch_write",
+                cfg_ops,
+                t0.elapsed(),
+                &mut lats,
+            ));
+            eprintln!("[rocks-parity] qs_batch_write done puts={puts} errors={errors}");
         }
-        blocks.push(summarize("qs_hot_get", cfg_ops, t0.elapsed(), &mut lats));
-        eprintln!("[rocks-parity] qs_hot_get done gets={gets} writes={writes} errors={errors}");
-
-        // qs_neg_lookup — gets past the keyspace (QS: ~10× more misses).
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut misses, mut errors) = (0u64, 0u64);
-        let t0 = Instant::now();
-        for _ in 0..cfg_ops {
-            let t = Instant::now();
-            let u = records + (xorshift(&mut rng) as usize % records.max(1));
-            match e.get(&ykey(u)) {
-                Ok(None) => misses += 1,
-                Ok(Some(_)) => {}
-                Err(()) => errors += 1,
-            }
-            lats.push(ms(t));
-        }
-        blocks.push(summarize("qs_neg_lookup", cfg_ops, t0.elapsed(), &mut lats));
-        eprintln!("[rocks-parity] qs_neg_lookup done misses={misses} errors={errors}");
-
-        // qs_batch_write — every op is one batched put (QS root write).
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut puts, mut errors) = (0u64, 0u64);
-        let t0 = Instant::now();
-        for _ in 0..cfg_ops {
-            let t = Instant::now();
-            let mut wb = Vec::with_capacity(batch);
-            for _ in 0..batch {
-                let u = (xorshift(&mut rng) as usize) % records;
-                wb.push(CfWrite::Put {
-                    cf: "default",
-                    k: ykey(u),
-                    v: yval.clone(),
-                });
-            }
-            if e.batch(std::mem::take(&mut wb)) {
-                puts += batch as u64;
-            } else {
-                errors += 1;
-            }
-            lats.push(ms(t));
-        }
-        blocks.push(summarize(
-            "qs_batch_write",
-            cfg_ops,
-            t0.elapsed(),
-            &mut lats,
-        ));
-        eprintln!("[rocks-parity] qs_batch_write done puts={puts} errors={errors}");
 
         self.rng = rng;
         blocks
@@ -3723,7 +3730,7 @@ mod tests {
         };
         let mut r = YcsbRunner::new(cfg);
         r.seed(&e);
-        let blocks = r.run_qs(&e);
+        let blocks = r.run_qs(&e, None);
         let names: Vec<_> = blocks
             .iter()
             .map(|b| {
@@ -3743,6 +3750,34 @@ mod tests {
         for b in &blocks {
             assert!(b.contains("\"p50_ms\""), "{b}");
         }
+    }
+
+    /// RFC-0240 — `ROCKS_PARITY_ONLY` must gate the qs suite itself (a
+    /// single-shape re-meter at 100M cannot pay for the other two shapes).
+    /// `only` is a parameter (not an env read) so parallel tests never race.
+    #[test]
+    fn rfc0240_qs_only_filters_shapes() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = crate::engines::CompatEngine::open(dir.path());
+        let cfg = Cfg {
+            records: 64,
+            ops: 100,
+            payload: 16,
+            zipfian: false,
+            batch: 8,
+        };
+        let mut r = YcsbRunner::new(cfg);
+        r.seed(&e);
+        let blocks = r.run_qs(&e, Some("qs_neg_lookup"));
+        let names: Vec<_> = blocks
+            .iter()
+            .map(|b| {
+                b.split("\"name\": \"")
+                    .nth(1)
+                    .and_then(|s| s.split('"').next())
+            })
+            .collect();
+        assert_eq!(names, vec![Some("qs_neg_lookup")]);
     }
 
     #[test]

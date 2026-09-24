@@ -59,6 +59,13 @@ impl<E: Env> Db<E> {
         if opts.sst_payload_budget_bytes.is_none() {
             opts.sst_payload_budget_bytes = Some(sst_payload_budget_from_env());
         }
+        if opts.large_value_threshold.is_none() {
+            if let Ok(v) = std::env::var("PEDRA_MIN_BLOB_BYTES") {
+                if let Ok(threshold) = v.trim().parse::<usize>() {
+                    opts.large_value_threshold = Some(threshold);
+                }
+            }
+        }
         let file_cache = Arc::new(crate::env::FileHandleCache::new(
             sst_file_cache_entries_from_env(),
         ));
@@ -512,14 +519,14 @@ impl<E: Env> Db<E> {
         ) {
             crate::vlog_gc_kernel::VlogRecoverAction::NoVlog => None,
             crate::vlog_gc_kernel::VlogRecoverAction::OpenBlob => {
-                Some(Mutex::new(ValueLog::open_blob(&env, &dir, blob_active)?))
+                Some(Arc::new(Mutex::new(ValueLog::open_blob(&env, &dir, blob_active)?)))
             }
             crate::vlog_gc_kernel::VlogRecoverAction::OpenNew
             | crate::vlog_gc_kernel::VlogRecoverAction::OpenPrimary
             | crate::vlog_gc_kernel::VlogRecoverAction::CreateEmptyPrimary
-            | crate::vlog_gc_kernel::VlogRecoverAction::RefuseOpen => Some(Mutex::new(
+            | crate::vlog_gc_kernel::VlogRecoverAction::RefuseOpen => Some(Arc::new(Mutex::new(
                 ValueLog::open_with_flag(&env, &dir, vlog_use_new)?,
-            )),
+            ))),
         };
 
         let mut db = Self {
@@ -610,7 +617,6 @@ impl<E: Env> Db<E> {
             scan_sst_probed: AtomicU64::new(0),
             get_mem_hit: AtomicU64::new(0),
             get_sst_fallback: AtomicU64::new(0),
-            lookup_sst_probes: AtomicU64::new(0),
             class_z0: Arc::new(AtomicU64::new(0)),
             class_z1: Arc::new(AtomicU64::new(0)),
             class_q: AtomicU64::new(0),
@@ -632,6 +638,11 @@ impl<E: Env> Db<E> {
             write_stall_drain: false,
             write_stall_count: 0,
             write_pressure_count: 0,
+            max_ram_bytes: crate::ram_pressure_kernel::resolve_ram_budget(
+                None,
+                pedradb_posix::total_physical_memory_bytes(),
+            ),
+            ram_pressure_throttle_count: 0,
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
             earliest_readable_seq,

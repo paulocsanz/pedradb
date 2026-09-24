@@ -2,7 +2,7 @@
 //!
 //! **Single artifact (pair `probe_order`):** this file is what `rustc` links
 //! *and* what Verus proves (`cfg(verus_keep_ghost)`). Slice covering walk
-//! stays rustc. No twin copy.
+//! stays rustc. No twin-cópia.
 //!
 //!   ./scripts/verus_probe_order.sh
 //!
@@ -156,7 +156,7 @@ pub(crate) fn probe_order_covering(
     out
 }
 
-/// AS-IS tooth: same covering test, oldest-first (historical `.rev()` walk).
+/// AS-IS dente: same covering test, oldest-first (historical `.rev()` walk).
 #[cfg(not(verus_keep_ghost))]
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn probe_order_covering_as_is(
@@ -528,7 +528,7 @@ mod tests {
         );
         assert!(
             run_pairwise_disjoint_los_as_is(&los, &his),
-            "AS-IS tooth: `<=` arms the bisect on the equal-lo tie"
+            "AS-IS dente: `<=` arms the bisect on the equal-lo tie"
         );
         // Live anchor: each table alone answers put vs tombstone — the
         // walk order is what decides which one the point lookup sees.
@@ -570,7 +570,7 @@ mod tests {
         assert_eq!(
             mutant,
             vec![0, 1],
-            "AS-IS tooth: older put first — the resurrecting order"
+            "AS-IS dente: older put first — the resurrecting order"
         );
         // Live anchor: the gate's first pick is the table the lookup
         // consults — the newest answers Deleted.
@@ -688,6 +688,6 @@ mod tests {
             newest_first.len() * (by_lo.len() + 1)
         );
         let mutant = probe_order_covering_as_is(&newest_first, &by_lo, 2, &[k, k], k);
-        assert_eq!(mutant, vec![0, 1], "AS-IS tooth: oldest first");
+        assert_eq!(mutant, vec![0, 1], "AS-IS dente: oldest first");
     }
 }

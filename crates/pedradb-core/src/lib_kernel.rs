@@ -54,6 +54,8 @@ pub mod error;
 pub mod flush_kernel;
 pub mod group_commit_kernel;
 pub mod group_window_kernel;
+/// Health assessment, self-diagnosis, and telemetry exporters.
+pub mod health_kernel;
 #[path = "history_kernel.rs"]
 pub mod history;
 #[path = "host_kernel.rs"]
@@ -74,6 +76,8 @@ pub mod write_cycle_kernel;
 
 /// Disk-pressure watermarks (RFC-0179): refuse writes before ENOSPC, keep reads up.
 pub mod disk_pressure_kernel;
+/// RAM-pressure watermarks and backpressure admission (OOM prevention).
+pub mod ram_pressure_kernel;
 pub mod leftover_page_kernel;
 #[path = "lock_kernel.rs"]
 pub mod lock;
@@ -145,7 +149,7 @@ pub use changelog_kernel::{
 pub use concurrent::ConcurrentDb;
 pub use db::{
     copy_db_directory, escape_inline_value, read_checkpoint_meta, BatchOp, BlobGcCandidate,
-    CheckpointMeta, CompactOptions, DbStats, FenceClass, FenceRecovery, FenceReport,
+    CheckpointMeta, CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport,
     HistoryHorizon, HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport,
     ScanProjection, Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions, WritePhaseStats,
     CHECKPOINT_META_FILE, DEFAULT_SST_PAYLOAD_BUDGET_BYTES, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL,
@@ -154,6 +158,10 @@ pub use db::{
 pub use disk_pressure_kernel::{
     compact_refuse, disk_pressure_admit, disk_probe_or_unknown, external_write_admitted,
     DiskPressureAdmit, DISK_HARD_FREE_BYTES, DISK_SOFT_FREE_BYTES,
+};
+pub use health_kernel::{
+    evaluate_db_health, format_json_status, format_prometheus_metrics, DbHealthReport,
+    HealthConfig, HealthIssue, HealthStatus, RecommendedIntervention,
 };
 pub use env::{
     admit_disk_write, probe_available_bytes, AdviseKind, Env, EnvFile, EnvSource, SstFileSource,
@@ -196,3 +204,4 @@ pub use vlog::{
     VLOG_VALUE_PREFIX,
 };
 pub use workload_class_kernel::{workload_class, workload_class_as_is, WorkloadClass};
+pub mod sync_kernel;

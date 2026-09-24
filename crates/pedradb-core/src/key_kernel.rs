@@ -222,7 +222,7 @@ mod tests {
         assert_eq!(
             pack_sequence_and_type_as_is(1, ValueType::Deletion),
             pack_sequence_and_type_as_is(0, ValueType::Value),
-            "AS-IS tooth: seq|kind without shift collides"
+            "AS-IS dente: seq|kind without shift collides"
         );
         let del = InternalKey::new(Bytes::from_static(b"k"), 1, ValueType::Deletion);
         let val = InternalKey::new(Bytes::from_static(b"k"), 0, ValueType::Value);
@@ -239,7 +239,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut db = crate::db::Db::open_with(
+        let mut db = crate::Db::open_with(
             &dir,
             crate::OpenOptions {
                 exclusive: true,

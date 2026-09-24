@@ -8,7 +8,9 @@
 
 use bytes::Bytes;
 
-use crate::key::SequenceNumber;
+use std::ops::Bound;
+
+use crate::key::{InternalKey, SequenceNumber, ValueType};
 use crate::memtable::Lookup;
 
 /// One latched family's uninstalled tail.
@@ -17,7 +19,7 @@ pub(crate) struct BulkRun {
     keys: Vec<Bytes>,
     vals: Vec<Bytes>,
     seqs: Vec<SequenceNumber>,
-    kinds: Vec<crate::key::ValueType>,
+    kinds: Vec<ValueType>,
     bytes: usize,
 }
 
@@ -30,6 +32,16 @@ impl BulkRun {
     }
 
     pub(crate) fn push(&mut self, key: Bytes, val: Bytes, seq: SequenceNumber) {
+        self.push_with_kind(key, val, seq, ValueType::Value);
+    }
+
+    pub(crate) fn push_with_kind(
+        &mut self,
+        key: Bytes,
+        val: Bytes,
+        seq: SequenceNumber,
+        kind: ValueType,
+    ) {
         self.bytes = self
             .bytes
             .saturating_add(key.len())
@@ -38,38 +50,7 @@ impl BulkRun {
         self.keys.push(key);
         self.vals.push(val);
         self.seqs.push(seq);
-        self.kinds.push(crate::key::ValueType::Value);
-    }
-
-    /// Insert or replace `key`, keeping the newest sequence. Used when a
-    /// memtable family (including a probing delete) is absorbed into the run.
-    pub(crate) fn upsert(
-        &mut self,
-        key: Bytes,
-        val: Bytes,
-        seq: SequenceNumber,
-        kind: crate::key::ValueType,
-    ) {
-        match self.keys.binary_search_by(|k| k.as_ref().cmp(key.as_ref())) {
-            Ok(i) => {
-                if seq >= self.seqs[i] {
-                    self.vals[i] = val;
-                    self.seqs[i] = seq;
-                    self.kinds[i] = kind;
-                }
-            }
-            Err(i) => {
-                self.bytes = self
-                    .bytes
-                    .saturating_add(key.len())
-                    .saturating_add(val.len())
-                    .saturating_add(8);
-                self.keys.insert(i, key);
-                self.vals.insert(i, val);
-                self.seqs.insert(i, seq);
-                self.kinds.insert(i, kind);
-            }
-        }
+        self.kinds.push(kind);
     }
 
     #[must_use]
@@ -88,30 +69,18 @@ impl BulkRun {
     }
 
     #[must_use]
-    pub(crate) fn lookup_entry(
-        &self,
-        key: &[u8],
-        snapshot: SequenceNumber,
-    ) -> Option<(SequenceNumber, Lookup)> {
+    pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
         let Ok(i) = self.keys.binary_search_by(|k| k.as_ref().cmp(key)) else {
-            return None;
+            return Lookup::NotFound;
         };
         if self.seqs[i] > snapshot {
-            return None;
+            return Lookup::NotFound;
         }
-        let look = match self.kinds[i] {
-            crate::key::ValueType::Value => Lookup::Found(self.vals[i].clone()),
-            crate::key::ValueType::Deletion | crate::key::ValueType::RangeDeletion => {
-                Lookup::Deleted
-            }
-        };
-        Some((self.seqs[i], look))
-    }
-
-    pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
-        self.lookup_entry(key, snapshot)
-            .map(|(_, look)| look)
-            .unwrap_or(Lookup::NotFound)
+        match self.kinds.get(i).copied().unwrap_or(ValueType::Value) {
+            ValueType::Value => Lookup::Found(self.vals[i].clone()),
+            ValueType::Deletion => Lookup::Deleted,
+            _ => Lookup::NotFound,
+        }
     }
 
     #[must_use]
@@ -129,8 +98,79 @@ impl BulkRun {
         &self.seqs
     }
 
-    pub(crate) fn kinds(&self) -> &[crate::key::ValueType] {
+    #[must_use]
+    pub(crate) fn kinds(&self) -> &[ValueType] {
         &self.kinds
+    }
+
+    pub(crate) fn last_visible_under_prefix(
+        &self,
+        prefix: &[u8],
+        snapshot: SequenceNumber,
+        hi: Option<&[u8]>,
+    ) -> Option<Bytes> {
+        let n = self.keys.len();
+        if n == 0 {
+            return None;
+        }
+        let end_idx = match hi {
+            Some(h) => match self.keys.binary_search_by(|k| k.as_ref().cmp(h)) {
+                Ok(i) | Err(i) => i,
+            },
+            None => n,
+        };
+        for i in (0..end_idx).rev() {
+            let k = &self.keys[i];
+            if !k.starts_with(prefix) {
+                if k.as_ref() < prefix {
+                    break;
+                }
+                continue;
+            }
+            if self.seqs[i] <= snapshot {
+                return Some(k.clone());
+            }
+        }
+        None
+    }
+
+    pub(crate) fn iter_range<'a>(
+        &'a self,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        snapshot: SequenceNumber,
+    ) -> impl Iterator<Item = (InternalKey, Bytes)> + 'a {
+        let start_idx = match start {
+            Bound::Unbounded => 0,
+            Bound::Included(s) => match self.keys.binary_search_by(|k| k.as_ref().cmp(s)) {
+                Ok(i) | Err(i) => i,
+            },
+            Bound::Excluded(s) => match self.keys.binary_search_by(|k| k.as_ref().cmp(s)) {
+                Ok(i) => i.saturating_add(1),
+                Err(i) => i,
+            },
+        };
+        let end_idx = match end {
+            Bound::Unbounded => self.keys.len(),
+            Bound::Included(e) => match self.keys.binary_search_by(|k| k.as_ref().cmp(e)) {
+                Ok(i) => i.saturating_add(1),
+                Err(i) => i,
+            },
+            Bound::Excluded(e) => match self.keys.binary_search_by(|k| k.as_ref().cmp(e)) {
+                Ok(i) | Err(i) => i,
+            },
+        };
+        let effective_end = end_idx.min(self.keys.len());
+        let effective_start = start_idx.min(effective_end);
+        (effective_start..effective_end).filter_map(move |i| {
+            if self.seqs[i] > snapshot {
+                return None;
+            }
+            let k = &self.keys[i];
+            let kind = self.kinds.get(i).copied().unwrap_or(ValueType::Value);
+            let ik = InternalKey::new(k.clone(), self.seqs[i], kind);
+            Some((ik, self.vals[i].clone()))
+        })
     }
 }
 

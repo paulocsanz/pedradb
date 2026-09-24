@@ -55,7 +55,7 @@ mod tests {
         assert_eq!(
             filter_partition_as_is(5, 4),
             0,
-            "AS-IS tooth: every key still partition 0"
+            "AS-IS dente: every key still partition 0"
         );
     }
 
