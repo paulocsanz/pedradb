@@ -1,0 +1,15 @@
+{
+  "bench": "scan_prefetch_n_window",
+  "keys": 48,
+  "value_bytes": 2048,
+  "rows": [
+    {"n":1,"rounds":117,"ms_per_scan":0.6868},
+    {"n":2,"rounds":124,"ms_per_scan":0.6484},
+    {"n":4,"rounds":123,"ms_per_scan":0.6504},
+    {"n":8,"rounds":122,"ms_per_scan":0.6564},
+    {"n":16,"rounds":122,"ms_per_scan":0.6564}
+  ],
+  "best_n": 2,
+  "default_n": 4,
+  "note": "single-threaded Env reads; lab laptop"
+}

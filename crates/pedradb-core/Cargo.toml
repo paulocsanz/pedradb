@@ -33,6 +33,7 @@ pedradb-posix.workspace = true
 [dev-dependencies]
 # Same production recover_kernel as collect_all (F4 / F14).
 stateright = "0.31"
+loom = "0.7"
 
 [[bench]]
 name = "baseline"
