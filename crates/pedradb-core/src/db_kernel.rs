@@ -6832,13 +6832,22 @@ impl<E: Env> Db<E> {
         cap
     }
 
-    /// Bulk-run flush size: per-CF / global write buffer, **not**
-    /// `PEDRA_STAGE_MAX_BYTES` (that clamp is for memtable staging).
+    /// Bulk-run flush size: per-CF / global write buffer, clamped by
+    /// `PEDRA_STAGE_MAX_BYTES` when set.
     fn bulk_chunk_cap(&self) -> Option<usize> {
         let mut cap = self.auto_flush_bytes.filter(|n| *n > 0);
         for &n in self.cf_write_buffer.values() {
             if n > 0 && cap.is_none_or(|c| n > c) {
                 cap = Some(n);
+            }
+        }
+        if let Some(c) = cap {
+            if let Ok(v) = std::env::var("PEDRA_STAGE_MAX_BYTES") {
+                if let Ok(max) = v.parse::<usize>() {
+                    if max > 0 && max < c {
+                        return Some(max);
+                    }
+                }
             }
         }
         cap
@@ -10167,10 +10176,26 @@ impl<E: Env> Db<E> {
         self.commit_inflight.load(Ordering::Acquire)
     }
 
-    #[cfg(test)]
-    pub(crate) fn bulk_live_bytes(&self) -> usize {
+    #[must_use]
+    pub fn bulk_live_bytes(&self) -> usize {
         self.bulk_runs.values().map(|r| r.bytes()).sum()
     }
+
+    #[must_use]
+    pub fn parked_bulk_bytes(&self) -> usize {
+        self.parked_bulk.iter().map(|(_, r)| r.bytes()).sum()
+    }
+
+    #[must_use]
+    pub fn sst_total_metadata_bytes(&self) -> usize {
+        self.ssts.iter().map(|s| s.metadata_memory_usage()).sum()
+    }
+
+    #[must_use]
+    pub fn change_log_len(&self) -> usize {
+        self.change_log.len()
+    }
+
     #[cfg(test)]
     pub(crate) fn hydrate_resident_bytes(&self) -> usize {
         0

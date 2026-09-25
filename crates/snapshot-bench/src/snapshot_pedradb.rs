@@ -184,6 +184,12 @@ impl PedraDbSnapshot {
         self.db.flush().map_err(map_pedradb)?;
         self.db.compact().map_err(map_pedradb)
     }
+
+    /// Diagnostic info for in-memory layers.
+    #[must_use]
+    pub fn memory_diag_string(&self) -> String {
+        self.db.memory_diag_string()
+    }
 }
 
 /// A concurrent read handle over a [`PedraDbSnapshot`]'s data column family,

@@ -3122,7 +3122,7 @@ fn write_sst_bulk_arrays_body(
         if crate::write_admission_kernel::batch_is_empty(
             staged.len().saturating_sub(block_start) as u64
         ) {
-            block_first_user = Some(keys[i].clone());
+            block_first_user = Some(Bytes::copy_from_slice(keys[i].as_ref()));
         }
         append_bulk_entry(&mut staged, k, seq, v);
     }
@@ -3142,8 +3142,8 @@ fn write_sst_bulk_arrays_body(
         file.write_all(&staged)?;
         staged.clear();
     }
-    let smallest_user_key = Some(keys[0].clone());
-    let largest_user_key = Some(keys[n_entries - 1].clone());
+    let smallest_user_key = Some(Bytes::copy_from_slice(keys[0].as_ref()));
+    let largest_user_key = Some(Bytes::copy_from_slice(keys[n_entries - 1].as_ref()));
     let data_len = pos - BULK_SST_HEADER_LEN as u64;
     let key_cp = SstTable::derive_index_accel(&mut index);
     let mut tail = Vec::with_capacity(index.len().saturating_mul(48).saturating_add(64));
@@ -3231,10 +3231,11 @@ fn finish_staged_block(
     let crc = crc32c::crc32c(&staged[block_start..]);
     let crc_bytes = crc.to_le_bytes();
     let stored = (staged.len() - block_start + 4) as u32;
+    let first_key = first.expect("bulk block missing first key");
     index.push(BlockHandle {
         offset: *pos,
         length: stored,
-        first_user_key: first.expect("bulk block missing first key"),
+        first_user_key: Bytes::copy_from_slice(first_key.as_ref()),
         p8: 0,
     });
     *pos += u64::from(stored);
@@ -3415,7 +3416,7 @@ fn write_sst_try_sorted_body(
             index.push(BlockHandle {
                 offset,
                 length,
-                first_user_key: first,
+                first_user_key: Bytes::copy_from_slice(first.as_ref()),
                 p8: 0,
             });
             return Ok(());
@@ -3431,7 +3432,7 @@ fn write_sst_try_sorted_body(
         index.push(BlockHandle {
             offset,
             length,
-            first_user_key: first,
+            first_user_key: Bytes::copy_from_slice(first.as_ref()),
             p8: 0,
         });
         Ok(())
@@ -3462,7 +3463,7 @@ fn write_sst_try_sorted_body(
         max_sequence = max_sequence.max(ikey.sequence);
         n_entries = n_entries.saturating_add(1);
         if smallest_user_key.is_none() {
-            smallest_user_key = Some(ikey.user_key.clone());
+            smallest_user_key = Some(Bytes::copy_from_slice(ikey.user_key.as_ref()));
         }
         if ikey.kind == ValueType::Deletion || ikey.kind == ValueType::RangeDeletion {
             tombstone_count = tombstone_count.saturating_add(1);
@@ -3526,7 +3527,9 @@ fn write_sst_try_sorted_body(
     }
     // The file's largest user key is the last entry's — derived from
     // `prev_ikey` by move, not tracked with a per-entry clone.
-    let largest_user_key = prev_ikey.as_ref().map(|k| k.user_key.clone());
+    let largest_user_key = prev_ikey
+        .as_ref()
+        .map(|k| Bytes::copy_from_slice(k.user_key.as_ref()));
     append_block_hash(&mut block_buf, &block_user_keys);
     flush_block(
         &mut data,
