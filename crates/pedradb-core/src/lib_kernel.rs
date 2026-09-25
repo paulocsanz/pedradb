@@ -81,6 +81,86 @@ pub mod ssi_conflict_kernel;
 pub mod merge_determinism_kernel;
 /// RFC-0279: Causal Seam Order & Handler Invariant Kernel.
 pub mod causal_seam_kernel;
+/// RFC-0280: VLog Referential Integrity & Blob Pointer Kernel.
+pub mod vlog_integrity_kernel;
+/// RFC-0280: RAM Pre-Flush Barrier & DRAM Bit-Rot Protection Kernel.
+pub mod ram_preflush_barrier_kernel;
+/// RFC-0280: Iterator Pinning & Hazard Reference Counting Kernel.
+pub mod iterator_pinning_kernel;
+/// RFC-0280: Hybrid Logical Clock & Monotonic Time Horizon Kernel.
+pub mod monotonic_clock_kernel;
+/// RFC-0280: Amortized Space & Write Amplification Bounds Kernel.
+pub mod space_amplification_kernel;
+/// RFC-0281: Bloom Filter Zero False Negative Soundness Kernel.
+pub mod bloom_soundness_kernel;
+/// RFC-0281: Dual-Log Recovery & Anti-Zombie Resurrection Kernel.
+pub mod dual_log_recovery_kernel;
+/// RFC-0281: Tombstone Soundness & Unmasking Prevention Kernel.
+pub mod tombstone_soundness_kernel;
+/// RFC-0281: Strict Weak Ordering Key Comparator Axiom Kernel.
+pub mod comparator_axiom_kernel;
+/// RFC-0281: Direct I/O 4096-Byte Alignment & DMA Coherence Contract Kernel.
+pub mod direct_io_contract_kernel;
+/// RFC-0282: RC11 Relaxed Memory Causality Kernel.
+pub mod rc11_relaxed_memory_kernel;
+/// RFC-0282: Torn Sector Heal & Dual-Boundary Generation Envelope Kernel.
+pub mod torn_sector_heal_kernel;
+/// RFC-0282: Asymmetric Network Partition & Leader Lease Kernel.
+pub mod asymmetric_lease_kernel;
+/// RFC-0282: Range Scan Snapshot Linearizability Kernel.
+pub mod range_scan_linear_kernel;
+/// RFC-0282: VLog Garbage Collection Tri-Color Reachability Barrier Kernel.
+pub mod vlog_gc_barrier_kernel;
+/// RFC-0282: Compaction Termination & Lyapunov Metric Kernel.
+pub mod compaction_lyapunov_kernel;
+/// RFC-0282: Volatile Zeroization & Residual Entropy Elimination Kernel.
+pub mod zeroize_entropy_kernel;
+/// RFC-0282: Dense Time Scheduler & Epsilon Perturbation Kernel.
+pub mod dense_time_scheduler_kernel;
+/// RFC-0282: Two-Phase Commit Distributed Recovery Confluence Kernel.
+pub mod twopc_confluence_kernel;
+/// RFC-0282: Schema Homomorphism & Categorical Evolution Kernel.
+pub mod schema_homomorphism_kernel;
+/// RFC-0283: Starvation Freedom & K-Bounded Overtaking Kernel.
+pub mod starvation_freedom_kernel;
+/// RFC-0283: Lossless Codec Inversion & Bijective Roundtrip Kernel.
+pub mod codec_inversion_kernel;
+/// RFC-0283: Prefix Delta-Encoding & Restart Point Soundness Kernel.
+pub mod prefix_delta_restart_kernel;
+/// RFC-0283: Cross-Column Family Isolation & Replay Independence Kernel.
+pub mod cross_cf_isolation_kernel;
+/// RFC-0283: In-Memory Block Cache Canary Sentinel Kernel.
+pub mod cache_canary_sentinel_kernel;
+/// RFC-0283: Dynamic SSI Serialization Graph Cycle Detector Kernel.
+pub mod ssi_cycle_detector_kernel;
+/// RFC-0283: Bounded Snapshot Epoch Lease & Anti-Space-Explosion Kernel.
+pub mod snapshot_epoch_lease_kernel;
+/// RFC-0283: Priority Inversion Freedom & Dual-Lane Admission Kernel.
+pub mod priority_inversion_freedom_kernel;
+/// RFC-0283: POSIX Parent Directory Synchronization Order Kernel.
+pub mod posix_dir_sync_kernel;
+/// RFC-0283: Replication Snapshot-to-Log Catch-Up Boundary Kernel.
+pub mod replication_catchup_boundary_kernel;
+/// RFC-0284: Prefix-Free Composite Key Injective Encoding Kernel.
+pub mod prefix_free_key_kernel;
+/// RFC-0284: Per-Table Entropy and Hash-Flooding Resilient Bloom Kernel.
+pub mod bloom_hash_entropy_kernel;
+/// RFC-0284: Compaction Debt Pacing and Write-Stall Prevention Kernel.
+pub mod compaction_pacing_kernel;
+/// RFC-0284: Super-Atomic MultiGet Snapshot Coherence Kernel.
+pub mod super_atomic_multiget_kernel;
+/// RFC-0284: Flash Translation Layer (FTL) Erase-Block Alignment Kernel.
+pub mod ftl_erase_boundary_kernel;
+/// RFC-0284: Cross-Device (EXDEV) Safe Migration Protocol Kernel.
+pub mod cross_device_barrier_kernel;
+/// RFC-0284: Monotonic Sequence Number Horizon and Rollover Prevention Kernel.
+pub mod sequence_horizon_kernel;
+/// RFC-0284: Pre-Manifest Orphan SST Recovery and Idempotent Cleanup Kernel.
+pub mod orphan_sst_cleanup_kernel;
+/// RFC-0284: Bitemporal Secondary Index Coherence Kernel.
+pub mod bitemporal_index_kernel;
+/// RFC-0284: Async Cancellation Safety and Leader Handover Kernel.
+pub mod async_cancellation_kernel;
 pub mod product_crown_kernel;
 pub mod rmw_sched_kernel;
 pub mod wal_buffer_kernel;
