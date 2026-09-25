@@ -6248,10 +6248,9 @@ impl<E: Env> Db<E> {
         if over {
             if let Some(run) = self.bulk_runs.remove(family) {
                 // Park even while the worker is encoding the previous
-                // chunk so fill overlaps SST. One parked + one encoding
-                // + the open tail is the RAM bound; a second overflow
-                // while parked is still full encodes inline.
-                if crate::write_admission_kernel::batch_is_empty(self.parked_bulk.len() as u64) {
+                // chunk so fill overlaps SST. Two parked + one encoding
+                // + the open tail is the RAM runway (matching RocksDB's 4 write buffers).
+                if self.parked_bulk.len() < 3 {
                     self.parked_bulk
                         .push_back((family.to_string(), Arc::new(run)));
                 } else {
