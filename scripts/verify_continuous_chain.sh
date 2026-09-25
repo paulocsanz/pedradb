@@ -96,8 +96,17 @@ echo ">>> [STAGE 18] Os Dez Pilares da Terceira Onda de Verificação (RFC-0284)
 cargo test -q -p pedradb-core --test rfc0284_dez_pilares_terceira_onda
 
 echo ""
+echo ">>> [STAGE 19] Cinco Pilares Fundamentais do Motor Puro PedraDB (RFC-0285)"
+cargo test -q -p pedradb-core --test rfc0285_cinco_pilares_motor_puro
+
+echo ""
+echo ">>> [STAGE 20] Dez Pilares de Robustez Caixote / Metal / Federação (RFC-0285)"
+cargo test -q -p pedradb-core --test rfc0285_dez_pilares_caixote_metal_federation
+
+echo ""
 echo "================================================================="
 echo "  CONTINUOUS VERIFICATION CHAIN: 100% UNIFIED & SOUND (ALL GREEN) "
 echo "================================================================="
+
 
 

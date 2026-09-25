@@ -161,6 +161,36 @@ pub mod orphan_sst_cleanup_kernel;
 pub mod bitemporal_index_kernel;
 /// RFC-0284: Async Cancellation Safety and Leader Handover Kernel.
 pub mod async_cancellation_kernel;
+/// RFC-0285: Zero-Allocation Hot-Path and Static Slab Reservation Kernel.
+pub mod hot_path_zero_alloc_kernel;
+/// RFC-0285: MemTable-to-SST Flush Bisimulation and Strict Monotonicity Kernel.
+pub mod memtable_flush_bisimulation_kernel;
+/// RFC-0285: Superblock Cryptographic Identity and Anti-Inode-Reuse Kernel.
+pub mod file_identity_superblock_kernel;
+/// RFC-0285: Memory-Mapped Region Quiescence and Safe Unmap Epoch Barrier Kernel.
+pub mod mmap_quiescence_barrier_kernel;
+/// RFC-0285: Block Cache Key Disambiguation and Anti-Incarnation Collision Kernel.
+pub mod block_cache_disambiguation_kernel;
+/// RFC-0285 Pilar 1: Lease Expiration and Runtime Freeze Guard Kernel.
+pub mod lease_expiration_guard_kernel;
+/// RFC-0285 Pilar 2: Mesh MTU Fragmentation and Blackhole Defense Kernel.
+pub mod mesh_mtu_fragmentation_kernel;
+/// RFC-0285 Pilar 3: Federated Cursor Continuity and Bisimulation Kernel.
+pub mod federated_cursor_continuity_kernel;
+/// RFC-0285 Pilar 4: Metal Parent Directory POSIX Fsync Barrier Kernel.
+pub mod metal_fsync_barrier_kernel;
+/// RFC-0285 Pilar 5: Multi-Tenant Prefix Isolation and Non-Interference Kernel.
+pub mod multitenant_prefix_isolation_kernel;
+/// RFC-0285 Pilar 6: Async Pool Decoupling and Starvation-Free Group Commit Kernel.
+pub mod async_pool_decoupling_kernel;
+/// RFC-0285 Pilar 7: Asymmetric Partition Quorum and Bipartite Confluence Kernel.
+pub mod asymmetric_partition_quorum_kernel;
+/// RFC-0285 Pilar 8: File Descriptor Quota Governor and EMFILE Prevention Kernel.
+pub mod fd_quota_governor_kernel;
+/// RFC-0285 Pilar 9: Boot-ID Stale Lockfile Reclaim and Crash Recovery Kernel.
+pub mod boot_id_lockfile_kernel;
+/// RFC-0285 Pilar 10: Bidirectional Schema Homomorphism and Unknown-Field Preservation Kernel.
+pub mod rolling_upgrade_homomorphism_kernel;
 pub mod product_crown_kernel;
 pub mod rmw_sched_kernel;
 pub mod wal_buffer_kernel;
