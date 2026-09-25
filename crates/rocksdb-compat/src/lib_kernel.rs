@@ -2235,6 +2235,26 @@ impl<E: PedraEnv> DB<E> {
         })
     }
 
+    /// Format in-memory layer metrics for diagnostics.
+    #[must_use]
+    pub fn memory_diag_string(&self) -> String {
+        self.inner.with_read(|db| {
+            format!(
+                "parked_n={} parked_b={} active_b={} imm={} retired_b={} sst_n={} sst_meta_b={} bulk_live_b={} bulk_parked_b={} change_log_len={}",
+                db.parked_unflushed_count(),
+                db.parked_unflushed_bytes(),
+                db.active_mem_usage(),
+                db.has_imm(),
+                db.retired_mem_bytes(),
+                db.sst_count(),
+                db.sst_total_metadata_bytes(),
+                db.bulk_live_bytes(),
+                db.parked_bulk_bytes(),
+                db.change_log_len(),
+            )
+        })
+    }
+
     fn open_cf_inner<O>(
         opts: &Options,
         path: impl AsRef<std::path::Path>,
@@ -4471,8 +4491,7 @@ where
                             )
                         });
                         // At-trigger or tombstone-trigger (Lethe RFC-0265 P0.2) even while inflight.
-                        let drain_l0 = (l0_due || (tombstone_due && l0 > 0))
-                            && !inner.recently_multi(fold_multi_hold);
+                        let drain_l0 = l0_due || (tombstone_due && l0 > 0);
 
                         if drain_l0 && !disable_auto_compactions {
                             while compat_compact_once(&inner, &gate) {}
@@ -4566,7 +4585,7 @@ where
     let handle = thread::Builder::new()
         .name("pedra-compat-flush".into())
         .spawn(move || {
-            let poll = Duration::from_millis(5);
+            let poll = Duration::from_millis(1);
             loop {
                 match rx.recv_timeout(poll) {
                     Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
@@ -4703,9 +4722,9 @@ fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
         .with_read(|db| db.auto_flush_threshold())
         .map_or(0, |t| t);
     if bound > 0 && inner.parked_unflushed_bytes() >= bound {
-        let mut budget = 2usize;
+        let mut budget = 4usize;
         while !pedradb_core::write_admission_kernel::batch_is_empty(budget as u64)
-            && inner.materialize_parked_if_not_multi()
+            && inner.materialize_parked_once()
             && inner.parked_unflushed_bytes() >= bound / 2
         {
             budget -= 1;

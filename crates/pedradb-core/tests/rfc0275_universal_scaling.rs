@@ -129,8 +129,7 @@ fn test_continuous_compaction_l0_bound_under_load() {
 #[test]
 fn test_bloom_filter_equality_checks_nbits() {
     let a = pedradb_core::bloom::BloomFilter::always_true();
-    let mut b = pedradb_core::bloom::BloomFilter::always_true();
-    b.nbits = 1;
+    let b = pedradb_core::bloom::BloomFilter::with_capacity(10, 10);
     assert_ne!(a, b);
     assert_eq!(a, pedradb_core::bloom::BloomFilter::always_true());
 }

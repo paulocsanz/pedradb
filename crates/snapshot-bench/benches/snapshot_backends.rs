@@ -318,12 +318,24 @@ fn open_pedradb(path: &Path) -> PedraDbSnapshot {
 fn maybe_settle(name: &str, dir: &Path, settle: impl FnOnce() -> Result<(), String>) {
     let size = dir_size_bytes(dir);
     let free = free_disk_bytes(dir).unwrap_or(u64::MAX);
-    // fjall settle can peak ~2×; require 1.3× free headroom or skip.
-    if free < size.saturating_mul(13) / 10 {
+    let force = std::env::var("SLIPSTREAM_BENCH_FORCE_SETTLE")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    // fjall settle can peak ~2× (major compaction rewrites all levels); require 1.3× free headroom.
+    // For pedradb and rocksdb, bulk runs already wrote bottom-level SSTs; settle only flushes the
+    // residual tail buffer (<256 MiB) and compacts metadata, requiring minimal free headroom (<2 GiB).
+    let required_free = if force {
+        0
+    } else if name == "fjall" {
+        size.saturating_mul(13) / 10
+    } else {
+        (size.saturating_mul(2) / 10).min(2 * 1024 * 1024 * 1024)
+    };
+    if free < required_free {
         eprintln!(
             "settle/{name}: SKIPPED — need ~{:.1} GiB free for settle headroom, have {:.1} GiB \
              (store is {:.1} GiB)",
-            size as f64 * 1.3 / (1u64 << 30) as f64,
+            required_free as f64 / (1u64 << 30) as f64,
             free as f64 / (1u64 << 30) as f64,
             size as f64 / (1u64 << 30) as f64,
         );
