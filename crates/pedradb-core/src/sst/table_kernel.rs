@@ -81,9 +81,8 @@ pub const SST_VERSION_V6: u32 = 6;
 /// self-describing per block (the index carries real offsets), so tables with
 /// different targets coexist; `PEDRA_BLOCK_TARGET` overrides new writes.
 pub const BLOCK_TARGET: usize = 4_096;
-/// Bulk-run SST block target: same 4 KiB as Rocks so evicted get_hit
-/// is one block, not a 256 KiB (or whole-file v3) read.
-pub const BULK_BLOCK_TARGET: usize = BLOCK_TARGET;
+/// Bulk-run SST block target: 16 KiB matches RocksDB's tuned data CF block size (RFC-0044).
+pub const BULK_BLOCK_TARGET: usize = 16_384;
 
 /// Effective block target for new writes: `PEDRA_BLOCK_TARGET` (bytes,
 /// clamped 1 KiB–256 KiB) when set, else [`BLOCK_TARGET`].
@@ -3082,7 +3081,11 @@ fn write_sst_bulk_arrays_body(
         ..StageTotals::default()
     };
     let t_enc = std::time::Instant::now();
-    let target = block_target().min(BULK_BLOCK_TARGET).max(BLOCK_TARGET);
+    let target = std::env::var("PEDRA_BLOCK_TARGET")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(BULK_BLOCK_TARGET)
+        .clamp(BLOCK_TARGET, 65_536);
     let n_blocks_est = n_entries.saturating_mul(256) / target + 2;
     let mut file = env.create(path)?;
     let mut header = [0u8; BULK_SST_HEADER_LEN];

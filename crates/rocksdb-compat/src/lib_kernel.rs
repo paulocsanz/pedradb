@@ -2818,10 +2818,12 @@ impl<E: PedraEnv> DB<E> {
                     },
                 });
             }
-            self.inner
+            let res = self.inner
                 .apply_latched_bulk(family, keys, vals, tail)
                 .map(|_| ())
-                .map_err(Error::from)
+                .map_err(Error::from);
+            self.notify_compact();
+            res
         })?;
         Ok(true)
     }
@@ -3001,7 +3003,9 @@ impl<E: PedraEnv> DB<E> {
             let family = puts[0].0;
             if self.inner.family_is_latched_async(family) {
                 let n = puts.iter().take_while(|p| p.0 == family).count();
-                return self.write_latched_cf_owned(family, n, puts, need_warm);
+                let r = self.write_latched_cf_owned(family, n, puts, need_warm);
+                self.notify_compact();
+                return r;
             }
         }
         thread_local! {
