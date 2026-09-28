@@ -6341,15 +6341,9 @@ impl<E: Env> Db<E> {
                 if !run.is_sorted() {
                     run.sort();
                 }
-                // Park even while the worker is encoding the previous
-                // chunk so fill overlaps SST. Fifteen parked + one encoding
-                // + the open tail is 4 GiB runway.
-                if self.parked_bulk.len() < 16 {
-                    self.parked_bulk
-                        .push_back((family.to_string(), Arc::new(run)));
-                } else {
-                    self.install_bulk_run(family, &run)?;
-                }
+                // Park so background workers and client assist encode SSTs off-lock.
+                self.parked_bulk
+                    .push_back((family.to_string(), Arc::new(run)));
             }
         }
         Ok(())
@@ -8614,15 +8608,18 @@ impl<E: Env> Db<E> {
         // caller-asserted `bottommost` (whole keyspace covered per family,
         // RFC-0217 P1.2 filter route) ORs in — `Remove` decisions rely on
         // the same condition.
-        let bottommost = input_idxs.len() == self.ssts.len();
-        let mut gc = options.gc;
-        gc.bottommost = gc.bottommost || bottommost;
-        let options = CompactOptions { gc, ..options };
         let tables: Vec<SstTable> = input_idxs.iter().map(|&i| self.ssts[i].clone()).collect();
         let cf = tables
             .first()
             .map(|t| t.cf().to_string())
             .unwrap_or_default();
+        let whole_db = input_idxs.len() == self.ssts.len();
+        let family_ssts_count = self.ssts.iter().filter(|t| t.cf() == cf).count();
+        let whole_family = tables.len() == family_ssts_count && family_ssts_count > 0;
+        let bottommost = whole_db || (whole_family && to_level == MAX_LSM_LEVEL);
+        let mut gc = options.gc;
+        gc.bottommost = bottommost;
+        let options = CompactOptions { gc, ..options };
         let kit = self
             .sst_source
             .as_ref()
@@ -12890,15 +12887,14 @@ fn write_merged_tables_span<'a>(
                     return Some(Err(e));
                 }
             };
-            let hard_cap = split_target.saturating_mul(4);
             let user_changed = last_user
                 .as_ref()
-                .is_none_or(|u| u.as_ref() != ok_entry.0.user_key.as_ref());
+                .is_some_and(|u| u.as_ref() != ok_entry.0.user_key.as_ref());
             if crate::compact_kernel::compact_should_split_at(acc, split_target)
                 && out.len() + 1 < span_budget
-                && (user_changed || acc >= hard_cap)
+                && user_changed
             {
-                // Target reached (or hard cap exceeded), within span budget — start a new file.
+                // Target reached at user-key boundary, within span budget — start a new file.
                 peeked = Some(Ok(ok_entry));
                 closed = true;
                 return None;

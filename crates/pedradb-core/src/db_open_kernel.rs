@@ -157,7 +157,15 @@ impl<E: Env> Db<E> {
         // (unpublished SSTs are orphans, swept by `gc_orphan_ssts`).
         // Replay ops above the floor into the memtable as data; ops at or
         // below it are already in live SSTs and re-applying them would
-        // resurrect superseded versions. The feed extension covers both.
+        // Per-CF manifest floor: each column family has its own highest sequence
+        // number published in SSTs. Filtering archived WAL records by a global max_seq
+        // causes silent data loss for unflushed CFs whose sequences are below another CF's SST floor.
+        let mut cf_manifest_floors: std::collections::BTreeMap<String, SequenceNumber> = std::collections::BTreeMap::new();
+        for table in &ssts {
+            let cf = if table.cf().is_empty() { "default".to_string() } else { table.cf().to_string() };
+            let cur = cf_manifest_floors.entry(cf).or_insert(0);
+            *cur = (*cur).max(table.max_sequence());
+        }
         let manifest_floor = max_seq;
         let feed_max_loaded = change_log.max_sequence().unwrap_or(0);
         let mut wal_archives: Vec<u64> = env
@@ -168,6 +176,7 @@ impl<E: Env> Db<E> {
             .collect();
         wal_archives.sort_unstable();
         let mut archive_max_seq_seen = 0u64;
+        let mut archived_data_replayed = false;
         for slot in &wal_archives {
             let path = dir.join(wal_archive_slot_name(*slot));
             let (records, _last_good, _resync) = match Wal::recover_span_on(&env, &path) {
@@ -194,18 +203,20 @@ impl<E: Env> Db<E> {
                     archive_max_seq_seen = archive_max_seq_seen.max(s);
                 }
                 // RFC-0217 P1.1: archived segments replay as data only
-                // above the manifest floor — the rotate never archives a
-                // below-floor window (see `unpublished_below_floor`), so
-                // every dropped frame's entry is in a published SST, and a
-                // replayed frame can never shadow newer published data
-                // (`lookup` trusts mem-first).
+                // above each CF's manifest floor — ops at or below are in
+                // published SSTs for that family.
                 let data_ops: Vec<_> = rec
                     .ops
                     .iter()
-                    .filter(|op| op.sequence > manifest_floor)
+                    .filter(|op| {
+                        let cf = crate::cf_kernel::cf_family_of(op.key.as_ref());
+                        let cf_floor = cf_manifest_floors.get(&cf).copied().unwrap_or(0);
+                        op.sequence > cf_floor
+                    })
                     .cloned()
                     .collect();
                 if !crate::write_admission_kernel::batch_is_empty(data_ops.len() as u64) {
+                    archived_data_replayed = true;
                     apply_ops_owned(&mut mem, data_ops);
                     if let Some(s) = rec.max_sequence() {
                         max_seq = max_seq.max(s);
@@ -471,7 +482,7 @@ impl<E: Env> Db<E> {
         // (the memtable replay is volatile): keep the files; the running
         // db clears them at the next store point after the deferred
         // publish catches up.
-        let keep_wal_archives = !wal_archives.is_empty() && manifest_floor < archive_max_seq_seen;
+        let keep_wal_archives = !wal_archives.is_empty() && (manifest_floor < archive_max_seq_seen || archived_data_replayed);
         if !keep_wal_archives {
             for slot in &wal_archives {
                 let path = dir.join(wal_archive_slot_name(*slot));
@@ -495,7 +506,12 @@ impl<E: Env> Db<E> {
         // Watermark may exceed max sequence still present in SSTs (e.g. latest_only
         // dropped a high-seq tombstone). Keep last_sequence ≥ earliest so current
         // gets never look "too old" after reopen.
-        let next_seq = max_seq.max(earliest_readable_seq).saturating_add(1).max(1);
+        // Also include archive_max_seq_seen so next_seq is strictly monotonic across reopens.
+        let next_seq = max_seq
+            .max(archive_max_seq_seen)
+            .max(earliest_readable_seq)
+            .saturating_add(1)
+            .max(1);
         if crate::write_admission_kernel::seq_exhausted(next_seq, MAX_SEQUENCE_NUMBER) {
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
