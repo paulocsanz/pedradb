@@ -123,7 +123,7 @@ fn test_foster_lyapunov_stochastic_stall_stability() {
     ];
 
     let drift = controller
-        .verify_step_drift(overloaded_state, &arrival_bursts)
+        .verify_step_lyapunov(overloaded_state, &arrival_bursts)
         .expect("A deriva de Foster-Lyapunov deve ser estritamente negativa");
     assert!(drift < 0.0, "Deriva estocástica deve atrair o sistema de volta para o conjunto compacto C");
 }
