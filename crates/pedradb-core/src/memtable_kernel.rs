@@ -1341,17 +1341,54 @@ impl MemTable {
         // describe the union — drop it (`bulk_span` falls back to the scan).
         self.cf_span.clear();
         self.span_stale = true;
-        for (_, vers) in other.map {
+        for (user_key, vers) in other.map {
             match vers {
                 Versions::One(v) => self.insert_map_gc(v.key, v.value, floor),
-                // Oldest-first: every incoming version is newer than the
-                // versions already merged for its key, so the binary search
-                // lands at index 0 — O(1) deque front inserts. Newest-first
-                // would land at a growing index and shift O(k) per insert
-                // (the quadratic the 2026-08-22 ycsb_a profile caught).
                 Versions::Many(vs) => {
-                    for v in vs.into_iter().rev() {
-                        self.insert_map_gc(v.key, v.value, floor);
+                    match self.map.entry(user_key) {
+                        std::collections::btree_map::Entry::Vacant(e) => {
+                            let mut list = vs;
+                            let mut dropped = Dropped::default();
+                            if let Some(f) = floor {
+                                Self::gc_below_floor(&mut list, f, &mut dropped);
+                            }
+                            let count = list.len();
+                            let bytes: usize = list.iter().map(|v| v.key.user_key.len() + v.value.len() + 8).sum();
+                            let rds = list.iter().filter(|v| v.key.kind == ValueType::RangeDeletion).count();
+                            self.entries = self.entries.saturating_add(count);
+                            self.approx_bytes = self.approx_bytes.saturating_add(bytes);
+                            self.range_tombstones = self.range_tombstones.saturating_add(rds);
+                            if count == 1 {
+                                if let Some(first) = list.into_iter().next() {
+                                    e.insert(Versions::One(first));
+                                }
+                            } else if count > 1 {
+                                e.insert(Versions::Many(list));
+                            }
+                        }
+                        std::collections::btree_map::Entry::Occupied(mut e) => {
+                            for v in vs.into_iter().rev() {
+                                let entry_bytes = v.key.user_key.len() + v.value.len() + 8;
+                                let is_rd = v.key.kind == ValueType::RangeDeletion;
+                                let mut dropped = Dropped::default();
+                                if Self::insert_into(
+                                    e.get_mut(),
+                                    v.key,
+                                    v.value,
+                                    entry_bytes,
+                                    &mut self.approx_bytes,
+                                    floor,
+                                    &mut dropped,
+                                ) {
+                                    self.entries = self.entries.saturating_add(1);
+                                    if is_rd {
+                                        self.range_tombstones = self.range_tombstones.saturating_add(1);
+                                    }
+                                }
+                                self.entries = self.entries.saturating_sub(dropped.versions);
+                                self.approx_bytes = self.approx_bytes.saturating_sub(dropped.bytes);
+                            }
+                        }
                     }
                 }
             }
