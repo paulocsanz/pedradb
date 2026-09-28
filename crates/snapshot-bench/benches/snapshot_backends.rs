@@ -41,8 +41,8 @@ use snapshot_bench::cellcost;
 use snapshot_bench::diagnose;
 use snapshot_bench::snapshot::SnapshotStore;
 use snapshot_bench::{
-    FjallConfig, FjallSnapshot, KvEntry, KvUpdate, PedraDbConfig, PedraDbReader, PedraDbSnapshot,
-    RocksDbConfig, RocksDbReader, RocksDbSnapshot, VersionToken, WatchCursor,
+    FjallConfig, FjallReader, FjallSnapshot, KvEntry, KvUpdate, PedraDbConfig, PedraDbReader,
+    PedraDbSnapshot, RocksDbConfig, RocksDbReader, RocksDbSnapshot, VersionToken, WatchCursor,
 };
 use tempfile::TempDir;
 
@@ -446,12 +446,18 @@ fn bench_one_backend_reads(
             maybe_settle(name, dir.path(), || {
                 store.settle().map_err(|e| e.to_string())
             });
+            let reader = store.reader();
             probe_percentiles(&format!("probe_hit/{name}"), |i| {
                 let _ = black_box(store.get(&key(i)).expect("get"));
             });
             if cell_on("probe_miss") {
                 probe_percentiles(&format!("probe_miss/{name}"), |i| {
                     let _ = black_box(store.get(&miss_key(i)).expect("get"));
+                });
+            }
+            if cell_on("get_loop") && quick_cells_only() {
+                median_get_loop(&format!("get_loop/{name}"), n, |k| {
+                    let _ = black_box(reader.get(k).expect("get"));
                 });
             }
             if quick_cells_only() {
@@ -462,6 +468,7 @@ fn bench_one_backend_reads(
             bench_prefix_scan(c, name, n, |prefix, f| {
                 store.for_each_in_range(prefix, |e| f(e)).expect("scan");
             });
+            bench_lookup_100_fjall(c, name, n, &reader);
         }
         Backend::RocksDb => {
             let mut store = open_rocksdb(&store_path);
@@ -690,6 +697,55 @@ fn bench_lookup_100_pedra(c: &mut Criterion, name: &str, n: usize, reader: &Pedr
     });
     drop(_cell);
     let mut mg_state = 0xFEED_FACEu64;
+    let multi_get = format!("{name}_multi_get");
+    let _cell = cellcost::Guard::new("lookup_100", &multi_get);
+    g.bench_function(multi_get.as_str(), |b| {
+        b.iter_batched(
+            || make_keys(&mut mg_state),
+            |keys| {
+                black_box(
+                    reader
+                        .multi_get(keys.iter().map(String::as_str))
+                        .expect("multi_get"),
+                )
+            },
+            BatchSize::SmallInput,
+        );
+    });
+    drop(_cell);
+    g.finish();
+    cellcost::flush_group("lookup_100");
+}
+
+fn bench_lookup_100_fjall(c: &mut Criterion, name: &str, n: usize, reader: &FjallReader) {
+    let make_keys = |state: &mut u64| -> Vec<String> {
+        (0..100)
+            .map(|_| key((next_rand(state) % n as u64) as usize))
+            .collect()
+    };
+    let mut g = c.benchmark_group("lookup_100");
+    g.throughput(Throughput::Elements(100));
+    if n >= SEQUENTIAL_ENTRIES {
+        g.sample_size(20);
+        g.warm_up_time(std::time::Duration::from_secs(2));
+        g.measurement_time(std::time::Duration::from_secs(15));
+    }
+    let mut loop_state = 0xCAFE_BABEu64;
+    let get_loop = format!("{name}_get_loop");
+    let _cell = cellcost::Guard::new("lookup_100", &get_loop);
+    g.bench_function(get_loop.as_str(), |b| {
+        b.iter_batched(
+            || make_keys(&mut loop_state),
+            |keys| {
+                for k in &keys {
+                    black_box(reader.get(k).expect("get"));
+                }
+            },
+            BatchSize::SmallInput,
+        );
+    });
+    drop(_cell);
+    let mut mg_state = 0xDECA_FBADu64;
     let multi_get = format!("{name}_multi_get");
     let _cell = cellcost::Guard::new("lookup_100", &multi_get);
     g.bench_function(multi_get.as_str(), |b| {
