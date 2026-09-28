@@ -236,6 +236,18 @@ impl FjallReader {
         }
     }
 
+    /// Batched point lookups for comparative benchmarking.
+    /// Results are positionally aligned with the input; `None` means
+    /// absent/deleted, exactly as [`get`](Self::get).
+    pub fn multi_get<'k>(
+        &self,
+        keys: impl IntoIterator<Item = &'k str>,
+    ) -> Result<Vec<Option<KvEntry>>, SnapshotError> {
+        keys.into_iter()
+            .map(|key| self.get(key))
+            .collect()
+    }
+
     /// Stream every live entry whose key starts with `prefix`, ascending, without
     /// buffering the whole match set — the memory-bounded scan for an on-disk fold.
     pub fn for_each_in_range(
