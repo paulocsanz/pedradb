@@ -1442,8 +1442,13 @@ impl WriteGroup {
             // Rocks WriteThread: after election, snapshot whoever already
             // joined. Fair-unlock + yield let waiters push; this loop
             // drains until `join_complete` (batch >= active or 4) or 2µs.
+            let look_us = if self.async_group_forced == Some(true) {
+                150
+            } else {
+                crate::group_window_kernel::JOIN_LOOK_US
+            };
             let join_deadline =
-                Instant::now() + Duration::from_micros(crate::group_window_kernel::JOIN_LOOK_US);
+                Instant::now() + Duration::from_micros(look_us);
             let mut batch: Vec<PendingWrite> = Vec::new();
             loop {
                 {
@@ -1464,7 +1469,12 @@ impl WriteGroup {
                     }
                 }
                 let active = self.active.load(Ordering::Relaxed);
-                if crate::group_window_kernel::join_complete(batch.len(), active) {
+                let is_concurrent = self.recently_concurrent() || self.async_group_forced == Some(true);
+                if is_concurrent {
+                    if crate::group_window_kernel::herd_full(batch.len()) {
+                        break;
+                    }
+                } else if crate::group_window_kernel::join_complete(batch.len(), active) {
                     break;
                 }
                 // RFC-0211 follow-up: async-only group, writers ≤ ncpu —
@@ -1608,16 +1618,18 @@ impl WriteGroup {
                         // RFC-0217 P0.4: with the flight cap on, the window
                         // never exceeds the previous group's measured flight
                         // (Darwin-async ≈0 flight collapses it to off).
+                        let peers_recent =
+                            self.recently_concurrent() || self.async_group_forced == Some(true);
                         let us = crate::group_window_kernel::async_catchup_bound_us(
                             self.effective_group_window_us(),
                             active,
                             batch.len(),
-                            self.recently_concurrent(),
+                            peers_recent,
                         )
                         .max(crate::group_window_kernel::herd_collect_us(
                             active,
                             batch.len(),
-                            false,
+                            peers_recent,
                         ))
                         .max(
                             crate::group_window_kernel::post_group_grace_us(
@@ -1641,9 +1653,10 @@ impl WriteGroup {
                     // A 10µs condvar wait measured cw=23µs/grp and lost
                     // QPS; the missing writers are already in submit().
                     let initial = batch.len();
-                    let peers = self.recently_concurrent();
+                    let peers =
+                        self.recently_concurrent() || self.async_group_forced == Some(true);
                     let herd_only = crate::group_window_kernel::herd_collect_us(
-                        active, initial, false,
+                        active, initial, peers,
                     )
                     .max(crate::group_window_kernel::post_group_grace_us(
                         self.last_group_len.load(Ordering::Relaxed),
@@ -1660,13 +1673,20 @@ impl WriteGroup {
                         // publish the leader is alone in `active` and
                         // would seal at 1 (avg_group 2.17). Spin until
                         // HERD_TARGET or the 10µs bound.
+                        drop(g);
                         while Instant::now() < deadline {
-                            batch.extend(g.pending.drain(..));
+                            {
+                                let mut q = self.queue.lock();
+                                if !q.pending.is_empty() {
+                                    batch.extend(q.pending.drain(..));
+                                }
+                            }
                             if crate::group_window_kernel::herd_full(batch.len()) {
                                 break;
                             }
-                            std::hint::spin_loop();
+                            std::thread::yield_now();
                         }
+                        g = self.queue.lock();
                     } else {
                         // RFC-0217 P0.1b: collect through the client-side gap.
                         let initial = batch.len();
@@ -2553,6 +2573,13 @@ impl<E: Env> ConcurrentDb<E> {
         if let Some(v) = self.point_cache.get(key) {
             self.note_class_point(v.is_some());
             return v;
+        }
+        if self.fast_outside_sst_miss(key) {
+            let sv = self.published_ssts.read();
+            if sv.mem.read().is_empty() && sv.imm.is_none() {
+                self.note_class_point(false);
+                return None;
+            }
         }
         if let Some(g) = self.inner.try_read() {
             note_lsm_lock();
