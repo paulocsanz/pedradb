@@ -264,6 +264,17 @@ impl BloomFilter {
         }
     }
 
+fn partition_index(h1: u64, nparts: u32) -> u32 {
+    if nparts <= 1 {
+        0
+    } else {
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            (h1 % u64::from(nparts)) as u32
+        }
+    }
+}
+
     /// Insert a user key.
     ///
     /// RFC-0030 P2: `while` + shared [`probe_bit`], not `for 0..k` — range
@@ -272,7 +283,7 @@ impl BloomFilter {
     pub fn insert(&mut self, key: &[u8]) {
         if self.nparts > 1 {
             let (h1, _) = hash_pair(key);
-            let i = crate::filter_partition_kernel::filter_partition(h1, self.nparts) as usize;
+            let i = Self::partition_index(h1, self.nparts) as usize;
             let mut g = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(Some(p)) = g.get_mut(i) {
                 p.insert(key);
@@ -300,13 +311,19 @@ impl BloomFilter {
     /// `false` ⇒ key is definitely absent; `true` ⇒ maybe present.
     #[must_use]
     pub fn may_contain(&self, key: &[u8]) -> bool {
+        let (h1, h2) = hash_pair(key);
+        self.may_contain_with_hashes(key, h1, h2)
+    }
+
+    /// Query with precomputed Kirsch-Mitzenmacher hash pair.
+    #[must_use]
+    pub fn may_contain_with_hashes(&self, key: &[u8], h1: u64, h2: u64) -> bool {
         if self.nparts > 1 {
-            return self.may_contain_part(key);
+            return self.may_contain_part_with_hashes(key, h1, h2);
         }
         if !self.is_active() {
             return true;
         }
-        let (h1, h2) = hash_pair(key);
         let nbits = u64::from(self.nbits);
         let mut i = 0u32;
         while i < self.k {
@@ -325,8 +342,12 @@ impl BloomFilter {
     }
 
     fn may_contain_part(&self, key: &[u8]) -> bool {
-        let (h1, _) = hash_pair(key);
-        let i = crate::filter_partition_kernel::filter_partition(h1, self.nparts) as usize;
+        let (h1, h2) = hash_pair(key);
+        self.may_contain_part_with_hashes(key, h1, h2)
+    }
+
+    fn may_contain_part_with_hashes(&self, key: &[u8], h1: u64, h2: u64) -> bool {
+        let i = Self::partition_index(h1, self.nparts) as usize;
         if let Some(slot) = self.parts_once.get(i) {
             let part = slot.get_or_init(|| {
                 let raw = self.encoded_parts.get(i).cloned().unwrap_or_default();
@@ -334,7 +355,7 @@ impl BloomFilter {
                 FILTER_BYTES_LOADED.fetch_add(raw.len() as u64, Ordering::Relaxed);
                 Self::decode_mono(&raw).unwrap_or_else(|_| Self::always_true())
             });
-            return part.may_contain(key);
+            return part.may_contain_with_hashes(key, h1, h2);
         }
         let mut g = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
         if i >= g.len() {
@@ -349,7 +370,7 @@ impl BloomFilter {
             let decoded = Self::decode_mono(raw).unwrap_or_else(|_| Self::always_true());
             g[i] = Some(Box::new(decoded));
         }
-        g[i].as_ref().is_none_or(|p| p.may_contain(key))
+        g[i].as_ref().is_none_or(|p| p.may_contain_with_hashes(key, h1, h2))
     }
 
     /// Encode for SST trailer: `nbits u32 | k u32 | nbytes u32 | bits`.
@@ -571,11 +592,17 @@ pub fn test_bit(bits: &[u8], i: usize) -> bool {
     (bits[i / 8] & (1 << (i % 8))) != 0
 }
 
-/// FNV-1a 64 + mix for a second independent hash.
+/// FNV-1a 64 + mix for a second independent hash (single-pass superscalar).
 pub fn hash_pair(key: &[u8]) -> (u64, u64) {
-    let h1 = fnv1a64(key);
+    let mut h1 = 0xcbf2_9ce4_8422_2325u64;
+    let mut h2 = 0x9e37_79b9_7f4a_7c15u64;
+    const FNV_PRIME: u64 = 0x0100_0000_01b3;
+    for &b in key {
+        let byte = u64::from(b);
+        h1 = (h1 ^ byte).wrapping_mul(FNV_PRIME);
+        h2 = (h2 ^ byte).wrapping_mul(FNV_PRIME);
+    }
     // Second hash must be non-zero for double hashing.
-    let mut h2 = fnv1a64_seed(key, 0x9e37_79b9_7f4a_7c15);
     if h2 == 0 {
         h2 = 0x9e37_79b9_7f4a_7c15;
     }

@@ -104,6 +104,14 @@ echo ">>> [STAGE 20] Dez Pilares de Robustez Caixote / Metal / Federação (RFC-
 cargo test -q -p pedradb-core --test rfc0285_dez_pilares_caixote_metal_federation
 
 echo ""
+echo ">>> [STAGE 21] Cinco Fronteiras Matemáticas do Motor Puro (RFC-0286)"
+cargo test -q -p pedradb-core --test rfc0286_cinco_fronteiras_matematicas
+
+echo ""
+echo ">>> [STAGE 22] Cinco Fronteiras Estruturais do LSM Puro (RFC-0287)"
+cargo test -q -p pedradb-core --test rfc0287_cinco_fronteiras_lsm
+
+echo ""
 echo "================================================================="
 echo "  CONTINUOUS VERIFICATION CHAIN: 100% UNIFIED & SOUND (ALL GREEN) "
 echo "================================================================="

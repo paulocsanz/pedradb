@@ -2460,6 +2460,9 @@ impl<E: PedraEnv> DB<E> {
     }
 
     fn notify_compact(&self) {
+        if let Some(tx) = &self.flush_tx {
+            let _ = tx.try_send(CompactCmd::Run);
+        }
         if let Some(tx) = &self.compact_tx {
             let _ = tx.try_send(CompactCmd::Run);
         }
@@ -2502,6 +2505,18 @@ impl<E: PedraEnv> DB<E> {
             self.inner.key_tls_gen_prefixed(effective.as_bytes(), key)
         };
         (epoch, gen)
+    }
+
+    /// Settled SST only state.
+    #[must_use]
+    pub fn is_settled_sst_only(&self) -> bool {
+        self.inner.is_settled_sst_only()
+    }
+
+    /// Fast outside SST miss check.
+    #[must_use]
+    pub fn fast_outside_sst_miss(&self, key: &[u8]) -> bool {
+        self.inner.fast_outside_sst_miss(key)
     }
 
     /// Put into the default CF.
@@ -2624,6 +2639,11 @@ impl<E: PedraEnv> DB<E> {
     /// TLS-warmed point get on a CF name already known valid.
     fn get_cached(&self, cf: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         let key = key.as_ref();
+        if self.inner.is_settled_sst_only()
+            && self.codec.encode_with(cf, key, |enc| self.inner.fast_outside_sst_miss(enc))
+        {
+            return Ok(None);
+        }
         // RFC-0041 YCSB-C: zipf (θ=0.99, 4096 keys) concentrates on a hot
         // set. Direct-mapped last-N skips CF-prefix encode + point-cache
         // mutex. Bytes stay shared with the point cache; we copy into Vec

@@ -25,6 +25,8 @@ cargo +nightly miri test -q -p pedradb-core --test rfc0283_dez_pilares_segunda_o
 cargo +nightly miri test -q -p pedradb-core --test rfc0284_dez_pilares_terceira_onda
 cargo +nightly miri test -q -p pedradb-core --test rfc0285_cinco_pilares_motor_puro
 cargo +nightly miri test -q -p pedradb-core --test rfc0285_dez_pilares_caixote_metal_federation
+cargo +nightly miri test -q -p pedradb-core --test rfc0286_cinco_fronteiras_matematicas
+cargo +nightly miri test -q -p pedradb-core --test rfc0287_cinco_fronteiras_lsm
 
 echo "=========================================================="
 echo "   GATE miri_concurrency: GREEN (0 Data-Races, 0 UB)      "

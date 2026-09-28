@@ -62,16 +62,31 @@ fn test_pedradb_ingest_rss_and_scan() {
         let diag_after_settle = store.memory_diag_string();
 
         let t_scan = std::time::Instant::now();
-        let scanned = store.range("route.svc-000010.").expect("scan");
+        let _scanned = store.range("route.svc-000010.").expect("scan");
         let scan_us = t_scan.elapsed().as_secs_f64() * 1e6;
 
-        eprintln!("N={n}: RSS ingest={:.1}MB ({:.1} B/key), settle={:.1}MB ({:.1}ms), scan={:.1}us ({} keys)\n  DIAG_BEFORE: {diag_before_settle}\n  DIAG_AFTER:  {diag_after_settle}",
+        let mut lat_miss = Vec::with_capacity(10_000);
+        let mk_sample = format!("route.svc-9{:06}.{:08}", 0, 0);
+        let is_settled = store.is_settled_sst_only();
+        let fast_miss = store.fast_outside_sst_miss(&format!("data\0{mk_sample}"));
+        eprintln!("SAMPLE MISS CHECK: is_settled={is_settled}, fast_miss={fast_miss}");
+        for i in 0..10_000 {
+            let mk = format!("route.svc-9{:06}.{:08}", i % 999_999, i % 1000);
+            let t = std::time::Instant::now();
+            let res = store.get(&mk).expect("get");
+            lat_miss.push(t.elapsed());
+            assert!(res.is_none());
+        }
+        lat_miss.sort();
+        let miss_p50_ns = lat_miss[lat_miss.len() / 2].as_nanos();
+
+        eprintln!("N={n}: RSS ingest={:.1}MB ({:.1} B/key), settle={:.1}MB ({:.1}ms), scan={:.1}us, miss_p50={}ns\n  DIAG_BEFORE: {diag_before_settle}\n  DIAG_AFTER:  {diag_after_settle}",
             rss_after_ingest_kb as f64 / 1024.0,
             (rss_after_ingest_kb.saturating_sub(rss_start_kb)) as f64 * 1024.0 / n as f64,
             rss_after_settle_kb as f64 / 1024.0,
             settle_ms,
             scan_us,
-            scanned.len(),
+            miss_p50_ns,
         );
     }
 }

@@ -649,13 +649,24 @@ impl SstTable {
     /// Fail-closed: a CRC or framing fault returns `Err` — never a silent
     /// miss. The caller must fail-stop or propagate.
     ///
-    /// # Errors
-    /// Corrupt block payload/framing or I/O on an evicted table.
     pub fn point_at_seeking(
         &self,
         user_key: &[u8],
         snapshot: SequenceNumber,
         scratch: &mut PointSeekScratch,
+    ) -> Result<Option<(SequenceNumber, Lookup)>> {
+        let (h1, h2) = crate::bloom_kernel::hash_pair(user_key);
+        self.point_at_seeking_with_hashes(user_key, snapshot, scratch, h1, h2)
+    }
+
+    /// Point version at `user_key` with precomputed Kirsch-Mitzenmacher hash pair.
+    pub fn point_at_seeking_with_hashes(
+        &self,
+        user_key: &[u8],
+        snapshot: SequenceNumber,
+        scratch: &mut PointSeekScratch,
+        h1: u64,
+        h2: u64,
     ) -> Result<Option<(SequenceNumber, Lookup)>> {
         if let (Some(lo), Some(hi)) = (
             self.smallest_user_key.as_deref(),
@@ -665,7 +676,7 @@ impl SstTable {
                 return Ok(None);
             }
         }
-        if !self.bloom.may_contain(user_key) {
+        if !self.bloom.may_contain_with_hashes(user_key, h1, h2) {
             return Ok(None);
         }
         if !self.is_lazy() {
