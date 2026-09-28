@@ -819,6 +819,8 @@ dependencies = [
  "pedradb-io-uring",
  "rocksdb",
  "rocksdb-compat",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
