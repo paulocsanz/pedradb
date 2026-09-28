@@ -6248,9 +6248,9 @@ impl<E: Env> Db<E> {
         if over {
             if let Some(run) = self.bulk_runs.remove(family) {
                 // Park even while the worker is encoding the previous
-                // chunk so fill overlaps SST. Three parked + one encoding
-                // + the open tail is the RAM runway (matching RocksDB's 4 write buffers).
-                if self.parked_bulk.len() < 4 {
+                // chunk so fill overlaps SST. Seven parked + one encoding
+                // + the open tail is 2 GiB runway.
+                if self.parked_bulk.len() < 8 {
                     self.parked_bulk
                         .push_back((family.to_string(), Arc::new(run)));
                 } else {
@@ -6859,10 +6859,10 @@ impl<E: Env> Db<E> {
     /// (25M slipstream: 185 MB/s ingest vs ~100 MB/s materialize OOMed a
     /// 3892 MB box with nothing bounding `parked_unflushed`).
     pub(crate) fn flush_debt_cap(&self) -> Option<usize> {
-        // Four thresholds = matching RocksDB's 4 write buffers (1 GiB runway):
-        // writer keeps filling chunk N+1..N+3 while the worker materializes chunk N.
-        // Cap of 2 made bulk ingest prematurely stall in await_flush_debt.
-        self.auto_flush_threshold().map(|t| t.saturating_mul(4))
+        // Eight thresholds = matching 8 parked bulk chunks (2 GiB runway):
+        // writer keeps filling chunk N+1..N+7 while the worker materializes chunk N.
+        // Lower cap made bulk ingest prematurely stall in await_flush_debt.
+        self.auto_flush_threshold().map(|t| t.saturating_mul(8))
     }
 
     /// Mem / imm / pin / parked (no SST yet) / folded retired / pending pins.
