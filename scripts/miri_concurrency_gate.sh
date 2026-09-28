@@ -27,6 +27,9 @@ cargo +nightly miri test -q -p pedradb-core --test rfc0285_cinco_pilares_motor_p
 cargo +nightly miri test -q -p pedradb-core --test rfc0285_dez_pilares_caixote_metal_federation
 cargo +nightly miri test -q -p pedradb-core --test rfc0286_cinco_fronteiras_matematicas
 cargo +nightly miri test -q -p pedradb-core --test rfc0287_cinco_fronteiras_lsm
+cargo +nightly miri test -q -p pedradb-core --test rfc0288_cinco_fronteiras_nucleo_lsm
+cargo +nightly miri test -q -p pedradb-core --test rfc0289_cinco_fronteiras_avancadas_lsm
+cargo +nightly miri test -q -p pedradb-core --test rfc0290_cinco_fronteiras_estruturais_lsm
 
 echo "=========================================================="
 echo "   GATE miri_concurrency: GREEN (0 Data-Races, 0 UB)      "
