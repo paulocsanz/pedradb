@@ -212,6 +212,36 @@ pub mod non_zeno_monotonic_clock_kernel;
 pub mod dma_generation_fence_kernel;
 /// RFC-0287: WAL Cryptographic Chain Recovery and Non-Torn Corruption Kernel.
 pub mod wal_crypto_chain_recovery_kernel;
+/// RFC-0288: Decompression Expansion Cap and Anti-Zip-Bomb Streaming Kernel.
+pub mod decompression_expansion_cap_kernel;
+/// RFC-0288: SkipList Weak Memory Barrier and Path Bisimulation Kernel.
+pub mod skiplist_weak_memory_barrier_kernel;
+/// RFC-0288: Sparse Tuple Homomorphism and Vertical Projection Soundness Kernel.
+pub mod sparse_tuple_homomorphism_kernel;
+/// RFC-0288: MANIFEST VersionEdit Semiring and Idempotent Closure Kernel.
+pub mod manifest_version_edit_semiring_kernel;
+/// RFC-0288: Bidirectional Iterator Reversal Automaton Kernel.
+pub mod bidi_iterator_reversal_kernel;
+/// RFC-0289: Separator Order Preservation and Strict Weak Ordering Oracle Kernel.
+pub mod separator_order_preservation_kernel;
+/// RFC-0289: VLog Hole-Punching Alignment and Block Geometry Invariant Kernel.
+pub mod vlog_hole_alignment_kernel;
+/// RFC-0289: Pinned Slice Lease and Transparent Decoupling Kernel.
+pub mod pinned_slice_lease_kernel;
+/// RFC-0289: Compaction Banach Contraction and Wave Stability Kernel.
+pub mod compaction_banach_contraction_kernel;
+/// RFC-0289: Cryptographic Nonce Space-Time Orthogonality and Zero-Reuse Kernel.
+pub mod crypto_nonce_space_time_kernel;
+/// RFC-0290: Dual Filter Pruning and Range Tombstone Bloom Blindspot Kernel.
+pub mod range_tombstone_bloom_dual_kernel;
+/// RFC-0290: Parallel Sub-Compaction Slice Equivalence and Confluence Kernel.
+pub mod parallel_subcompaction_slice_kernel;
+/// RFC-0290: Group Commit Fair-Share and Bounded Delay Admission Kernel.
+pub mod group_commit_fair_share_kernel;
+/// RFC-0290: Readahead Window Contraction and Consumption Feedback Kernel.
+pub mod readahead_consumption_feedback_kernel;
+/// RFC-0290: Transactional Overlay Read View and Read-Your-Own-Writes Kernel.
+pub mod transactional_overlay_read_view_kernel;
 pub mod product_crown_kernel;
 pub mod rmw_sched_kernel;
 pub mod wal_buffer_kernel;

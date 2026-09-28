@@ -294,7 +294,7 @@ impl SnapshotStore for PedraDbSnapshot {
 
         let mut wo = WriteOptions::default();
         wo.set_sync(self.config.sync);
-        self.db.write_opt(&wb, &wo).map_err(map_pedradb)?;
+        self.db.write_opt_owned(wb, &wo).map_err(map_pedradb)?;
 
         self.cursor = cursor.clone();
         Ok(())
