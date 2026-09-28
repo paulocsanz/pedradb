@@ -14,13 +14,27 @@ use crate::key::{InternalKey, SequenceNumber, ValueType};
 use crate::memtable::Lookup;
 
 /// One latched family's uninstalled tail.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct BulkRun {
     keys: Vec<Bytes>,
     vals: Vec<Bytes>,
     seqs: Vec<SequenceNumber>,
     kinds: Vec<ValueType>,
     bytes: usize,
+    is_sorted: bool,
+}
+
+impl Default for BulkRun {
+    fn default() -> Self {
+        Self {
+            keys: Vec::new(),
+            vals: Vec::new(),
+            seqs: Vec::new(),
+            kinds: Vec::new(),
+            bytes: 0,
+            is_sorted: true,
+        }
+    }
 }
 
 impl BulkRun {
@@ -35,6 +49,35 @@ impl BulkRun {
         self.push_with_kind(key, val, seq, ValueType::Value);
     }
 
+    #[must_use]
+    pub(crate) fn is_sorted(&self) -> bool {
+        self.is_sorted
+    }
+
+    pub(crate) fn sort(&mut self) {
+        if self.is_sorted || self.keys.len() <= 1 {
+            self.is_sorted = true;
+            return;
+        }
+        let mut indices: Vec<usize> = (0..self.keys.len()).collect();
+        indices.sort_by(|&a, &b| self.keys[a].cmp(&self.keys[b]));
+        let mut new_keys = Vec::with_capacity(self.keys.len());
+        let mut new_vals = Vec::with_capacity(self.vals.len());
+        let mut new_seqs = Vec::with_capacity(self.seqs.len());
+        let mut new_kinds = Vec::with_capacity(self.kinds.len());
+        for &idx in &indices {
+            new_keys.push(self.keys[idx].clone());
+            new_vals.push(self.vals[idx].clone());
+            new_seqs.push(self.seqs[idx]);
+            new_kinds.push(self.kinds[idx]);
+        }
+        self.keys = new_keys;
+        self.vals = new_vals;
+        self.seqs = new_seqs;
+        self.kinds = new_kinds;
+        self.is_sorted = true;
+    }
+
     pub(crate) fn push_with_kind(
         &mut self,
         key: Bytes,
@@ -42,6 +85,11 @@ impl BulkRun {
         seq: SequenceNumber,
         kind: ValueType,
     ) {
+        if self.is_sorted && !self.keys.is_empty() {
+            if self.keys[self.keys.len() - 1] > key {
+                self.is_sorted = false;
+            }
+        }
         self.bytes = self
             .bytes
             .saturating_add(key.len())
@@ -246,4 +294,22 @@ mod tests {
         assert_eq!(keys[1].as_ref(), b"c");
         assert_eq!(vals[1].as_ref(), b"3");
     }
+
+    #[test]
+    fn bulk_run_is_sorted_tracking() {
+        let mut r = BulkRun::default();
+        assert!(r.is_sorted());
+        r.push(Bytes::from_static(b"a"), Bytes::from_static(b"1"), 1);
+        assert!(r.is_sorted());
+        r.push(Bytes::from_static(b"b"), Bytes::from_static(b"2"), 2);
+        assert!(r.is_sorted());
+        r.push(Bytes::from_static(b"a"), Bytes::from_static(b"0"), 3);
+        assert!(!r.is_sorted());
+        r.sort();
+        assert!(r.is_sorted());
+        assert_eq!(r.keys()[0].as_ref(), b"a");
+        assert_eq!(r.keys()[1].as_ref(), b"a");
+        assert_eq!(r.keys()[2].as_ref(), b"b");
+    }
 }
+

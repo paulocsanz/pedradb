@@ -173,36 +173,48 @@ thread_local! {
     static SST_BLOCK_CRC_SKIPPED: Cell<usize> = const { Cell::new(0) };
 }
 
-/// Verified raw 4 KiB blocks (CRC trailer included) for evicted files.
-/// get_hit of one key does not need this; lookup_100's 100 keys do —
-/// 25M v63 get_loop was 0.88× because each of 100 probes re-pread+CRC
-/// while Rocks reused its block cache. 512 × 4 KiB = 2 MiB TLS.
-const RAW_BLOCK_CACHE_CAP: usize = 512;
+/// Verified decoded blocks for evicted files (RFC-0293/0295).
+/// Caches the decompressed block body in memory with lazy LRU eviction,
+/// eliminating all per-probe disk I/O, CRC re-computation, and LZ4 decompression.
+const RAW_BLOCK_CACHE_CAP: usize = 4096;
 
 #[derive(Default)]
 struct RawBlockCache {
-    map: HashMap<(u64, u64), Arc<[u8]>>,
-    order: VecDeque<(u64, u64)>,
+    map: HashMap<(u64, u64), (Arc<[u8]>, u64)>,
+    order: VecDeque<((u64, u64), u64)>,
+    epoch: u64,
 }
 
 impl RawBlockCache {
     fn get(&mut self, key: &(u64, u64)) -> Option<Arc<[u8]>> {
-        self.map.get(key).cloned()
+        let (val, ins_epoch) = self.map.get_mut(key)?;
+        self.epoch = self.epoch.wrapping_add(1);
+        *ins_epoch = self.epoch;
+        let arc = Arc::clone(val);
+        self.order.push_back((*key, self.epoch));
+        Some(arc)
     }
 
     fn insert(&mut self, key: (u64, u64), img: Arc<[u8]>) {
-        if self.map.contains_key(&key) {
+        self.epoch = self.epoch.wrapping_add(1);
+        let ep = self.epoch;
+        if let Some((val, ins_epoch)) = self.map.get_mut(&key) {
+            *val = img;
+            *ins_epoch = ep;
+            self.order.push_back((key, ep));
             return;
         }
         while self.map.len() >= RAW_BLOCK_CACHE_CAP {
-            if let Some(old) = self.order.pop_front() {
-                self.map.remove(&old);
+            if let Some((old, old_ep)) = self.order.pop_front() {
+                if self.map.get(&old).is_some_and(|(_, e)| *e == old_ep) {
+                    self.map.remove(&old);
+                }
             } else {
                 break;
             }
         }
-        self.order.push_back(key);
-        self.map.insert(key, img);
+        self.order.push_back((key, ep));
+        self.map.insert(key, (img, ep));
     }
 }
 
@@ -870,25 +882,21 @@ impl SstTable {
                 };
                 let cache_key = (crate::cache::path_id(&self.path), h.offset);
                 let cached = RAW_BLOCKS.with(|c| c.borrow_mut().get(&cache_key));
-                if let Some(raw) = cached {
+                if let Some(plain) = cached {
                     SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                     SST_BLOCK_CRC_SKIPPED.with(|c| c.set(c.get().saturating_add(1)));
-                    if raw.len() >= 4 {
-                        if let Some(found) = seek_point_in_block_body(
-                            &raw[..raw.len() - 4],
-                            self.compressed_blocks,
-                            user_key,
-                            snapshot,
-                            &mut scratch.plain,
-                            &self.path,
-                        )? {
-                            if crate::lookup_kernel::prefer_newer_seq(
-                                best.is_some(),
-                                found.0,
-                                best.as_ref().map(|(s, _)| *s).unwrap_or(0),
-                            ) {
-                                best = Some(found);
-                            }
+                    if let Some(found) = seek_point_in_plain_block(
+                        &plain,
+                        user_key,
+                        snapshot,
+                        &self.path,
+                    )? {
+                        if crate::lookup_kernel::prefer_newer_seq(
+                            best.is_some(),
+                            found.0,
+                            best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                        ) {
+                            best = Some(found);
                         }
                     }
                 } else {
@@ -898,18 +906,42 @@ impl SstTable {
                         .read_range(&self.path, h.offset, &mut scratch.raw)
                         .map_err(CoreError::Io)?;
                     SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
-                    let found = seek_point_in_block_image(
-                        &scratch.raw,
-                        self.compressed_blocks,
-                        user_key,
-                        snapshot,
-                        &mut scratch.plain,
-                        &self.path,
-                    )?;
+                    let body = split_block_crc(&scratch.raw, &self.path)?;
+                    let plain_arc: Arc<[u8]> = if self.compressed_blocks {
+                        let (size, input) = lz4_flex::block::uncompressed_size(body).map_err(|e| {
+                            CoreError::Internal(format!(
+                                "SST lz4 decompress failed in {}: {e}",
+                                self.path.display()
+                            ))
+                        })?;
+                        scratch.plain.clear();
+                        scratch.plain.resize(size, 0);
+                        let written = lz4_flex::block::decompress_into(input, &mut scratch.plain).map_err(|e| {
+                            CoreError::Internal(format!(
+                                "SST lz4 decompress failed in {}: {e}",
+                                self.path.display()
+                            ))
+                        })?;
+                        if written != size {
+                            return Err(CoreError::Internal(format!(
+                                "SST lz4 size prefix mismatch in {}: wrote {written} of {size} bytes",
+                                self.path.display()
+                            )));
+                        }
+                        Arc::from(scratch.plain.as_slice())
+                    } else {
+                        Arc::from(body)
+                    };
                     RAW_BLOCKS.with(|c| {
                         c.borrow_mut()
-                            .insert(cache_key, Arc::from(scratch.raw.as_slice()));
+                            .insert(cache_key, Arc::clone(&plain_arc));
                     });
+                    let found = seek_point_in_plain_block(
+                        &plain_arc,
+                        user_key,
+                        snapshot,
+                        &self.path,
+                    )?;
                     if let Some(found) = found {
                         if crate::lookup_kernel::prefer_newer_seq(
                             best.is_some(),
@@ -3063,6 +3095,23 @@ pub fn write_sst_bulk_arrays(
     seqs: &[SequenceNumber],
     sync: bool,
 ) -> Result<SstTable> {
+    if keys.len() > 1 {
+        let mut sorted = true;
+        for i in 1..keys.len() {
+            if keys[i - 1] > keys[i] {
+                sorted = false;
+                break;
+            }
+        }
+        if !sorted {
+            let mut indices: Vec<usize> = (0..keys.len()).collect();
+            indices.sort_by(|&a, &b| keys[a].cmp(&keys[b]));
+            let sorted_keys: Vec<Bytes> = indices.iter().map(|&i| keys[i].clone()).collect();
+            let sorted_vals: Vec<Bytes> = indices.iter().map(|&i| vals[i].clone()).collect();
+            let sorted_seqs: Vec<SequenceNumber> = indices.iter().map(|&i| seqs[i]).collect();
+            return write_sst_bulk_arrays_body(env, path.as_ref(), &sorted_keys, &sorted_vals, &sorted_seqs, sync);
+        }
+    }
     write_sst_bulk_arrays_body(env, path.as_ref(), keys, vals, seqs, sync)
 }
 
@@ -3156,8 +3205,8 @@ fn write_sst_bulk_arrays_body(
         file.write_all(&staged)?;
         staged.clear();
     }
-    let smallest_user_key = Some(keys[0].clone());
-    let largest_user_key = Some(keys[n_entries - 1].clone());
+    let smallest_user_key = keys.first().cloned();
+    let largest_user_key = keys.last().cloned();
     let data_len = pos - BULK_SST_HEADER_LEN as u64;
     let key_cp = SstTable::derive_index_accel(&mut index);
     let mut tail = Vec::with_capacity(index.len().saturating_mul(48).saturating_add(64));
@@ -3245,7 +3294,7 @@ fn finish_staged_block(
     let crc = crc32c::crc32c(&staged[block_start..]);
     let crc_bytes = crc.to_le_bytes();
     let stored = (staged.len() - block_start + 4) as u32;
-    let first_key = first.expect("bulk block missing first key");
+    let first_key = first.unwrap_or_default();
     index.push(BlockHandle {
         offset: *pos,
         length: stored,

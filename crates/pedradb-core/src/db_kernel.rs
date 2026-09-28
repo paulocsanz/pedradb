@@ -1362,29 +1362,35 @@ impl SstRun {
             return None;
         }
         for &i in tables_newest_first {
-            if ssts[i].smallest_user_key().is_none() || ssts[i].largest_user_key().is_none() {
+            let Some(table) = ssts.get(i) else {
+                return None;
+            };
+            if table.smallest_user_key().is_none() || table.largest_user_key().is_none() {
                 return None;
             }
         }
         let mut by_lo: Vec<usize> = tables_newest_first.to_vec();
         by_lo.sort_by(|&a, &b| {
-            ssts[a]
-                .smallest_user_key()
-                .unwrap()
-                .cmp(ssts[b].smallest_user_key().unwrap())
+            let a_lo = ssts.get(a).and_then(|t| t.smallest_user_key());
+            let b_lo = ssts.get(b).and_then(|t| t.smallest_user_key());
+            a_lo.cmp(&b_lo)
         });
         // RFC-0164 P1.2 / RFC-0222 P0.6: the strict-disjoint predicate
         // lives in the kernel rustc links. Equal-lo ties (put+tombstone)
         // keep the covering walk — the inlined `>=` was the same test
         // but the catalog could not see the call.
-        let los: Vec<&[u8]> = by_lo
-            .iter()
-            .map(|&i| ssts[i].smallest_user_key().unwrap())
-            .collect();
-        let his: Vec<&[u8]> = by_lo
-            .iter()
-            .map(|&i| ssts[i].largest_user_key().unwrap())
-            .collect();
+        let mut los: Vec<&[u8]> = Vec::with_capacity(by_lo.len());
+        let mut his: Vec<&[u8]> = Vec::with_capacity(by_lo.len());
+        for &i in &by_lo {
+            let Some(table) = ssts.get(i) else {
+                return None;
+            };
+            let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) else {
+                return None;
+            };
+            los.push(lo);
+            his.push(hi);
+        }
         if !crate::probe_order_kernel::run_pairwise_disjoint_los(&los, &his) {
             return None;
         }
@@ -1838,8 +1844,8 @@ pub struct Db<E: Env = StdEnv> {
     /// Full chunks waiting for off-lock SST materialize (writer parks,
     /// host worker encodes). Lookup still sees them.
     parked_bulk: VecDeque<(String, Arc<crate::bulk_run::BulkRun>)>,
-    /// Chunk the worker is encoding off-lock (not in `parked_bulk`).
-    bulk_encoding: Option<(String, Arc<crate::bulk_run::BulkRun>)>,
+    /// Chunks workers are encoding off-lock (not in `parked_bulk`).
+    bulk_encodings: Vec<(u64, String, Arc<crate::bulk_run::BulkRun>)>,
     /// Bulk SST installs since the last MANIFEST persist (RFC-0159 P1.2).
     /// Async hydrate persists every [`BULK_MANIFEST_EVERY`] chunks off the
     /// write lock; v50 batched under the lock and regressed 0.98→0.91×.
@@ -2449,6 +2455,14 @@ impl<E: Env> Db<E> {
                     .and_then(|s| s.parse().ok())
             })
             .collect()
+    }
+
+    /// Asserts physical disk resource invariants (Barreira 2):
+    /// Verifies that all active files in memory/manifest exist on disk,
+    /// no orphan uncommitted SST files exist on disk, no abandoned .tmp files exist,
+    /// and file numbers do not violate the allocator watermark.
+    pub fn assert_disk_inventory_invariant(&self) -> std::result::Result<(), crate::orphan_sst_cleanup_kernel::DiskResourceInvariantError> {
+        crate::orphan_sst_cleanup_kernel::assert_no_orphan_files_invariant(self.path(), &self.sst_file_nums(), self.next_file_num)
     }
 
     /// Persist CHANGELOG at most every `n` durable commits (RFC-0031).
@@ -3681,6 +3695,78 @@ impl<E: Env> Db<E> {
         false
     }
 
+    /// Whether any write in `[start, end)` (point or range tombstone) has `sequence > snapshot`.
+    #[must_use]
+    pub fn range_has_write_after(&self, start: &[u8], end: &[u8], snapshot: SequenceNumber) -> bool {
+        if start >= end {
+            return false;
+        }
+        // 1. Check unapplied ops (off-lock window)
+        for u in &self.unapplied {
+            if u.seq <= snapshot {
+                continue;
+            }
+            if u.kind == ValueType::RangeDeletion {
+                if u.key.as_ref() < end && start < u.end.as_ref() {
+                    return true;
+                }
+            } else if start <= u.key.as_ref() && u.key.as_ref() < end {
+                return true;
+            }
+        }
+        // 2. Check memtable layers
+        let layers = self.mem_layers();
+        for table in layers.iter() {
+            if table.has_range_tombstones() {
+                let mut tombs = Vec::new();
+                table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
+                for t in tombs {
+                    if t.sequence > snapshot && t.start.as_ref() < end && start < t.end.as_ref() {
+                        return true;
+                    }
+                }
+            }
+            for (k, _) in table.iter_internal_range(
+                std::ops::Bound::Included(start),
+                std::ops::Bound::Excluded(end),
+            ) {
+                if k.sequence > snapshot {
+                    return true;
+                }
+            }
+        }
+        // 3. Check SSTs
+        for table in &self.ssts {
+            if table.has_range_tombstones() {
+                let mut tombs = Vec::new();
+                table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
+                for t in tombs {
+                    if t.sequence > snapshot && t.start.as_ref() < end && start < t.end.as_ref() {
+                        return true;
+                    }
+                }
+            }
+            if !table.overlaps_user_range(
+                std::ops::Bound::Included(start),
+                std::ops::Bound::Excluded(end),
+            ) {
+                continue;
+            }
+            if table.max_sequence() <= snapshot {
+                continue;
+            }
+            for (k, _) in table.entries_in_user_range(
+                std::ops::Bound::Included(start),
+                std::ops::Bound::Excluded(end),
+            ) {
+                if k.sequence > snapshot {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Resolve vlog pointer to payload (or return inline value).
     fn resolve_stored_value(&self, stored: Bytes) -> Result<Bytes> {
         if stored.first() == Some(&INLINE_ESCAPE) {
@@ -4115,7 +4201,7 @@ impl<E: Env> Db<E> {
                     consider(k);
                 }
             }
-            if let Some((_, run)) = &self.bulk_encoding {
+            for (_, _, run) in &self.bulk_encodings {
                 if let Some(k) = run.last_visible_under_prefix(prefix, snapshot, hi) {
                     consider(k);
                 }
@@ -4334,7 +4420,7 @@ impl<E: Env> Db<E> {
                         }
                     }
                 }
-                if let Some((_, run)) = &self.bulk_encoding {
+                for (_, _, run) in &self.bulk_encodings {
                     if let Some(k) = run.last_visible_under_prefix(prefix, snapshot, before.as_deref()) {
                         if cand.as_ref().is_none_or(|c| k > *c) {
                             cand = Some(k);
@@ -4408,24 +4494,21 @@ impl<E: Env> Db<E> {
         projection: ScanProjection,
     ) -> impl Iterator<Item = VisibleKv> + '_ {
         self.scan_at_projected(self.visible_sequence(), start, end, None, projection)
+            .expect("head snapshot must be readable")
     }
 
     /// Streaming range at `snapshot` with optional live-key `limit`.
     ///
-    /// Prefer [`Self::try_scan_at`] when the snapshot may predate version GC.
-    /// This convenience path **panics** on [`CoreError::SnapshotTooOld`] so a
-    /// too-old scan cannot silently look like an empty range.
+    /// # Errors
+    /// Returns [`CoreError::SnapshotTooOld`] if history for `snapshot` was collected by GC.
     pub fn scan_at(
         &self,
         snapshot: SequenceNumber,
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
         limit: Option<usize>,
-    ) -> impl Iterator<Item = VisibleKv> + '_ {
+    ) -> Result<impl Iterator<Item = VisibleKv> + '_> {
         self.try_scan_at(snapshot, start, end, limit)
-            .unwrap_or_else(|e| {
-                panic!("scan_at: {e}; use try_scan_at for recoverable SnapshotTooOld")
-            })
     }
 
     /// Fail-closed streaming scan at `snapshot` (open-items §2.1 (c) range path).
@@ -4462,7 +4545,10 @@ impl<E: Env> Db<E> {
             .into_window_kvs())
     }
 
-    /// [`scan_at`](Self::scan_at) with projection (panics on too-old snapshot).
+    /// [`scan_at`](Self::scan_at) with projection.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::SnapshotTooOld`] if history for `snapshot` was collected by GC.
     pub fn scan_at_projected(
         &self,
         snapshot: SequenceNumber,
@@ -4470,11 +4556,8 @@ impl<E: Env> Db<E> {
         end: Bound<&[u8]>,
         limit: Option<usize>,
         projection: ScanProjection,
-    ) -> impl Iterator<Item = VisibleKv> + '_ {
+    ) -> Result<impl Iterator<Item = VisibleKv> + '_> {
         self.try_scan_at_projected(snapshot, start, end, limit, projection)
-            .unwrap_or_else(|e| {
-                panic!("scan_at_projected: {e}; use try_scan_at_projected for recoverable SnapshotTooOld")
-            })
     }
 
     /// Fail-closed projected scan (see [`Self::try_scan_at`]).
@@ -4589,7 +4672,7 @@ impl<E: Env> Db<E> {
             return 0;
         }
         let cap = limit.unwrap_or(usize::MAX);
-        if !self.bulk_runs.is_empty() || !self.parked_bulk.is_empty() || self.bulk_encoding.is_some() {
+        if !self.bulk_runs.is_empty() || !self.parked_bulk.is_empty() || !self.bulk_encodings.is_empty() {
             return self.scan_at_raw(snapshot, start, end, limit, false).count();
         }
         // deps_scan / kvrocks_scan: one memtable, no SST, latest snapshot —
@@ -4846,7 +4929,7 @@ impl<E: Env> Db<E> {
         for (_, run) in &self.parked_bulk {
             streams.push(Box::new(run.iter_range(start, end, snapshot)));
         }
-        if let Some((_, run)) = &self.bulk_encoding {
+        for (_, _, run) in &self.bulk_encodings {
             streams.push(Box::new(run.iter_range(start, end, snapshot)));
         }
         // Range tombstones from EVERY table (G2): a covering delete whose
@@ -5995,6 +6078,7 @@ impl<E: Env> Db<E> {
                     // RFC-0217 P1.1: no WAL frame — a rotate may only drop
                     // the segment once a publish covers this sequence.
                     self.walless_seq_high = self.walless_seq_high.max(seq);
+                    let value = escape_inline_value(value);
                     self.mem
                         .write()
                         .insert(InternalKey::new(key, seq, ValueType::Value), value);
@@ -6065,20 +6149,33 @@ impl<E: Env> Db<E> {
     }
 
     /// Pop one parked bulk chunk for off-lock SST write. Pins it in
-    /// `bulk_encoding` so get still hits until [`Self::finish_bulk_sst`].
+    /// `bulk_encodings` so get still hits until [`Self::finish_bulk_sst`].
     pub(crate) fn pop_parked_bulk_job(
         &mut self,
     ) -> Option<(String, Arc<crate::bulk_run::BulkRun>, u64, PathBuf, E, bool)> {
         let (fam, run) = self.parked_bulk.pop_front()?;
-        self.bulk_encoding = Some((fam.clone(), Arc::clone(&run)));
         let num = self.alloc_file_num();
+        self.bulk_encodings.push((num, fam.clone(), Arc::clone(&run)));
         let final_path = self.dir.join(format!("{num:06}.sst"));
         let (env, _, sync) = self.l0_write_ctx();
         Some((fam, run, num, final_path, env, sync))
     }
 
+    pub(crate) fn remove_bulk_encoding(&mut self, num: u64) -> Option<(String, Arc<crate::bulk_run::BulkRun>)> {
+        if let Some(pos) = self.bulk_encodings.iter().position(|(n, _, _)| *n == num) {
+            let (_, fam, run) = self.bulk_encodings.remove(pos);
+            Some((fam, run))
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn take_bulk_encoding(&mut self) -> Option<(String, Arc<crate::bulk_run::BulkRun>)> {
-        self.bulk_encoding.take()
+        if let Some((_, fam, run)) = self.bulk_encodings.pop() {
+            Some((fam, run))
+        } else {
+            None
+        }
     }
 
     pub(crate) fn push_parked_bulk_front(&mut self, pin: (String, Arc<crate::bulk_run::BulkRun>)) {
@@ -6099,13 +6196,7 @@ impl<E: Env> Db<E> {
                 t.release_resident();
             }
         }
-        if self
-            .bulk_encoding
-            .as_ref()
-            .is_some_and(|(f, _)| f == family)
-        {
-            self.bulk_encoding = None;
-        }
+        self.remove_bulk_encoding(num);
         self.bulk_diag("run_install", family, MAX_LSM_LEVEL);
         self.persist_bulk_manifest(false)
     }
@@ -6246,7 +6337,10 @@ impl<E: Env> Db<E> {
             cap.is_some_and(|c| run.bytes() >= c)
         };
         if over {
-            if let Some(run) = self.bulk_runs.remove(family) {
+            if let Some(mut run) = self.bulk_runs.remove(family) {
+                if !run.is_sorted() {
+                    run.sort();
+                }
                 // Park even while the worker is encoding the previous
                 // chunk so fill overlaps SST. Fifteen parked + one encoding
                 // + the open tail is 4 GiB runway.
@@ -9485,7 +9579,7 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        if let Some((f, run)) = &self.bulk_encoding {
+        for (_, f, run) in &self.bulk_encodings {
             if f == fam {
                 if let Some(res) = check_run(run) {
                     return res;
@@ -10180,8 +10274,15 @@ impl<E: Env> Db<E> {
     }
 
     #[must_use]
+    pub fn parked_bulk_len(&self) -> usize {
+        self.parked_bulk.len()
+    }
+
+    #[must_use]
     pub fn parked_bulk_bytes(&self) -> usize {
-        self.parked_bulk.iter().map(|(_, r)| r.bytes()).sum()
+        let parked: usize = self.parked_bulk.iter().map(|(_, r)| r.bytes()).sum();
+        let enc: usize = self.bulk_encodings.iter().map(|(_, _, r)| r.bytes()).sum();
+        parked.saturating_add(enc)
     }
 
     #[must_use]
@@ -11658,17 +11759,22 @@ impl<E: Env> Db<E> {
         self.unsynced_ssts
             .retain(|p| !old_paths.iter().any(|o| o == p));
         self.note_sst_inventory_changed();
+        let new_paths: Vec<PathBuf> = new_tables.iter().map(|t| t.path().to_path_buf()).collect();
         Some(L0CompactUndo {
             prev_tables,
             prev_levels,
             prev_manifest,
             prev_earliest,
             old_paths,
+            new_paths,
         })
     }
 
     /// Undo [`Self::apply_prepared_l0_compact`] after a failed MANIFEST persist.
     pub fn undo_prepared_l0_compact(&mut self, undo: L0CompactUndo) {
+        for p in &undo.new_paths {
+            let _ = self.remove_db_file(p);
+        }
         self.ssts = undo.prev_tables;
         self.sst_levels = undo.prev_levels;
         self.manifest_file_num = undo.prev_manifest;
@@ -11744,6 +11850,7 @@ pub struct L0CompactUndo {
     prev_manifest: u64,
     prev_earliest: SequenceNumber,
     old_paths: Vec<PathBuf>,
+    new_paths: Vec<PathBuf>,
 }
 
 impl L0CompactUndo {
@@ -11751,6 +11858,12 @@ impl L0CompactUndo {
     #[must_use]
     pub fn old_paths(&self) -> &[PathBuf] {
         &self.old_paths
+    }
+
+    /// Newly generated SST paths from the compact (deleted on rollback).
+    #[must_use]
+    pub fn new_paths(&self) -> &[PathBuf] {
+        &self.new_paths
     }
 }
 
@@ -12778,15 +12891,14 @@ fn write_merged_tables_span<'a>(
             };
             if crate::compact_kernel::compact_should_split_at(acc, split_target)
                 && out.len() + 1 < span_budget
-                && last_user
+                && (last_user
                     .as_ref()
                     .is_none_or(|u| u.as_ref() != ok_entry.0.user_key.as_ref())
+                    || acc >= split_target.saturating_mul(4))
             {
-                // Target reached, the user key changed, and one more chunk
-                // still fits this span's share of the reserved range —
-                // start a new file with this entry. A same-user version run
-                // never splits: it stays in one file. Past the span budget
-                // the split is skipped and the chunk runs long instead.
+                // Target reached, the user key changed (or reached hard 4x target),
+                // and one more chunk still fits this span's share of the reserved range —
+                // start a new file with this entry.
                 peeked = Some(Ok(ok_entry));
                 closed = true;
                 return None;
@@ -12803,10 +12915,21 @@ fn write_merged_tables_span<'a>(
             Ok(table) => table,
             Err(e) => {
                 let _ = env.remove_file(&tmp_path);
+                for t in &out {
+                    let _ = env.remove_file(t.path());
+                }
                 return Err(e);
             }
         };
-        let chunk = finish_merged_chunk_on(env, dir, file_num, do_sync_dir, written)?;
+        let chunk = match finish_merged_chunk_on(env, dir, file_num, do_sync_dir, written) {
+            Ok(c) => c,
+            Err(e) => {
+                for t in &out {
+                    let _ = env.remove_file(t.path());
+                }
+                return Err(e);
+            }
+        };
         // Register the chunk's resident body the moment it exists: this
         // Vec accumulates every chunk of the job, and a freshly opened
         // chunk holds its whole file body in RAM. Unregistered payloads
@@ -12954,7 +13077,15 @@ fn write_merged_tables_parallel<E: Env + Sync>(
     });
     let mut out: Vec<SstTable> = Vec::new();
     for r in results {
-        out.extend(r?);
+        match r {
+            Ok(tables) => out.extend(tables),
+            Err(e) => {
+                for t in &out {
+                    let _ = env.remove_file(t.path());
+                }
+                return Err(e);
+            }
+        }
     }
     let consumed = next_file_num.into_inner() - first_file_num;
     debug_assert_eq!(
@@ -16763,6 +16894,7 @@ mod tests {
             let snap = db.visible_sequence();
             let got: Vec<(Vec<u8>, Vec<u8>)> = db
                 .scan_at(snap, start, end, limit)
+                .expect("scan_at")
                 .map(|kv| (kv.key.to_vec(), kv.value.to_vec()))
                 .collect();
             let mut want: Vec<(Vec<u8>, Vec<u8>)> = expect
@@ -18072,6 +18204,23 @@ mod tests {
             matches!(err, CoreError::SnapshotTooOld { .. }),
             "try_scan_at too old: {err:?}"
         );
+        let err_scan = db
+            .scan_at(old_seq, Bound::Unbounded, Bound::Unbounded, None)
+            .err()
+            .expect("scan_at must return Err instead of panicking on GC watermark");
+        assert!(matches!(err_scan, CoreError::SnapshotTooOld { .. }));
+
+        let err_scan_proj = db
+            .scan_at_projected(
+                old_seq,
+                Bound::Unbounded,
+                Bound::Unbounded,
+                None,
+                ScanProjection::Full,
+            )
+            .err()
+            .expect("scan_at_projected must return Err instead of panicking on GC watermark");
+        assert!(matches!(err_scan_proj, CoreError::SnapshotTooOld { .. }));
         // Latest range still works.
         let live = db.range_limited(Bound::Unbounded, Bound::Unbounded, None);
         assert_eq!(live.len(), 1);
@@ -19046,6 +19195,7 @@ mod tests {
                 Bound::Unbounded,
                 Some(100),
             )
+            .expect("scan_at")
             .collect();
         assert_eq!(page.len(), 100);
         let next_start = page.last().unwrap().key.clone();
@@ -20397,6 +20547,42 @@ mod tests {
              (first={first}, second={})",
             crate::sst::sst_blocks_decoded()
         );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Regression test for Bug 5: aborting/undoing a prepared compaction must remove
+    /// the newly generated SST files from disk so that orphan files do not leak.
+    #[test]
+    fn undo_prepared_l0_compact_removes_new_sst_files_from_disk() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"k1", b"v1").unwrap();
+        db.flush().unwrap();
+        db.put(b"k2", b"v2").unwrap();
+        db.flush().unwrap();
+        assert_eq!(db.sst_count(), 2);
+
+        // Prepare compaction job
+        let job = db.prepare_l0_compact(CompactOptions::default()).unwrap().unwrap();
+        let new_tables = job.write().unwrap();
+        assert!(!new_tables.is_empty());
+        let new_paths: Vec<PathBuf> = new_tables.iter().map(|t| t.path().to_path_buf()).collect();
+        for p in &new_paths {
+            assert!(p.exists(), "new SST must exist on disk after execute");
+        }
+
+        // Apply in-memory state
+        let undo = db.apply_prepared_l0_compact(job, new_tables).unwrap();
+
+        // Roll back the compaction
+        db.undo_prepared_l0_compact(undo);
+
+        // Verify that every newly generated SST file has been deleted from disk!
+        for p in &new_paths {
+            assert!(!p.exists(), "new SST file {:?} must be deleted from disk on undo", p);
+        }
+
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

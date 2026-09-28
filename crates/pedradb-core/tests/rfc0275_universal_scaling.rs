@@ -80,7 +80,7 @@ fn test_point_scan_bloom_filter_pruning() {
         Bound::Included(absent_key.as_slice()),
         Bound::Included(absent_key.as_slice()),
         None,
-    ).count();
+    ).unwrap().count();
 
     assert_eq!(count, 0);
     let probe_after = db.read_probe().scan_sst_probed;

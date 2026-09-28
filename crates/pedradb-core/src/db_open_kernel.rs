@@ -545,7 +545,7 @@ impl<E: Env> Db<E> {
             bulk_route_enabled: crate::bulk_ingest::bulk_enabled(),
             bulk_runs: HashMap::new(),
             parked_bulk: VecDeque::new(),
-            bulk_encoding: None,
+            bulk_encodings: Vec::new(),
             bulk_manifest_debt: 0,
             fold_pair_expected: None,
             retired_pending: Vec::new(),

@@ -153,3 +153,191 @@ fn merge_is_get_put_and_loses_concurrent_operands() {
     assert_eq!(sorted, (0..N).collect::<Vec<_>>());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Bug 1: `get_cf_opt` must not poison thread-local cache across column families.
+#[test]
+fn get_cf_opt_no_cross_cf_cache_pollution() {
+    let dir = tmp("cf-cache-isolation");
+    let mut opts = Options::new();
+    opts.create_if_missing(true);
+    let db = DB::open_cf(&opts, &dir, &["finance", "public"]).unwrap();
+    let cf_finance = db.cf_handle("finance").unwrap();
+    let cf_public = db.cf_handle("public").unwrap();
+
+    db.put(b"shared_key", b"val_default").unwrap();
+    db.put_cf(&cf_finance, b"shared_key", b"val_finance").unwrap();
+    db.put_cf(&cf_public, b"shared_key", b"val_public").unwrap();
+
+    let ro = ReadOptions::default();
+
+    // Query finance first (warms TLS cache)
+    let got_finance = db.get_cf_opt(&cf_finance, b"shared_key", &ro).unwrap();
+    assert_eq!(got_finance.as_deref(), Some(b"val_finance".as_slice()));
+
+    // Query public: must NOT return finance value!
+    let got_public = db.get_cf_opt(&cf_public, b"shared_key", &ro).unwrap();
+    assert_eq!(
+        got_public.as_deref(),
+        Some(b"val_public".as_slice()),
+        "cross-cf leak: got_public returned finance value"
+    );
+
+    // Query default: must NOT return finance or public value!
+    let got_default = db.get_opt(b"shared_key", &ro).unwrap();
+    assert_eq!(
+        got_default.as_deref(),
+        Some(b"val_default".as_slice()),
+        "cross-cf leak: got_default returned non-default value"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Bug 4: `multi_get` must evaluate all keys under a single atomic snapshot (no fractured reads).
+#[test]
+fn multi_get_snapshot_isolation_no_fractured_reads() {
+    let dir = tmp("multi-get-snapshot");
+    let mut opts = Options::new();
+    opts.create_if_missing(true);
+    let db = Arc::new(DB::open(&opts, &dir).unwrap());
+
+    // Initialize key_a and key_b to "0"
+    let mut wb = rocksdb_compat::WriteBatch::default();
+    wb.put(b"key_a", b"0");
+    wb.put(b"key_b", b"0");
+    db.write(&wb).unwrap();
+
+    let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+
+    // Writer thread: continuously writes (i, i) atomically
+    let writer_db = Arc::clone(&db);
+    let writer_running = Arc::clone(&running);
+    let writer = thread::spawn(move || {
+        for i in 1..=500 {
+            let mut wb = rocksdb_compat::WriteBatch::default();
+            let val = i.to_string().into_bytes();
+            wb.put(b"key_a", &val);
+            wb.put(b"key_b", &val);
+            writer_db.write(&wb).unwrap();
+        }
+        writer_running.store(false, std::sync::atomic::Ordering::Relaxed);
+    });
+
+    // Reader thread: multi_get on [key_a, key_b] must ALWAYS see key_a == key_b
+    let reader_db = Arc::clone(&db);
+    let reader_running = Arc::clone(&running);
+    let reader = thread::spawn(move || {
+        let keys = [b"key_a".as_slice(), b"key_b".as_slice()];
+        while reader_running.load(std::sync::atomic::Ordering::Relaxed) {
+            let res = reader_db.multi_get(keys);
+            assert_eq!(res.len(), 2);
+            let val_a = res[0].as_ref().unwrap().clone();
+            let val_b = res[1].as_ref().unwrap().clone();
+            assert_eq!(
+                val_a, val_b,
+                "fractured read detected: multi_get saw mismatched versions across keys"
+            );
+        }
+    });
+
+    writer.join().unwrap();
+    reader.join().unwrap();
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Bug 3: Reverse iteration across multiple pages (> 2048 keys) must refill
+/// in bounded linear O(M) time and yield all keys in exact descending order.
+#[test]
+fn reverse_iterator_refill_spans_multiple_windows_correctly() {
+    let dir = tmp("reverse-iter-multi-window");
+    let mut opts = Options::new();
+    opts.create_if_missing(true);
+    let db = DB::open(&opts, &dir).unwrap();
+
+    let total = 5000;
+    for i in 0..total {
+        let key = format!("k_{i:06}").into_bytes();
+        let val = format!("v_{i}").into_bytes();
+        db.put(&key, &val).unwrap();
+    }
+
+    let mut iter = db.iterator(IteratorMode::End).unwrap();
+    let mut seen = Vec::new();
+    while iter.valid() {
+        let k = std::str::from_utf8(iter.key()).unwrap();
+        let id: usize = k.strip_prefix("k_").unwrap().parse().unwrap();
+        seen.push(id);
+        iter.next();
+    }
+
+    assert_eq!(seen.len(), total, "must yield exactly all 5000 keys");
+    let expected: Vec<usize> = (0..total).rev().collect();
+    assert_eq!(seen, expected, "reverse iteration must yield exact descending sequence");
+
+    // Barreira 3: Algorithmic Complexity Budget Guard
+    // Total steps to traverse all keys in reverse must be bounded by O(M), strictly <= 3 * M
+    iter.assert_step_budget(total, 3);
+
+    // Verify forward iteration complexity budget as well (<= 2 * M)
+    let mut fwd_iter = db.iterator(IteratorMode::Start).unwrap();
+    let mut fwd_seen = 0;
+    while fwd_iter.valid() {
+        fwd_seen += 1;
+        fwd_iter.next();
+    }
+    assert_eq!(fwd_seen, total);
+    fwd_iter.assert_step_budget(total, 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Barreira 2: Physical Resource Invariants & Disk Leak Checker.
+/// Verifies that any uncommitted SST, abandoned .tmp file, or missing manifest SST
+/// is immediately flagged by the invariant checker.
+#[test]
+fn test_physical_disk_inventory_and_leak_invariant() {
+    let dir = tmp("disk-inventory-invariant");
+    let mut opts = Options::new();
+    opts.create_if_missing(true);
+    let db = DB::open(&opts, &dir).unwrap();
+
+    for i in 0..100 {
+        db.put(format!("key_{i:04}").as_bytes(), b"val").unwrap();
+    }
+    db.flush().unwrap();
+    db.compact().unwrap();
+
+    // 1. Quiescent database must strictly satisfy the invariant
+    db.assert_disk_inventory_invariant()
+        .expect("Valid database must pass disk invariant checker");
+
+    // 2. Inject an abandoned .tmp file (e.g. from an interrupted compaction or aborted write)
+    let tmp_path = dir.join("compaction_job_01.tmp");
+    std::fs::write(&tmp_path, b"abandoned tmp data").unwrap();
+
+    let err = db.assert_disk_inventory_invariant().unwrap_err();
+    assert!(
+        err.to_string().contains("Abandoned temporary file"),
+        "Invariant checker must detect abandoned .tmp files: {err}"
+    );
+    std::fs::remove_file(&tmp_path).unwrap();
+
+    // 3. Inject an orphan / uncommitted .sst file (disk leak)
+    let orphan_sst = dir.join("099999.sst");
+    std::fs::write(&orphan_sst, b"fake uncommitted sst").unwrap();
+
+    let err = db.assert_disk_inventory_invariant().unwrap_err();
+    assert!(
+        err.to_string().contains("Orphan / uncommitted SST"),
+        "Invariant checker must detect orphan SST files: {err}"
+    );
+    std::fs::remove_file(&orphan_sst).unwrap();
+
+    // 4. Invariant holds again once clean
+    db.assert_disk_inventory_invariant()
+        .expect("Clean database must pass disk invariant checker");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+

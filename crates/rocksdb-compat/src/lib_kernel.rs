@@ -325,6 +325,8 @@ pub struct Options {
     pub pending_compaction_hard_bytes: u64,
     /// Maximum concurrent in-flight submissions before queue backpressure (RFC-0274 Pillar VI).
     pub max_in_flight_writers: usize,
+    /// Maximum background flush/compact jobs (parallelism knob).
+    pub max_background_jobs: Option<usize>,
 }
 
 type CompactionFilterFn =
@@ -408,6 +410,7 @@ impl Default for Options {
             pending_compaction_soft_bytes: pedradb_core::backpressure_kernel::DEFAULT_PENDING_COMPACTION_SOFT_BYTES,
             pending_compaction_hard_bytes: pedradb_core::backpressure_kernel::DEFAULT_PENDING_COMPACTION_HARD_BYTES,
             max_in_flight_writers: pedradb_core::backpressure_kernel::DEFAULT_MAX_IN_FLIGHT_WRITERS,
+            max_background_jobs: None,
         }
     }
 }
@@ -515,8 +518,16 @@ impl Options {
     pub fn set_use_fsync(&mut self, _v: bool) {}
     pub fn set_manual_wal_flush(&mut self, _v: bool) {}
     pub fn set_wal_bytes_per_sync(&mut self, _n: u64) {}
-    pub fn increase_parallelism(&mut self, _n: i32) {}
-    pub fn set_max_background_jobs(&mut self, _n: i32) {}
+    pub fn increase_parallelism(&mut self, n: i32) {
+        if n > 0 {
+            self.max_background_jobs = Some(n as usize);
+        }
+    }
+    pub fn set_max_background_jobs(&mut self, n: i32) {
+        if n > 0 {
+            self.max_background_jobs = Some(n as usize);
+        }
+    }
     pub fn set_max_open_files(&mut self, _n: i32) {}
     pub fn set_keep_log_file_num(&mut self, _n: usize) {}
     pub fn set_compaction_readahead_size(&mut self, _n: usize) {}
@@ -1001,19 +1012,19 @@ fn fx_bytes(mut hash: u64, bytes: &[u8]) -> u64 {
     if n <= 16 {
         let mut tmp = [0u8; 16];
         tmp[..n].copy_from_slice(bytes);
-        hash = fx_mix(hash, u64::from_le_bytes(tmp[0..8].try_into().unwrap()));
-        hash = fx_mix(hash, u64::from_le_bytes(tmp[8..16].try_into().unwrap()));
+        hash = fx_mix(hash, u64::from_le_bytes(tmp[0..8].try_into().unwrap_or([0u8; 8])));
+        hash = fx_mix(hash, u64::from_le_bytes(tmp[8..16].try_into().unwrap_or([0u8; 8])));
         return fx_mix(hash, n as u64);
     }
     let mut bytes = bytes;
     while bytes.len() >= 8 {
         let (chunk, rest) = bytes.split_at(8);
-        hash = fx_mix(hash, u64::from_le_bytes(chunk.try_into().unwrap()));
+        hash = fx_mix(hash, u64::from_le_bytes(chunk.try_into().unwrap_or([0u8; 8])));
         bytes = rest;
     }
     if bytes.len() >= 4 {
         let (chunk, rest) = bytes.split_at(4);
-        hash = fx_mix(hash, u32::from_le_bytes(chunk.try_into().unwrap()) as u64);
+        hash = fx_mix(hash, u32::from_le_bytes(chunk.try_into().unwrap_or([0u8; 4])) as u64);
         bytes = rest;
     }
     for &b in bytes {
@@ -1471,11 +1482,16 @@ impl WriteBatch {
         start: impl AsRef<[u8]>,
         end: impl AsRef<[u8]>,
     ) {
+        let s = start.as_ref();
+        let e = end.as_ref();
+        if s >= e {
+            return;
+        }
         self.ops.push((
             Some(Arc::clone(&cf.name)),
             BatchOp::DeleteRange {
-                start: Bytes::copy_from_slice(start.as_ref()),
-                end: Bytes::copy_from_slice(end.as_ref()),
+                start: Bytes::copy_from_slice(s),
+                end: Bytes::copy_from_slice(e),
             },
         ));
     }
@@ -1561,17 +1577,21 @@ pub struct DBIterator<E: PedraEnv = StdEnv> {
     codec: KeyCodec,
     cf: String,
     seq: pedradb_core::SequenceNumber,
-    cf_start: Bound<Vec<u8>>,
+    _cf_start: Bound<Vec<u8>>,
     cf_end: Bound<Vec<u8>>,
     /// Encoded last / first key of the current page — the refill resume
     /// points. Kept aside from `items` because consumed slots are moved
     /// out (zero-copy handoff), not just index-past.
     resume_fwd: Vec<u8>,
     resume_rev: Vec<u8>,
+    /// Checkpoints of preceding window boundaries for linear O(M) reverse iteration.
+    rev_checkpoints: Vec<Vec<u8>>,
     exhausted: bool,
     /// Last refill error (fix C6 hardening): a failed window refill no
     /// longer vanishes — `status()` reports it instead of a silent truncation.
     err: Option<Error>,
+    /// Cumulative steps (keys examined/refilled) for complexity budget assertions (Barreira 3).
+    steps_examined: usize,
 }
 
 impl<E: PedraEnv> Iterator for DBIterator<E> {
@@ -1654,6 +1674,25 @@ impl<E: PedraEnv> DBIterator<E> {
         }
     }
 
+    /// Total entries examined/materialized by the iterator across all refills (Barreira 3).
+    #[must_use]
+    pub fn steps_examined(&self) -> usize {
+        self.steps_examined
+    }
+
+    /// Asserts asymptotic linear complexity (Barreira 3):
+    /// Verifies that iterating `m` keys never exceeds a step budget `max_ratio * m + overhead`.
+    pub fn assert_step_budget(&self, m: usize, max_ratio: usize) {
+        let budget = (max_ratio * m).saturating_add(ITER_WINDOW * 2);
+        assert!(
+            self.steps_examined <= budget,
+            "Algorithmic complexity violation: examined {} steps for {} keys (budget was {})! Possible O(M^2) regression.",
+            self.steps_examined,
+            m,
+            budget
+        );
+    }
+
     fn invalidate(&mut self) {
         self.exhausted = true;
         self.idx = if self.reverse {
@@ -1681,6 +1720,7 @@ impl<E: PedraEnv> DBIterator<E> {
             ITER_WINDOW,
         ) {
             Ok(page) if !pedradb_core::write_admission_kernel::batch_is_empty(page.len() as u64) => {
+                self.steps_examined = self.steps_examined.saturating_add(page.len());
                 self.set_page(page);
                 self.idx = 0;
             }
@@ -1700,16 +1740,23 @@ impl<E: PedraEnv> DBIterator<E> {
             return;
         }
         let end = Bound::Excluded(std::mem::take(&mut self.resume_rev));
-        match page_last_n(
+        let start = if let Some(cp) = self.rev_checkpoints.pop() {
+            Bound::Included(cp)
+        } else {
+            self.invalidate();
+            return;
+        };
+        match page_forward(
             &self.inner,
             &self.codec,
             &self.cf,
             self.seq,
-            bound_as_ref(&self.cf_start),
-            end,
+            start,
+            bound_as_ref(&end),
             ITER_WINDOW,
         ) {
             Ok(page) if !pedradb_core::write_admission_kernel::batch_is_empty(page.len() as u64) => {
+                self.steps_examined = self.steps_examined.saturating_add(page.len());
                 self.idx = page.len() - 1;
                 self.set_page(page);
             }
@@ -1784,6 +1831,43 @@ fn page_forward_inner<E: PedraEnv>(
         .map_err(Error::from)
 }
 
+fn page_last_n_with_checkpoints<E: PedraEnv>(
+    inner: &ConcurrentDb<E>,
+    codec: &KeyCodec,
+    cf: &str,
+    seq: pedradb_core::SequenceNumber,
+    start: Bound<&[u8]>,
+    end: Bound<Vec<u8>>,
+    n: usize,
+) -> Result<(Vec<(Bytes, Bytes)>, Vec<Vec<u8>>)> {
+    let e = bound_as_ref(&end);
+    inner
+        .with_read(|db| {
+            let mut checkpoints: Vec<Vec<u8>> = Vec::new();
+            let mut ring: VecDeque<(Bytes, Bytes)> = VecDeque::with_capacity(n.saturating_add(1));
+            let mut count = 0usize;
+            for row in db.try_scan_window_at(seq, start, e)? {
+                if !crate::iter_kernel::iter_window_keep(row.snapshot_live) {
+                    continue;
+                }
+                if count % n == 0 {
+                    checkpoints.push(row.key.to_vec());
+                }
+                count += 1;
+                if ring.len() == n {
+                    ring.pop_front();
+                }
+                ring.push_back((codec.decode_bytes_owned(cf, row.key), row.value));
+            }
+            checkpoints.pop();
+            Ok::<(Vec<(Bytes, Bytes)>, Vec<Vec<u8>>), CoreError>((
+                ring.into_iter().collect(),
+                checkpoints,
+            ))
+        })
+        .map_err(Error::from)
+}
+
 fn page_last_n<E: PedraEnv>(
     inner: &ConcurrentDb<E>,
     codec: &KeyCodec,
@@ -1793,23 +1877,7 @@ fn page_last_n<E: PedraEnv>(
     end: Bound<Vec<u8>>,
     n: usize,
 ) -> Result<Vec<(Bytes, Bytes)>> {
-    let e = bound_as_ref(&end);
-    inner
-        .with_read(|db| {
-            // Iterator borrows the Db — consume the ring window under the guard.
-            let mut ring: VecDeque<(Bytes, Bytes)> = VecDeque::with_capacity(n.saturating_add(1));
-            for row in db.try_scan_window_at(seq, start, e)? {
-                if !crate::iter_kernel::iter_window_keep(row.snapshot_live) {
-                    continue;
-                }
-                if ring.len() == n {
-                    ring.pop_front();
-                }
-                ring.push_back((codec.decode_bytes_owned(cf, row.key), row.value));
-            }
-            Ok::<Vec<(Bytes, Bytes)>, CoreError>(ring.into_iter().collect())
-        })
-        .map_err(Error::from)
+    page_last_n_with_checkpoints(inner, codec, cf, seq, start, end, n).map(|(items, _)| items)
 }
 
 /// Read snapshot (sequence-pinned point + iterator reads).
@@ -1879,10 +1947,13 @@ fn cf_bounds(codec: &KeyCodec, cf: &str) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
     if codec.default_raw && cf == DEFAULT_CF {
         (Bound::Unbounded, Bound::Unbounded)
     } else {
-        let start = Bound::Included(codec.encode(cf, &[]));
-        let mut succ = codec.encode(cf, &[]);
-        *succ.last_mut().expect("prefix non-empty") = 1;
-        (start, Bound::Excluded(succ))
+        let prefix = codec.encode(cf, &[]);
+        let start = Bound::Included(prefix.clone());
+        if let Some(succ) = prefix_exclusive_end(&prefix) {
+            (start, Bound::Excluded(succ))
+        } else {
+            (start, Bound::Unbounded)
+        }
     }
 }
 
@@ -1965,7 +2036,7 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
     if let Some(up) = bounds.upper {
         cf_end = min_excluded(cf_end, &codec.encode(cf, up));
     }
-    let (items, idx, reverse) = match mode {
+    let (items, rev_checkpoints, idx, reverse) = match mode {
         IteratorMode::Start | IteratorMode::From(_, Direction::Forward) => {
             let user_lo = match mode {
                 IteratorMode::From(k, _) => {
@@ -1986,10 +2057,10 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
                 bound_as_ref(&cf_end),
                 ITER_WINDOW,
             )?;
-            (page, 0, false)
+            (page, Vec::new(), 0, false)
         }
         IteratorMode::End => {
-            let page = page_last_n(
+            let (page, cps) = page_last_n_with_checkpoints(
                 inner,
                 codec,
                 cf,
@@ -1999,7 +2070,7 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
                 ITER_WINDOW,
             )?;
             let i = page.len().saturating_sub(1);
-            (page, i, true)
+            (page, cps, i, true)
         }
         IteratorMode::From(k, Direction::Reverse) => {
             let enc = codec.encode(cf, k);
@@ -2010,7 +2081,7 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
                 },
                 None => cf_end.clone(),
             };
-            let page = page_last_n(
+            let (page, cps) = page_last_n_with_checkpoints(
                 inner,
                 codec,
                 cf,
@@ -2020,7 +2091,7 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
                 ITER_WINDOW,
             )?;
             let i = page.len().saturating_sub(1);
-            (page, i, true)
+            (page, cps, i, true)
         }
     };
     let exhausted = pedradb_core::write_admission_kernel::batch_is_empty(items.len() as u64);
@@ -2032,6 +2103,7 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
         .first()
         .map(|(k, _)| codec.encode_resume(cf, k))
         .unwrap_or_default();
+    let initial_steps = items.len() + rev_checkpoints.len() * ITER_WINDOW;
     Ok(DBIterator {
         items,
         idx,
@@ -2040,12 +2112,14 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
         codec: codec.clone(),
         cf: cf.to_string(),
         seq,
-        cf_start,
+        _cf_start: cf_start,
         cf_end,
         resume_fwd,
         resume_rev,
+        rev_checkpoints,
         exhausted,
         err: None,
+        steps_examined: initial_steps,
     })
 }
 
@@ -2070,6 +2144,7 @@ pub struct DB<E: PedraEnv = IoUringEnv> {
     /// injected-Env cases.
     flush_tx: Option<SyncSender<CompactCmd>>,
     flush_thread: Option<JoinHandle<()>>,
+    flush_pool: Vec<JoinHandle<()>>,
     compact_gate: Arc<Mutex<()>>,
     /// Last [`DB::resume`] outcome after a durability fence (RFC-0047 P1.1).
     /// `Arc`-shared with the host compact worker (P1.2 auto-resume writes
@@ -2140,9 +2215,18 @@ impl DB<IoUringEnv> {
             db.inner.set_defer_auto_compact(true);
             db.compact_tx = tx;
             db.compact_thread = th;
-            let (ftx, fth) = spawn_flush_worker(db.inner.clone());
+            let worker_count = opts
+                .max_background_jobs
+                .unwrap_or_else(|| {
+                    std::thread::available_parallelism()
+                        .map(|n| n.get())
+                        .unwrap_or(4)
+                })
+                .clamp(1, 8);
+            let (ftx, fth, fpool) = spawn_flush_worker(db.inner.clone(), worker_count);
             db.flush_tx = ftx;
             db.flush_thread = fth;
+            db.flush_pool = fpool;
         }
         Ok(db)
     }
@@ -2209,9 +2293,18 @@ impl DB<StdEnv> {
             db.inner.set_defer_auto_compact(true);
             db.compact_tx = tx;
             db.compact_thread = th;
-            let (ftx, fth) = spawn_flush_worker(db.inner.clone());
+            let worker_count = opts
+                .max_background_jobs
+                .unwrap_or_else(|| {
+                    std::thread::available_parallelism()
+                        .map(|n| n.get())
+                        .unwrap_or(4)
+                })
+                .clamp(1, 8);
+            let (ftx, fth, fpool) = spawn_flush_worker(db.inner.clone(), worker_count);
             db.flush_tx = ftx;
             db.flush_thread = fth;
+            db.flush_pool = fpool;
         }
         Ok(db)
     }
@@ -2449,6 +2542,7 @@ impl<E: PedraEnv> DB<E> {
             compact_thread: None,
             flush_tx: None,
             flush_thread: None,
+            flush_pool: Vec::new(),
             compact_gate: Arc::new(Mutex::new(())),
             fence_recovery: Arc::new(Mutex::new(None)),
             auto_resume_transient: opts.auto_resume_transient,
@@ -2725,11 +2819,17 @@ impl<E: PedraEnv> DB<E> {
         start: impl AsRef<[u8]>,
         end: impl AsRef<[u8]>,
     ) -> Result<()> {
+        let s = start.as_ref();
+        let e = end.as_ref();
+        if s >= e {
+            return Ok(());
+        }
         self.check_cf(&cf.name)?;
-        let lo = self.codec.encode(&cf.name, start.as_ref());
-        let hi = self.codec.encode(&cf.name, end.as_ref());
+        let lo = self.codec.encode(&cf.name, s);
+        let hi = self.codec.encode(&cf.name, e);
         self.inner.delete_range(lo, hi).map_err(Error::from)?;
         LAST_GET.with(|slot| *slot.borrow_mut() = LastGetTable::new());
+        LAST_CF.with(|slot| *slot.borrow_mut() = LastGetTable::new());
         Ok(())
     }
 
@@ -4067,9 +4167,9 @@ impl<E: PedraEnv> DB<E> {
         }
         self.check_cf(name)?;
         let start = self.codec.encode(name, &[]);
-        let mut end = start.clone();
-        *end.last_mut().expect("prefix") = 1;
-        self.inner.delete_range(start, end).map_err(Error::from)?;
+        if let Some(end) = prefix_exclusive_end(&start) {
+            self.inner.delete_range(start, end).map_err(Error::from)?;
+        }
         self.flush()?;
         self.compact()?;
         let mut cfs = self.cfs.write();
@@ -4156,29 +4256,7 @@ impl<E: PedraEnv> DB<E> {
     ) -> Result<Option<Vec<u8>>> {
         ro.refuse_checksums_off()?;
         if ro.snap.is_none() {
-            self.check_cf(&cf.name)?;
-            let key = key.as_ref();
-            let (epoch, gen) = self.tls_point_ids(&cf.name, key);
-            let hit = if cf.name.as_ref() == DEFAULT_CF {
-                LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key))
-            } else {
-                LAST_GET.with(|slot| slot.borrow().get(epoch, gen, &cf.name, key))
-            };
-            if let Some(h) = hit {
-                self.inner.note_class_point(h.is_some());
-                return Ok(h.map(|b| b.to_vec()));
-            }
-            let got = self
-                .codec
-                .encode_with(&cf.name, key, |enc| self.inner.get(enc));
-            if got.is_some() {
-                if cf.name.as_ref() == DEFAULT_CF {
-                    LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
-                } else {
-                    LAST_GET.with(|slot| slot.borrow_mut().hash_store(epoch, gen, &cf.name, key, got.clone()));
-                }
-            }
-            return Ok(got.map(|b| b.to_vec()));
+            return self.get_cf(cf, key);
         }
         let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
         self.get_at(CoreSnapshot::at(seq), &cf.name, key)
@@ -4200,27 +4278,39 @@ impl<E: PedraEnv> DB<E> {
 
     /// rust-rocksdb `multi_get`.
     ///
-    /// Evaluates batched gets via thread-local zero-copy fast path (RFC-0293).
+    /// Evaluates batched gets under a single atomic snapshot point-in-time.
     pub fn multi_get<K, I>(&self, keys: I) -> Vec<Result<Option<Vec<u8>>>>
     where
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
+        let keys: Vec<K> = keys.into_iter().collect();
+        if pedradb_core::write_admission_kernel::batch_is_empty(keys.len() as u64) {
+            return Vec::new();
+        }
+        let seq = self.inner.visible_sequence();
+        let snap = CoreSnapshot::at(seq);
         keys.into_iter()
-            .map(|k| self.get(k))
+            .map(|k| self.get_at(snap, DEFAULT_CF, k))
             .collect()
     }
 
     /// rust-rocksdb `multi_get_cf`.
     ///
-    /// Evaluates batched gets via thread-local zero-copy fast path (RFC-0293).
+    /// Evaluates batched gets under a single atomic snapshot point-in-time.
     pub fn multi_get_cf<'a, K, I>(&self, keys: I) -> Vec<Result<Option<Vec<u8>>>>
     where
         K: AsRef<[u8]>,
         I: IntoIterator<Item = (&'a ColumnFamily, K)>,
     {
-        keys.into_iter()
-            .map(|(cf, k)| self.get_cf(cf, k))
+        let pairs: Vec<(&'a ColumnFamily, K)> = keys.into_iter().collect();
+        if pedradb_core::write_admission_kernel::batch_is_empty(pairs.len() as u64) {
+            return Vec::new();
+        }
+        let seq = self.inner.visible_sequence();
+        let snap = CoreSnapshot::at(seq);
+        pairs.into_iter()
+            .map(|(cf, k)| self.get_at(snap, &cf.name, k))
             .collect()
     }
 
@@ -4235,8 +4325,14 @@ impl<E: PedraEnv> DB<E> {
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
+        let keys: Vec<K> = keys.into_iter().collect();
+        if pedradb_core::write_admission_kernel::batch_is_empty(keys.len() as u64) {
+            return Vec::new();
+        }
+        let seq = self.inner.visible_sequence();
+        let snap = CoreSnapshot::at(seq);
         keys.into_iter()
-            .map(|k| self.get_cf(cf, k))
+            .map(|k| self.get_at(snap, &cf.name, k))
             .collect()
     }
 
@@ -4329,12 +4425,45 @@ impl<E: PedraEnv> DB<E> {
         // value. OCC group-commit treats simultaneous members as one
         // snapshot and would still last-write-wins.
         let _g = self.merge_gate.lock();
+        let existing = if cf == DEFAULT_CF {
+            self.get(key)?
+        } else {
+            self.get_cached(cf, key)?
+        };
+        let operands = MergeOperands::one(operand.to_vec());
         self.codec.encode_with(cf, key, |enc| {
-            let existing = self.inner.get(enc);
-            let operands = MergeOperands::one(operand.to_vec());
             match op(key, existing.as_deref(), &operands) {
-                Some(v) => self.inner.put(enc, v).map_err(Error::from),
-                None => self.inner.delete(enc).map_err(Error::from),
+                Some(v) => {
+                    let interned = intern_put_value(&v);
+                    self.inner.put(enc, interned.as_ref()).map_err(Error::from)?;
+                    if interned.len() <= 1024 {
+                        let (epoch, gen) = self.tls_point_ids(cf, key);
+                        if cf == DEFAULT_CF {
+                            LAST_GET.with(|slot| {
+                                slot.borrow_mut().store_key(epoch, gen, key, Some(interned))
+                            });
+                        } else {
+                            LAST_CF.with(|slot| {
+                                slot.borrow_mut().store(epoch, gen, cf, key, Some(interned))
+                            });
+                        }
+                    }
+                    Ok(())
+                }
+                None => {
+                    self.inner.delete(enc).map_err(Error::from)?;
+                    let (epoch, gen) = self.tls_point_ids(cf, key);
+                    if cf == DEFAULT_CF {
+                        LAST_GET.with(|slot| {
+                            slot.borrow_mut().store_key(epoch, gen, key, None)
+                        });
+                    } else {
+                        LAST_CF.with(|slot| {
+                            slot.borrow_mut().store(epoch, gen, cf, key, None)
+                        });
+                    }
+                    Ok(())
+                }
             }
         })
     }
@@ -4374,6 +4503,20 @@ impl<E: PedraEnv> DB<E> {
                 num_entries: r.num_entries,
             })
             .collect())
+    }
+
+    /// Asserts physical disk resource invariants (Barreira 2):
+    /// Verifies that all active files in memory/manifest exist on disk,
+    /// no orphan uncommitted SST files exist on disk, no abandoned .tmp files exist,
+    /// and file numbers do not violate the allocator watermark.
+    pub fn assert_disk_inventory_invariant(&self) -> Result<()> {
+        let _gate = self.compact_gate.lock();
+        while self.inner.materialize_bulk_once() {}
+        while self.inner.materialize_parked_once() {}
+        while self.inner.drain_imm_once() {}
+        self.inner
+            .assert_disk_inventory_invariant()
+            .map_err(|e| Error::invalid(format!("Disk invariant violation: {e}")))
     }
 
     /// rust-rocksdb `raw_iterator`.
@@ -4501,6 +4644,9 @@ impl<E: PedraEnv> Drop for DB<E> {
         if let Some(h) = self.flush_thread.take() {
             let _ = h.join();
         }
+        for h in self.flush_pool.drain(..) {
+            let _ = h.join();
+        }
         if let Some(tx) = self.compact_tx.take() {
             let _ = tx.send(CompactCmd::Shutdown);
         }
@@ -4557,6 +4703,7 @@ where
             loop {
                 match rx.recv_timeout(wait) {
                     Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
+                        let _g = gate.lock();
                         while inner.materialize_bulk_once() {}
                         while inner.park_imm_once() {}
                         while inner.fold_parked_once_off_lock() {}
@@ -4565,7 +4712,10 @@ where
                         break;
                     }
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
-                        while inner.materialize_bulk_once() {}
+                        {
+                            let _g = gate.lock();
+                            while inner.materialize_bulk_once() {}
+                        }
                         compact_diag(&inner);
                         let fenced = inner.is_durability_fenced();
                         if fenced && !fence_notified {
@@ -4602,7 +4752,7 @@ where
                                     .map(|f| db.level_file_count_cf(f))
                                     .max()
                                     .unwrap_or(0)
-                            }
+                                }
                         });
                         let l0_due = pedradb_core::flush_kernel::l0_compact_due(
                             l0 as u64,
@@ -4656,9 +4806,12 @@ where
                             let _ = inner.fold_parked_once_off_lock();
                         }
                         if inner.writes_idle_for(persist_idle) {
-                            while inner.materialize_parked_once() {}
-                            let _ = inner.persist_unsynced_l0s_off_lock();
-                            let _ = inner.rotate_wal_if_writers_idle();
+                            {
+                                let _g = gate.lock();
+                                while inner.materialize_parked_once() {}
+                                let _ = inner.persist_unsynced_l0s_off_lock();
+                                let _ = inner.rotate_wal_if_writers_idle();
+                            }
                             if !disable_auto_compactions {
                                 while compat_compact_once(&inner, &gate) {}
                             }
@@ -4697,7 +4850,8 @@ where
 /// its re-acquire.
 fn spawn_flush_worker<E>(
     inner: ConcurrentDb<E>,
-) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>)
+    worker_count: usize,
+) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>, Vec<JoinHandle<()>>)
 where
     E: PedraEnv + Send + Sync + 'static,
     E::File: Send + Sync + 'static,
@@ -4710,18 +4864,24 @@ where
     let mat_count = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let tick_secs_w = std::sync::Arc::clone(&tick_secs);
     let mat_count_w = std::sync::Arc::clone(&mat_count);
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let shutdown_primary = std::sync::Arc::clone(&shutdown);
+    let inner_primary = inner.clone();
     let handle = thread::Builder::new()
         .name("pedra-compat-flush".into())
         .spawn(move || {
             let poll = Duration::from_millis(1);
             loop {
                 match rx.recv_timeout(poll) {
-                    Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
+                    Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
+                        shutdown_primary.store(true, std::sync::atomic::Ordering::Release);
+                        break;
+                    }
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
                         let t0 = std::time::Instant::now();
-                        let before = inner.parked_unflushed_count();
-                        flush_worker_tick(&inner);
-                        if inner.parked_unflushed_count() < before {
+                        let before = inner_primary.parked_unflushed_count();
+                        flush_worker_tick(&inner_primary);
+                        if inner_primary.parked_unflushed_count() < before {
                             mat_count_w.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
                         tick_secs_w
@@ -4734,7 +4894,31 @@ where
     if let Ok(mut s) = FLUSH_DIAG_STATE.lock() {
         *s = Some((tick_secs, mat_count));
     }
-    (Some(tx), handle)
+    let mut pool = Vec::new();
+    let extra_workers = worker_count.saturating_sub(1);
+    for i in 1..=extra_workers {
+        let inner_aux = inner.clone();
+        let shutdown_aux = std::sync::Arc::clone(&shutdown);
+        if let Ok(h) = thread::Builder::new()
+            .name(format!("pedra-compat-flush-{i}"))
+            .spawn(move || {
+                while !shutdown_aux.load(std::sync::atomic::Ordering::Relaxed) {
+                    if inner_aux.has_parked_bulk() {
+                        while inner_aux.materialize_bulk_once() {
+                            if shutdown_aux.load(std::sync::atomic::Ordering::Relaxed) {
+                                break;
+                            }
+                        }
+                    } else {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+            })
+        {
+            pool.push(h);
+        }
+    }
+    (Some(tx), handle, pool)
 }
 
 /// Shared flush-worker diag state (last-tick seconds, materialize count).

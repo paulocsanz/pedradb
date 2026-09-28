@@ -350,7 +350,7 @@ impl<E: Env> Db<E> {
                 });
             }
         }
-        if let Some((_, run)) = &self.bulk_encoding {
+        for (_, _, run) in &self.bulk_encodings {
             for (i, k) in run.keys().iter().enumerate() {
                 let seq = run.seqs()[i];
                 let kind = run.kinds().get(i).copied().unwrap_or(ValueType::Value);
@@ -462,7 +462,7 @@ impl<E: Env> Db<E> {
                 consider(&mut latest, ik, run.vals()[i].clone());
             }
         }
-        if let Some((_, run)) = &self.bulk_encoding {
+        for (_, _, run) in &self.bulk_encodings {
             for (i, k) in run.keys().iter().enumerate() {
                 let seq = run.seqs()[i];
                 let kind = run.kinds().get(i).copied().unwrap_or(ValueType::Value);

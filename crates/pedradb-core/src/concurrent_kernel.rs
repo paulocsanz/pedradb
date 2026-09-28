@@ -1132,6 +1132,9 @@ impl WriteGroup {
             self.await_l0_park(db);
             self.await_ram_pressure(db);
         }
+        while db.read().parked_bulk_len() >= 16 {
+            granted_sleep("bulk_parked_debt", FLUSH_DEBT_POLL);
+        }
         let active = self.begin_submit();
         let n = (keys.len() + tail.len()) as u64;
         if active == 1 && !self.recently_concurrent() {
@@ -1781,62 +1784,111 @@ impl WriteGroup {
     }
 
     fn validate_occ_batch<E: Env>(guard: &mut Db<E>, batch: &mut [PendingWrite]) {
-        // RFC-0057 P2.1: collect each member's read state under the one
-        // lock acquisition, then let the group-commit kernel decide —
-        // every member validates against the same `last_seq` (the group's
-        // own sequences do not exist yet), which is the simultaneity the
-        // kernel's theorem pins.
-        let mut reads: Vec<crate::group_commit_kernel::OccRead> = Vec::with_capacity(batch.len());
-        let mut too_old: Vec<Option<CoreError>> = Vec::with_capacity(batch.len());
-        for p in batch.iter() {
+        // Track accumulated writes of accepted transactions within this batch (intra-group OCC)
+        let mut accepted_keys: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+        let mut accepted_ranges: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+
+        for p in batch.iter_mut() {
             let Some((snap, keys)) = p.occ.as_ref() else {
-                reads.push(crate::group_commit_kernel::OccRead {
-                    snap: 0,
-                    touched_key_written_after: false,
-                });
-                too_old.push(None);
+                // Non-OCC write (raw batch): always commits and updates accepted writes for subsequent OCC transactions
+                for op in &p.ops {
+                    match op {
+                        BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                            accepted_keys.insert(key.to_vec());
+                        }
+                        BatchOp::DeleteRange { start, end } => {
+                            accepted_ranges.push((start.to_vec(), end.to_vec()));
+                        }
+                    }
+                }
                 continue;
             };
+
+            // 1. Snapshot readable check
             if let Err(e) = guard.ensure_snapshot_readable(Snapshot::at(*snap)) {
-                too_old.push(Some(e));
-                reads.push(crate::group_commit_kernel::OccRead {
-                    snap: 0,
-                    touched_key_written_after: false,
-                });
+                p.ops.clear();
+                p.occ_err = Some(e);
                 continue;
             }
-            let touched = keys
+
+            // 2. Conflict check against committed state in guard
+            let mut conflict = keys
                 .iter()
                 .any(|k| guard.key_has_write_after(k.as_ref(), *snap))
                 || p.ops.iter().any(|op| match op {
                     BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
                         guard.key_has_write_after(key, *snap)
                     }
-                    BatchOp::DeleteRange { .. } => false,
+                    BatchOp::DeleteRange { start, end } => {
+                        guard.range_has_write_after(start, end, *snap)
+                    }
                 });
-            reads.push(crate::group_commit_kernel::OccRead {
-                snap: *snap,
-                touched_key_written_after: touched,
-            });
-            too_old.push(None);
-        }
-        let too_old_flags: Vec<bool> = too_old.iter().map(|o| o.is_some()).collect();
-        let fates = crate::group_commit_kernel::occ_batch_plan(
-            &too_old_flags,
-            &reads,
-            guard.last_sequence(),
-        );
-        for ((p, fate), old) in batch.iter_mut().zip(fates).zip(too_old) {
-            match fate {
-                crate::group_commit_kernel::OccMemberFate::TooOld => {
-                    p.ops.clear();
-                    p.occ_err = old;
+
+            // 3. Intra-batch conflict check against prior accepted transactions in this same batch
+            if !conflict {
+                // Check read set against prior accepted writes
+                for k in keys {
+                    let k_ref = k.as_ref();
+                    if accepted_keys.contains(k_ref) {
+                        conflict = true;
+                        break;
+                    }
+                    if accepted_ranges.iter().any(|(s, e)| s.as_slice() <= k_ref && k_ref < e.as_slice()) {
+                        conflict = true;
+                        break;
+                    }
                 }
-                crate::group_commit_kernel::OccMemberFate::Conflict => {
-                    p.ops.clear();
-                    p.occ_err = Some(CoreError::TransactionConflict);
+            }
+
+            if !conflict {
+                // Check write set against prior accepted writes
+                for op in &p.ops {
+                    match op {
+                        BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                            let k = key.as_ref();
+                            if accepted_keys.contains(k) {
+                                conflict = true;
+                                break;
+                            }
+                            if accepted_ranges.iter().any(|(s, e)| s.as_slice() <= k && k < e.as_slice()) {
+                                conflict = true;
+                                break;
+                            }
+                        }
+                        BatchOp::DeleteRange { start, end } => {
+                            let s = start.as_ref();
+                            let e = end.as_ref();
+                            if accepted_keys.iter().any(|k| s <= k.as_slice() && k.as_slice() < e) {
+                                conflict = true;
+                                break;
+                            }
+                            if accepted_ranges.iter().any(|(as_start, as_end)| as_start.as_slice() < e && s < as_end.as_slice()) {
+                                conflict = true;
+                                break;
+                            }
+                        }
+                    }
+                    if conflict {
+                        break;
+                    }
                 }
-                crate::group_commit_kernel::OccMemberFate::Ok => {}
+            }
+
+            if conflict {
+                p.ops.clear();
+                p.occ_err = Some(CoreError::TransactionConflict);
+            } else {
+                // Accepted! Add this transaction's writes to accepted_keys and accepted_ranges
+                for op in &p.ops {
+                    match op {
+                        BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                            accepted_keys.insert(key.to_vec());
+                        }
+                        BatchOp::DeleteRange { start, end } => {
+                            accepted_ranges.push((start.to_vec(), end.to_vec()));
+                        }
+                    }
+                }
             }
         }
     }
@@ -2493,13 +2545,16 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<Bytes> {
         self.reads_served.fetch_add(1, Ordering::Relaxed);
-        if self.fast_outside_sst_miss(key) {
-            self.note_class_point(false);
-            return None;
-        }
         if let Some(v) = self.point_cache.get(key) {
             self.note_class_point(v.is_some());
             return v;
+        }
+        if self.fast_outside_sst_miss(key) {
+            let sv = self.published_ssts.read();
+            if sv.mem.read().is_empty() && sv.imm.is_none() {
+                self.note_class_point(false);
+                return None;
+            }
         }
         if let Some(g) = self.inner.try_read() {
             note_lsm_lock();
@@ -4143,7 +4198,6 @@ impl<E: Env> ConcurrentDb<E> {
     /// I/O.
     pub fn flush(&self) -> Result<()> {
         let _flush = self.flush_lock.lock();
-        while self.materialize_bulk_holding_flush() {}
         while self.materialize_parked_holding_flush() {}
         let persist = {
             let mut g = self.inner.write();
@@ -4271,16 +4325,17 @@ impl<E: Env> ConcurrentDb<E> {
 
     /// Encode+install one parked bulk chunk off the write lock so the
     /// hydrate writer can fill the next run (RFC-0159 P1.7).
+    /// Safe for concurrent callers: SST writes run on independent files
+    /// without holding Db write lock or flush_lock.
     #[must_use]
     pub fn materialize_bulk_once(&self) -> bool {
         if !self.inner.read().has_parked_bulk() {
             return false;
         }
-        let _flush = self.flush_lock.lock();
-        self.materialize_bulk_holding_flush()
+        self.materialize_bulk_off_lock()
     }
 
-    fn materialize_bulk_holding_flush(&self) -> bool {
+    fn materialize_bulk_off_lock(&self) -> bool {
         let job = self.inner.write().pop_parked_bulk_job();
         let Some((fam, run, num, final_path, env, sync)) = job else {
             return false;
@@ -4293,8 +4348,8 @@ impl<E: Env> ConcurrentDb<E> {
             Ok(t) => t,
             Err(_) => {
                 let mut g = self.inner.write();
-                if let Some(pin) = g.take_bulk_encoding() {
-                    g.push_parked_bulk_front(pin);
+                if let Some((fam, run)) = g.remove_bulk_encoding(num) {
+                    g.push_parked_bulk_front((fam, run));
                 }
                 return false;
             }
@@ -4980,6 +5035,14 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn sst_count(&self) -> usize {
         self.inner.read().sst_count()
+    }
+
+    /// Asserts physical disk resource invariants (Barreira 2):
+    /// Verifies that all active files in memory/manifest exist on disk,
+    /// no orphan uncommitted SST files exist on disk, no abandoned .tmp files exist,
+    /// and file numbers do not violate the allocator watermark.
+    pub fn assert_disk_inventory_invariant(&self) -> std::result::Result<(), crate::orphan_sst_cleanup_kernel::DiskResourceInvariantError> {
+        self.inner.read().assert_disk_inventory_invariant()
     }
 
     /// Files at LSM `level` (read lock).
@@ -7329,6 +7392,158 @@ mod tests {
             Some(payload.as_slice()),
             "last overflow key must read back"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Regression test for Bug 5: interleaved / reverse-ordered batches in BulkRun
+    /// must be correctly sorted across pushes so that SST block bounds and key lookups
+    /// remain monotonic and all keys are found via point GET and range scan.
+    #[test]
+    fn bulk_interleaved_batches_are_sorted_and_searchable() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(1024 * 1024),
+                ..OpenOptions::default()
+            },
+            crate::env::StdEnv,
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+
+        // Latch the family
+        let v = vec![b'v'; 16];
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                batch.push(BatchOp::put(
+                    format!("data\0{b:04}-{j:04}").into_bytes(),
+                    v.clone(),
+                ));
+            }
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(db.family_is_latched_async("data"));
+
+        // Ingest three batches in REVERSE / scrambled order:
+        // Batch 0: z-9000-...
+        // Batch 1: z-1000-...
+        // Batch 2: z-5000-...
+        let chunks = vec![9000u32, 1000u32, 5000u32];
+        let mut expected_keys = Vec::new();
+
+        for chunk_id in chunks {
+            let mut keys = Vec::new();
+            let mut vals = Vec::new();
+            for j in 0..50u32 {
+                let k = format!("data\0z-{chunk_id:04}-{j:04}").into_bytes();
+                let val = format!("val-{chunk_id}-{j}").into_bytes();
+                keys.push(Bytes::from(k.clone()));
+                vals.push(Bytes::from(val));
+                expected_keys.push(k);
+            }
+            db.apply_latched_bulk("data", keys, vals, Vec::new()).unwrap();
+        }
+
+        // Flush to SST
+        db.flush().unwrap();
+
+        // 1. Point lookups: every single key must be found
+        for k in &expected_keys {
+            let res = db.get(k);
+            assert!(
+                res.is_some(),
+                "Key {:?} must be found after bulk ingest",
+                std::str::from_utf8(k)
+            );
+        }
+
+        // 2. Scan: keys must be returned in strictly sorted order
+        expected_keys.sort();
+        let scanned = db.scan_collect(
+            Bound::Included(b"data\0z-"),
+            Bound::Excluded(b"data\0z~"),
+        );
+        assert_eq!(scanned.len(), expected_keys.len());
+        for (i, (k, _)) in scanned.into_iter().enumerate() {
+            assert_eq!(
+                &k[..],
+                expected_keys[i].as_slice(),
+                "Key order mismatch at index {i}"
+            );
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Regression test for Bug 2: tail values in apply_latched_bulk must be escaped
+    /// with escape_inline_value so that values starting with 0x7F or VLG1 are not
+    /// silently truncated or misidentified as vlog pointers.
+    #[test]
+    fn test_hydrate_tail_escape_preserves_special_values() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with_env_bounded(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(1024 * 1024),
+                ..OpenOptions::default()
+            },
+            crate::env::StdEnv,
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+
+        let v = vec![b'v'; 16];
+        for b in 0..10u32 {
+            let mut batch = Vec::new();
+            for j in 0..8u32 {
+                batch.push(BatchOp::put(
+                    format!("data\0{b:04}-{j:04}").into_bytes(),
+                    v.clone(),
+                ));
+            }
+            db.apply_batch_vec(batch).unwrap();
+        }
+        assert!(db.family_is_latched_async("data"));
+
+        let key = Bytes::from_static(b"data\0z-cursor");
+        // Special value starting with INLINE_ESCAPE (0x7F)
+        let val_escape = vec![0x7F, 0x01, 0x02, 0x03];
+        db.apply_latched_bulk(
+            "data",
+            vec![Bytes::from_static(b"data\0z-0001")],
+            vec![Bytes::from_static(b"normal_val")],
+            vec![BatchOp::put(key.clone(), val_escape.clone())],
+        )
+        .unwrap();
+
+        let read_val = db.get(&key);
+        assert_eq!(
+            read_val.as_deref(),
+            Some(val_escape.as_slice()),
+            "Tail value starting with 0x7F must read back identically without truncation"
+        );
+
+        // Special value starting with VLG1 prefix
+        let val_vlog = b"VLG1_fake_pointer_that_must_not_crash".to_vec();
+        db.apply_latched_bulk(
+            "data",
+            vec![Bytes::from_static(b"data\0z-0002")],
+            vec![Bytes::from_static(b"normal_val2")],
+            vec![BatchOp::put(key.clone(), val_vlog.clone())],
+        )
+        .unwrap();
+
+        let read_val2 = db.get(&key);
+        assert_eq!(
+            read_val2.as_deref(),
+            Some(val_vlog.as_slice()),
+            "Tail value starting with VLG1 must read back identically without vlog error"
+        );
+
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -11656,6 +11871,115 @@ mod tests {
             assert_eq!(scan[1], (Bytes::from_static(b"k_large"), Bytes::copy_from_slice(&large_val)));
         }
     }
+
+    fn make_occ_write(ops: Vec<BatchOp>, snap: SequenceNumber, read_set: Vec<Bytes>) -> PendingWrite {
+        PendingWrite {
+            ops,
+            do_sync: false,
+            submit_active: 0,
+            reply: None,
+            occ: Some((snap, read_set)),
+            occ_err: None,
+        }
+    }
+
+    #[test]
+    fn test_occ_intra_group_conflict_prevents_lost_update() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        db.put(b"balance", b"100").unwrap();
+        let snap = db.visible_sequence();
+
+        let p1 = make_occ_write(
+            vec![BatchOp::Put {
+                key: Bytes::from_static(b"balance"),
+                value: Bytes::from_static(b"150"),
+            }],
+            snap,
+            vec![Bytes::from_static(b"balance")],
+        );
+
+        let p2 = make_occ_write(
+            vec![BatchOp::Put {
+                key: Bytes::from_static(b"balance"),
+                value: Bytes::from_static(b"120"),
+            }],
+            snap,
+            vec![Bytes::from_static(b"balance")],
+        );
+
+        let mut batch = vec![p1, p2];
+        let mut guard = db.inner.write();
+        WriteGroup::validate_occ_batch(&mut guard, &mut batch);
+
+        assert!(batch[0].occ_err.is_none(), "first transaction must be accepted");
+        assert!(
+            matches!(batch[1].occ_err, Some(CoreError::TransactionConflict)),
+            "second transaction in same batch must be aborted with TransactionConflict"
+        );
+        assert!(batch[1].ops.is_empty(), "aborted transaction ops must be cleared");
+    }
+
+    #[test]
+    fn test_occ_range_delete_conflict() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        db.put(b"foo", b"val").unwrap();
+        let snap = db.visible_sequence();
+
+        // 1. Intra-batch DeleteRange vs Put
+        let p_del = make_occ_write(
+            vec![BatchOp::DeleteRange {
+                start: Bytes::from_static(b"a"),
+                end: Bytes::from_static(b"z"),
+            }],
+            snap,
+            vec![],
+        );
+
+        let p_put = make_occ_write(
+            vec![BatchOp::Put {
+                key: Bytes::from_static(b"foo"),
+                value: Bytes::from_static(b"bar"),
+            }],
+            snap,
+            vec![Bytes::from_static(b"foo")],
+        );
+
+        let mut batch = vec![p_del, p_put];
+        let mut guard = db.inner.write();
+        WriteGroup::validate_occ_batch(&mut guard, &mut batch);
+
+        assert!(batch[0].occ_err.is_none(), "first range delete transaction must be accepted");
+        assert!(
+            matches!(batch[1].occ_err, Some(CoreError::TransactionConflict)),
+            "put inside concurrent range delete must conflict"
+        );
+        drop(guard);
+
+        // 2. Committed DeleteRange after snapshot conflicts with OCC transaction
+        let snap_before = db.visible_sequence();
+        db.delete_range(b"m", b"z").unwrap();
+
+        let p_after = make_occ_write(
+            vec![BatchOp::Put {
+                key: Bytes::from_static(b"p"),
+                value: Bytes::from_static(b"val"),
+            }],
+            snap_before,
+            vec![Bytes::from_static(b"p")],
+        );
+
+        let mut batch2 = vec![p_after];
+        let mut guard2 = db.inner.write();
+        WriteGroup::validate_occ_batch(&mut guard2, &mut batch2);
+
+        assert!(
+            matches!(batch2[0].occ_err, Some(CoreError::TransactionConflict)),
+            "write covered by committed range delete after snapshot must conflict"
+        );
+    }
 }
+
 
 
