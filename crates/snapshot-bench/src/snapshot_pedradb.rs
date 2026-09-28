@@ -95,6 +95,8 @@ pub struct PedraDbSnapshot {
     // Arc so `reader()` handles share the instance: Pedra serves reads from
     // `&DB` concurrently with writes, and `DB` is `Send + Sync`.
     db: Arc<DB>,
+    cf_data: ColumnFamily,
+    cf_meta: ColumnFamily,
     config: PedraDbConfig,
     cursor: WatchCursor,
 }
@@ -140,8 +142,11 @@ impl PedraDbSnapshot {
         )
         .map_err(map_pedradb)?;
 
+        let cf_data = cf(&db, DATA_CF)?;
+        let cf_meta = cf(&db, META_CF)?;
+
         let cursor = match db
-            .get_cf(&cf(&db, META_CF)?, CURSOR_KEY)
+            .get_cf(&cf_meta, CURSOR_KEY)
             .map_err(map_pedradb)?
         {
             Some(raw) => VersionToken::from_raw(&raw)
@@ -159,6 +164,8 @@ impl PedraDbSnapshot {
             cursor.clone(),
             Self {
                 db: Arc::new(db),
+                cf_data,
+                cf_meta,
                 config,
                 cursor,
             },
@@ -172,6 +179,7 @@ impl PedraDbSnapshot {
     pub fn reader(&self) -> PedraDbReader {
         PedraDbReader {
             db: Arc::clone(&self.db),
+            cf_data: self.cf_data.clone(),
         }
     }
 
@@ -190,6 +198,16 @@ impl PedraDbSnapshot {
     pub fn memory_diag_string(&self) -> String {
         self.db.memory_diag_string()
     }
+
+    #[must_use]
+    pub fn is_settled_sst_only(&self) -> bool {
+        self.db.is_settled_sst_only()
+    }
+
+    #[must_use]
+    pub fn fast_outside_sst_miss(&self, key: &str) -> bool {
+        self.db.fast_outside_sst_miss(key.as_bytes())
+    }
 }
 
 /// A concurrent read handle over a [`PedraDbSnapshot`]'s data column family,
@@ -197,12 +215,20 @@ impl PedraDbSnapshot {
 #[derive(Clone)]
 pub struct PedraDbReader {
     db: Arc<DB>,
+    cf_data: ColumnFamily,
 }
 
 impl PedraDbReader {
     /// Live entry for `key`, or `None` if absent/deleted.
     pub fn get(&self, key: &str) -> Result<Option<KvEntry>, SnapshotError> {
-        get_entry(&self.db, key)
+        match self
+            .db
+            .get_cf(&self.cf_data, key.as_bytes())
+            .map_err(map_pedradb)?
+        {
+            Some(raw) => Ok(Some(decode_entry(key, &raw)?)),
+            None => Ok(None),
+        }
     }
 
     /// Batched point lookups. Pedra's `multi_get_cf` is currently a sequential
@@ -212,11 +238,10 @@ impl PedraDbReader {
         &self,
         keys: impl IntoIterator<Item = &'k str>,
     ) -> Result<Vec<Option<KvEntry>>, SnapshotError> {
-        let data = cf(&self.db, DATA_CF)?;
         let keys: Vec<&str> = keys.into_iter().collect();
         let results = self
             .db
-            .multi_get_cf(keys.iter().map(|k| (&data, k.as_bytes())));
+            .multi_get_cf(keys.iter().map(|k| (&self.cf_data, k.as_bytes())));
         keys.iter()
             .zip(results)
             .map(|(key, res)| match res.map_err(map_pedradb)? {
@@ -232,7 +257,7 @@ impl PedraDbReader {
         prefix: &str,
         f: impl FnMut(KvEntry) -> Result<(), SnapshotError>,
     ) -> Result<(), SnapshotError> {
-        scan_prefix(&self.db, prefix, f)
+        scan_prefix(&self.db, &self.cf_data, prefix, f)
     }
 
     /// Buffered counterpart to [`for_each_in_range`](Self::for_each_in_range).
@@ -252,22 +277,20 @@ impl SnapshotStore for PedraDbSnapshot {
     }
 
     fn apply(&mut self, batch: &[KvUpdate], cursor: &WatchCursor) -> Result<(), SnapshotError> {
-        let data = cf(&self.db, DATA_CF)?;
-        let meta = cf(&self.db, META_CF)?;
         let mut wb = WriteBatch::default();
         let mut scratch = Vec::new();
         for update in batch {
             match update {
                 KvUpdate::Put(entry) => {
                     encode_value_into(&mut scratch, &entry.value, &entry.version)?;
-                    wb.put_cf(&data, entry.key.as_bytes(), scratch.as_slice());
+                    wb.put_cf(&self.cf_data, entry.key.as_bytes(), scratch.as_slice());
                 }
                 KvUpdate::Delete { key, .. } | KvUpdate::Purge { key, .. } => {
-                    wb.delete_cf(&data, key.as_bytes());
+                    wb.delete_cf(&self.cf_data, key.as_bytes());
                 }
             }
         }
-        wb.put_cf(&meta, CURSOR_KEY, cursor.version().as_bytes());
+        wb.put_cf(&self.cf_meta, CURSOR_KEY, cursor.version().as_bytes());
 
         let mut wo = WriteOptions::default();
         wo.set_sync(self.config.sync);
@@ -278,7 +301,14 @@ impl SnapshotStore for PedraDbSnapshot {
     }
 
     fn get(&self, key: &str) -> Result<Option<KvEntry>, SnapshotError> {
-        get_entry(&self.db, key)
+        match self
+            .db
+            .get_cf(&self.cf_data, key.as_bytes())
+            .map_err(map_pedradb)?
+        {
+            Some(raw) => Ok(Some(decode_entry(key, &raw)?)),
+            None => Ok(None),
+        }
     }
 
     fn range(&self, prefix: &str) -> Result<Vec<KvEntry>, SnapshotError> {
@@ -295,7 +325,7 @@ impl SnapshotStore for PedraDbSnapshot {
         prefix: &str,
         f: impl FnMut(KvEntry) -> Result<(), SnapshotError>,
     ) -> Result<(), SnapshotError> {
-        scan_prefix(&self.db, prefix, f)
+        scan_prefix(&self.db, &self.cf_data, prefix, f)
     }
 
     fn cursor(&self) -> WatchCursor {
@@ -321,25 +351,15 @@ fn cf(db: &DB, name: &str) -> Result<ColumnFamily, SnapshotError> {
         .ok_or_else(|| SnapshotError::Backend(format!("missing column family: {name}")))
 }
 
-fn get_entry(db: &DB, key: &str) -> Result<Option<KvEntry>, SnapshotError> {
-    match db
-        .get_cf(&cf(db, DATA_CF)?, key.as_bytes())
-        .map_err(map_pedradb)?
-    {
-        Some(raw) => Ok(Some(decode_entry(key, &raw)?)),
-        None => Ok(None),
-    }
-}
-
 /// Streaming prefix scan. Pedra's `ReadOptions` iterate bounds are accepted
 /// but not yet applied by `iterator_cf_opt`, so we start at the prefix and
 /// stop when keys leave it — the classic portable Rocks prefix walk.
 fn scan_prefix(
     db: &DB,
+    data: &ColumnFamily,
     prefix: &str,
     mut f: impl FnMut(KvEntry) -> Result<(), SnapshotError>,
 ) -> Result<(), SnapshotError> {
-    let data = cf(db, DATA_CF)?;
     let mode = if prefix.is_empty() {
         IteratorMode::Start
     } else {
@@ -355,7 +375,7 @@ fn scan_prefix(
         }
     }
     let iter = db
-        .iterator_cf_opt(&data, mode, read_opts)
+        .iterator_cf_opt(data, mode, read_opts)
         .map_err(map_pedradb)?;
     for item in iter {
         let (raw_key, raw_val) = item.map_err(map_pedradb)?;
