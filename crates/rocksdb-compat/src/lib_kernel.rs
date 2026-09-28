@@ -2743,7 +2743,7 @@ impl<E: PedraEnv> DB<E> {
         }
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
-                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(64 * 1024));
         }
         let r = KEY_POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
@@ -2799,7 +2799,7 @@ impl<E: PedraEnv> DB<E> {
         }
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
-                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(64 * 1024));
         }
         KEY_POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
@@ -2874,7 +2874,7 @@ impl<E: PedraEnv> DB<E> {
         let family = family_arc.as_ref();
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
-                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(64 * 1024));
         }
         KEY_POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
@@ -2934,7 +2934,7 @@ impl<E: PedraEnv> DB<E> {
         }
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
-                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(64 * 1024));
         }
         let r = KEY_POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
@@ -2979,7 +2979,7 @@ impl<E: PedraEnv> DB<E> {
     ) -> Result<()> {
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
-                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(64 * 1024));
         }
         let r = KEY_POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
@@ -3108,7 +3108,7 @@ impl<E: PedraEnv> DB<E> {
         }
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
-                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(64 * 1024));
         }
         let mut warm: Vec<(&str, Vec<u8>, Option<Bytes>)> = if need_warm {
             Vec::with_capacity(puts.len())
@@ -3186,7 +3186,7 @@ impl<E: PedraEnv> DB<E> {
     ) -> Result<()> {
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
-                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(64 * 1024));
         }
         let mut warm: Vec<(&str, Vec<u8>, Option<Bytes>)> = if need_warm {
             Vec::with_capacity(n)
@@ -3260,7 +3260,7 @@ impl<E: PedraEnv> DB<E> {
         let val = Bytes::copy_from_slice(v);
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
-                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(64 * 1024));
         }
         KEY_POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
