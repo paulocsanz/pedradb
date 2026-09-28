@@ -623,6 +623,28 @@ pub fn group_batch_sync_plan_as_is(_client_sync: bool) -> GroupSyncPlan {
     GroupSyncPlan::BatchRidesGroup
 }
 
+/// Smooth write-pacing delay in microseconds based on L0 file accumulation (RFC-0300 P0.3).
+///
+/// Prevents catastrophic write-stall cliffs by applying progressive microsecond damping
+/// when L0 file count approaches the hard limit, allowing background compaction workers
+/// to catch up and drain L0 without freezing tail p99 latency.
+#[must_use]
+pub fn write_pacing_delay_micros(l0_count: u64, l0_limit: u64) -> u64 {
+    if l0_limit == 0 || l0_count < l0_limit * 3 / 4 {
+        0
+    } else if l0_count >= l0_limit {
+        1000
+    } else {
+        let span = l0_limit - (l0_limit * 3 / 4);
+        if span == 0 {
+            0
+        } else {
+            let excess = l0_count - (l0_limit * 3 / 4);
+            (excess * 1000) / span
+        }
+    }
+}
+
 #[cfg(not(verus_keep_ghost))]
 /// `put_if_absent`: live key ⇒ CasMismatch; else put. Data-fate, not Env.
 #[must_use]
@@ -2086,5 +2108,19 @@ mod kani_proofs {
         } else {
             assert_eq!(plan, FenceAdmission::AdmitOps);
         }
+    }
+
+    #[test]
+    fn test_write_pacing_delay_progression() {
+        // limit = 100, 3/4 threshold = 75
+        assert_eq!(write_pacing_delay_micros(0, 100), 0);
+        assert_eq!(write_pacing_delay_micros(50, 100), 0);
+        assert_eq!(write_pacing_delay_micros(74, 100), 0);
+        assert_eq!(write_pacing_delay_micros(75, 100), 0);
+        assert_eq!(write_pacing_delay_micros(80, 100), 200);
+        assert_eq!(write_pacing_delay_micros(87, 100), 480);
+        assert_eq!(write_pacing_delay_micros(99, 100), 960);
+        assert_eq!(write_pacing_delay_micros(100, 100), 1000);
+        assert_eq!(write_pacing_delay_micros(120, 100), 1000);
     }
 }

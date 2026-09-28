@@ -572,8 +572,13 @@ impl<F: EnvFile> ValueLog<F> {
             if rec.offset != offset {
                 continue;
             }
-            let stored_len = u32::from_le_bytes(rec.hdr[0..4].try_into().unwrap());
-            let stored_crc = u32::from_le_bytes(rec.hdr[4..8].try_into().unwrap());
+            let mut cur = crate::codec::SafeCursor::new(&rec.hdr);
+            let stored_len = cur.read_u32_le().map_err(|_| {
+                CoreError::CorruptValue(format!("corrupt vlog pending hdr at {offset}"))
+            })?;
+            let stored_crc = cur.read_u32_le().map_err(|_| {
+                CoreError::CorruptValue(format!("corrupt vlog pending hdr at {offset}"))
+            })?;
             if stored_len != len {
                 return Err(CoreError::CorruptValue(format!(
                     "len mismatch in vlog pending at {offset}: stored {stored_len} expect {len}"

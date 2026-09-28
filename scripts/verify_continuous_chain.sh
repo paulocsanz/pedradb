@@ -136,6 +136,10 @@ echo ">>> [STAGE 28] Dez Fronteiras Fundacionais de Verificação do LSM (RFC-02
 cargo test -q -p pedradb-core --test rfc0294_dez_fronteiras_fundacionais_lsm
 
 echo ""
+echo ">>> [STAGE 29] Anti-Panic & SafeCursor Zero-Low-Hanging-Fruit Gate (RFC-0298)"
+./scripts/check_anti_panic_gates.sh
+
+echo ""
 echo "================================================================="
 echo "  CONTINUOUS VERIFICATION CHAIN: 100% UNIFIED & SOUND (ALL GREEN) "
 echo "================================================================="

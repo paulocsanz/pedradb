@@ -29,8 +29,6 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-pub mod ops_kernel;
-
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -139,18 +137,41 @@ impl Catalog {
         if buf.len() < 8 + 8 + 8 + 8 + 4 {
             return Err(OpsError::Msg("catalog too short".into()));
         }
-        let (payload, crc_b) = buf.split_at(buf.len() - 4);
-        let stored = u32::from_le_bytes(crc_b.try_into().unwrap());
+        let payload_len = buf.len() - 4;
+        let mut cur = pedradb_core::codec::SafeCursor::new(buf);
+        let payload = cur
+            .read_exact(payload_len)
+            .map_err(|e| OpsError::Msg(e.to_string()))?;
+        let stored = cur
+            .read_u32_le()
+            .map_err(|e| OpsError::Msg(e.to_string()))?;
+        cur.ensure_fully_consumed()
+            .map_err(|e| OpsError::Msg(e.to_string()))?;
         if !pedradb_core::wal::crc::crc_match_ok(stored, crc32c::crc32c(payload)) {
             return Err(OpsError::Msg("catalog CRC mismatch".into()));
         }
-        if &payload[0..8] != CATALOG_MAGIC {
+        let mut pcur = pedradb_core::codec::SafeCursor::new(payload);
+        let magic = pcur
+            .read_exact(8)
+            .map_err(|e| OpsError::Msg(e.to_string()))?;
+        if magic != CATALOG_MAGIC {
             return Err(OpsError::Msg("catalog magic".into()));
         }
+        let next_id = pcur
+            .read_u64_le()
+            .map_err(|e| OpsError::Msg(e.to_string()))?;
+        let last_shipped_seq = pcur
+            .read_u64_le()
+            .map_err(|e| OpsError::Msg(e.to_string()))?;
+        let next_wal_seg = pcur
+            .read_u64_le()
+            .map_err(|e| OpsError::Msg(e.to_string()))?;
+        pcur.ensure_fully_consumed()
+            .map_err(|e| OpsError::Msg(e.to_string()))?;
         Ok(Self {
-            next_id: u64::from_le_bytes(payload[8..16].try_into().unwrap()),
-            last_shipped_seq: u64::from_le_bytes(payload[16..24].try_into().unwrap()),
-            next_wal_seg: u64::from_le_bytes(payload[24..32].try_into().unwrap()),
+            next_id,
+            last_shipped_seq,
+            next_wal_seg,
         })
     }
 }
@@ -579,11 +600,7 @@ impl<E: Env> BackupEngine<E> {
                             let Some(ms) = wr.max_sequence() else {
                                 continue;
                             };
-                            if ops_kernel::pitr_record_in_window(
-                                ms,
-                                base_meta.last_sequence,
-                                target,
-                            ) {
+                            if ms > base_meta.last_sequence && ms <= target {
                                 // Filter individual ops? Whole record is one TX;
                                 // include record if max in range (records are atomic).
                                 replay.push(raw);
@@ -750,29 +767,45 @@ fn read_warch(env: &impl Env, path: &Path) -> Result<Vec<Vec<u8>>> {
     if buf.len() < 8 + 4 + 4 {
         return Err(OpsError::Msg("warch too short".into()));
     }
-    let (payload, crc_b) = buf.split_at(buf.len() - 4);
-    let stored = u32::from_le_bytes(crc_b.try_into().unwrap());
+    let payload_len = buf.len() - 4;
+    let mut cur = pedradb_core::codec::SafeCursor::new(&buf);
+    let payload = cur
+        .read_exact(payload_len)
+        .map_err(|e| OpsError::Msg(e.to_string()))?;
+    let stored = cur
+        .read_u32_le()
+        .map_err(|e| OpsError::Msg(e.to_string()))?;
+    cur.ensure_fully_consumed()
+        .map_err(|e| OpsError::Msg(e.to_string()))?;
     if !pedradb_core::wal::crc::crc_match_ok(stored, crc32c::crc32c(payload)) {
         return Err(OpsError::Msg("warch CRC mismatch".into()));
     }
-    if &payload[0..8] != WARCH_MAGIC {
+    let mut pcur = pedradb_core::codec::SafeCursor::new(payload);
+    let magic = pcur
+        .read_exact(8)
+        .map_err(|e| OpsError::Msg(e.to_string()))?;
+    if magic != WARCH_MAGIC {
         return Err(OpsError::Msg("warch magic".into()));
     }
-    let n = u32::from_le_bytes(payload[8..12].try_into().unwrap()) as usize;
-    let mut off = 12;
-    let mut out = Vec::with_capacity(n);
+    let n = pcur
+        .read_u32_le()
+        .map_err(|e| OpsError::Msg(e.to_string()))? as usize;
+    let bound = pedradb_core::codec::SafeCursor::bounded_capacity(
+        n,
+        4,
+        pcur.remaining(),
+        100_000,
+    )
+    .map_err(|_| OpsError::Msg("warch truncated".into()))?;
+    let mut out = Vec::with_capacity(bound);
     for _ in 0..n {
-        if off + 4 > payload.len() {
-            return Err(OpsError::Msg("warch truncated".into()));
-        }
-        let len = u32::from_le_bytes(payload[off..off + 4].try_into().unwrap()) as usize;
-        off += 4;
-        if off + len > payload.len() {
-            return Err(OpsError::Msg("warch record truncated".into()));
-        }
-        out.push(payload[off..off + len].to_vec());
-        off += len;
+        let rec = pcur
+            .read_length_prefixed_bytes(payload.len())
+            .map_err(|_| OpsError::Msg("warch record truncated".into()))?;
+        out.push(rec.to_vec());
     }
+    pcur.ensure_fully_consumed()
+        .map_err(|e| OpsError::Msg(e.to_string()))?;
     Ok(out)
 }
 
@@ -961,7 +994,11 @@ fn peek_sst_version(env: &impl Env, path: &Path) -> Result<u32> {
     if !sst_magic_is_pedra(&hdr[0..8]) {
         return Err(dir_kind::not_dropin_err(path));
     }
-    Ok(u32::from_le_bytes(hdr[8..12].try_into().unwrap()))
+    let mut cur = pedradb_core::codec::SafeCursor::new(&hdr[8..12]);
+    let ver = cur
+        .read_u32_le()
+        .map_err(|_| dir_kind::not_dropin_err(path))?;
+    Ok(ver)
 }
 
 /// Rewrite a DB directory to the current on-disk formats (SST writer version +
@@ -1067,7 +1104,7 @@ mod tests {
         assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
         assert!(
             pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: any catalog crc would match"
+            "AS-IS dente: any catalog crc would match"
         );
         let bak = temp();
         BackupEngine::open_with_env(&bak, StdEnv).unwrap();
@@ -1106,7 +1143,7 @@ mod tests {
         assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
         assert!(
             pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: any warch crc would match"
+            "AS-IS dente: any warch crc would match"
         );
         let data = temp();
         let bak = temp();
@@ -1193,7 +1230,7 @@ mod tests {
         assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
         assert!(
             pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: any CURRENT crc would match"
+            "AS-IS dente: any CURRENT crc would match"
         );
         let data = temp();
         {
@@ -1230,7 +1267,7 @@ mod tests {
         assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
         assert!(
             pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
-            "AS-IS tooth: any warch crc would match"
+            "AS-IS dente: any warch crc would match"
         );
         let data = temp();
         let bak = temp();

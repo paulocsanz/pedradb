@@ -3695,6 +3695,25 @@ impl<E: Env> Db<E> {
         false
     }
 
+    /// Resolve vlog pointer to payload (or return inline value).
+    fn resolve_stored_value(&self, stored: Bytes) -> Result<Bytes> {
+        if stored.first() == Some(&INLINE_ESCAPE) {
+            // F188: escaped inline value — strip the marker byte.
+            return Ok(stored.slice(1..));
+        }
+        let Some(ptr) = vlog::decode_vlog_ptr(stored.as_ref()) else {
+            return Ok(stored);
+        };
+        if crate::lookup_kernel::vlog_ptr_orphaned(self.vlog.is_none()) {
+            return Err(CoreError::Internal(
+                "vlog ref in DB but VALUES.vlog not open".into(),
+            ));
+        }
+        let vlog = self.vlog.as_ref().expect("vlog_ptr_orphaned");
+        let guard = vlog.lock();
+        guard.read_ptr_on(&self.env, &self.dir, ptr, self.vlog_use_new)
+    }
+
     /// Whether any write in `[start, end)` (point or range tombstone) has `sequence > snapshot`.
     #[must_use]
     pub fn range_has_write_after(&self, start: &[u8], end: &[u8], snapshot: SequenceNumber) -> bool {
@@ -3765,25 +3784,6 @@ impl<E: Env> Db<E> {
             }
         }
         false
-    }
-
-    /// Resolve vlog pointer to payload (or return inline value).
-    fn resolve_stored_value(&self, stored: Bytes) -> Result<Bytes> {
-        if stored.first() == Some(&INLINE_ESCAPE) {
-            // F188: escaped inline value — strip the marker byte.
-            return Ok(stored.slice(1..));
-        }
-        let Some(ptr) = vlog::decode_vlog_ptr(stored.as_ref()) else {
-            return Ok(stored);
-        };
-        if crate::lookup_kernel::vlog_ptr_orphaned(self.vlog.is_none()) {
-            return Err(CoreError::Internal(
-                "vlog ref in DB but VALUES.vlog not open".into(),
-            ));
-        }
-        let vlog = self.vlog.as_ref().expect("vlog_ptr_orphaned");
-        let guard = vlog.lock();
-        guard.read_ptr_on(&self.env, &self.dir, ptr, self.vlog_use_new)
     }
 
     /// Shared handle to the append-only value log.
@@ -7642,7 +7642,7 @@ impl<E: Env> Db<E> {
                 .map(|(i, _)| i)
                 .collect();
             let mut options = CompactOptions::default();
-            options.gc.bottommost = true;
+            options.gc.bottommost = input_idxs.len() == self.ssts.len();
             match self.rewrite_ssts(input_idxs, MAX_LSM_LEVEL, options, Some(decision)) {
                 Ok(()) => {}
                 Err(e) => return Err(self.fence_io_err(e)),
@@ -9861,9 +9861,10 @@ impl<E: Env> Db<E> {
 
     /// Apply prepared ops to the memtable after durable WAL.
     pub(crate) fn apply_ops_to_mem(&mut self, ops: Vec<WriteOp>) {
+        let top = ops.iter().map(|o| o.sequence).max().unwrap_or_else(|| self.next_seq.load(Ordering::Relaxed).saturating_sub(1));
         self.note_dirty_points(&ops);
         apply_ops_owned(&mut *self.mem.write(), ops);
-        self.publish_sequence(self.last_sequence());
+        self.publish_sequence(top);
     }
 
     /// Async commit: encode WAL and `write()` it before `Ok` — same
@@ -12889,16 +12890,15 @@ fn write_merged_tables_span<'a>(
                     return Some(Err(e));
                 }
             };
+            let hard_cap = split_target.saturating_mul(4);
+            let user_changed = last_user
+                .as_ref()
+                .is_none_or(|u| u.as_ref() != ok_entry.0.user_key.as_ref());
             if crate::compact_kernel::compact_should_split_at(acc, split_target)
                 && out.len() + 1 < span_budget
-                && (last_user
-                    .as_ref()
-                    .is_none_or(|u| u.as_ref() != ok_entry.0.user_key.as_ref())
-                    || acc >= split_target.saturating_mul(4))
+                && (user_changed || acc >= hard_cap)
             {
-                // Target reached, the user key changed (or reached hard 4x target),
-                // and one more chunk still fits this span's share of the reserved range —
-                // start a new file with this entry.
+                // Target reached (or hard cap exceeded), within span budget — start a new file.
                 peeked = Some(Ok(ok_entry));
                 closed = true;
                 return None;
@@ -16567,19 +16567,31 @@ mod tests {
         )
         .unwrap();
         db.set_physical_cfs(vec!["default".into(), "lock".into()]);
-        let t0 = std::time::Instant::now();
-        for i in 0..20_000u32 {
+        let put = |db: &mut Db, i: u32| {
             let mut k = [0u8; 10];
             k[..7].copy_from_slice(b"default");
             k[7] = 0;
             k[8] = (i >> 8) as u8;
             k[9] = i as u8;
             db.put(&k, b"v").unwrap();
+        };
+        // Two equal windows, not a wall-clock budget: under a loaded
+        // `cargo test` process the whole 20k can take tens of seconds and
+        // still be O(1) per put. A cf_families-per-put regression makes
+        // the second half walk a full memtable and show up as a ratio.
+        let t0 = std::time::Instant::now();
+        for i in 0..10_000u32 {
+            put(&mut db, i);
         }
-        let dt = t0.elapsed();
+        let first = t0.elapsed();
+        let t1 = std::time::Instant::now();
+        for i in 10_000..20_000u32 {
+            put(&mut db, i);
+        }
+        let second = t1.elapsed();
         assert!(
-            dt < std::time::Duration::from_millis(800),
-            "20k physical-CF puts took {dt:?} (cf_families-per-put is back)"
+            second < first.saturating_mul(8) + std::time::Duration::from_millis(50),
+            "second 10k {second:?} vs first 10k {first:?} (cf_families-per-put is back)"
         );
         assert!(
             db.live_sst_meta().is_empty(),
