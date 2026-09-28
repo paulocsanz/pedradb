@@ -2492,13 +2492,13 @@ fn seek_point_scan(
     let mut entry_i = 0usize;
     let mut uk_buf: Vec<u8> = Vec::new();
     while pos < plain.len() {
-        if pos + 4 > plain.len() {
-            return Err(CoreError::Internal(format!(
+        let mut cur = crate::codec::SafeCursor::new(&plain[pos..]);
+        let raw_len = cur.read_u32_le().map_err(|_| {
+            CoreError::Internal(format!(
                 "SST block entry truncated in {}",
                 path.display()
-            )));
-        }
-        let raw_len = u32::from_le_bytes(plain[pos..pos + 4].try_into().unwrap());
+            ))
+        })?;
         if raw_len == BLOCK_HASH_MAGIC {
             break;
         }
@@ -2535,8 +2535,13 @@ fn seek_point_scan(
             uk_buf.clear();
             uk_buf.extend_from_slice(&restart_uk[..shared]);
             uk_buf.extend_from_slice(suffix);
-            let val_len =
-                u32::from_le_bytes(plain[body_end..body_end + 4].try_into().unwrap()) as usize;
+            let mut val_cur = crate::codec::SafeCursor::new(&plain[body_end..]);
+            let val_len = val_cur.read_u32_le().map_err(|_| {
+                CoreError::Internal(format!(
+                    "SST block entry truncated in {}",
+                    path.display()
+                ))
+            })? as usize;
             let Some(val_end) = body_end.checked_add(4).and_then(|v| v.checked_add(val_len)) else {
                 return Err(CoreError::Internal(format!(
                     "SST block entry length overflow in {}",
@@ -2584,8 +2589,13 @@ fn seek_point_scan(
                 restart_uk.clear();
                 restart_uk.extend_from_slice(&plain[pos..uk_end]);
             }
-            let val_len =
-                u32::from_le_bytes(plain[ikey_end..ikey_end + 4].try_into().unwrap()) as usize;
+            let mut val_cur = crate::codec::SafeCursor::new(&plain[ikey_end..]);
+            let val_len = val_cur.read_u32_le().map_err(|_| {
+                CoreError::Internal(format!(
+                    "SST block entry truncated in {}",
+                    path.display()
+                ))
+            })? as usize;
             let Some(val_end) = ikey_end.checked_add(4).and_then(|v| v.checked_add(val_len)) else {
                 return Err(CoreError::Internal(format!(
                     "SST block entry length overflow in {}",
@@ -2651,7 +2661,10 @@ fn split_block_crc<'a>(raw: &'a [u8], path: &Path) -> Result<&'a [u8]> {
         )));
     }
     let (body, crc_bytes) = raw.split_at(raw.len() - 4);
-    let stored = u32::from_le_bytes(crc_bytes.try_into().unwrap());
+    let mut cur = crate::codec::SafeCursor::new(crc_bytes);
+    let stored = cur.read_u32_le().map_err(|_| {
+        CoreError::Internal(format!("SST block CRC truncated in {}", path.display()))
+    })?;
     let computed = crc32c::crc32c(body);
     if !crate::sst::sst_block_crc_ok(stored, computed) {
         return Err(CoreError::Internal(format!(
@@ -2915,13 +2928,20 @@ fn split_block_hash(plain: &[u8]) -> (&[u8], Option<&[u8]>) {
     if plain.len() < 6 {
         return (plain, None);
     }
-    let n_buckets = u16::from_le_bytes(plain[plain.len() - 2..].try_into().unwrap()) as usize;
+    let mut cur = crate::codec::SafeCursor::new(&plain[plain.len() - 2..]);
+    let Ok(nb) = cur.read_u16_le() else {
+        return (plain, None);
+    };
+    let n_buckets = nb as usize;
     let trailer_len = 4usize.saturating_add(n_buckets).saturating_add(2);
     if trailer_len > plain.len() {
         return (plain, None);
     }
     let start = plain.len() - trailer_len;
-    let magic = u32::from_le_bytes(plain[start..start + 4].try_into().unwrap());
+    let mut cur_magic = crate::codec::SafeCursor::new(&plain[start..]);
+    let Ok(magic) = cur_magic.read_u32_le() else {
+        return (plain, None);
+    };
     if magic != BLOCK_HASH_MAGIC {
         return (plain, None);
     }

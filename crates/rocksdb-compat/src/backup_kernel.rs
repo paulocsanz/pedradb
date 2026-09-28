@@ -169,7 +169,8 @@ impl BackupEngine {
                 kind: ErrorKind::InvalidArgument,
             });
         };
-        self.inner.restore(latest.id, db_dir).map_err(map_ops)
+        self.inner.restore(latest.id, db_dir.as_ref()).map_err(map_ops)?;
+        copy_compat_sidecars(&latest.path, db_dir.as_ref())
     }
 
     /// rust-rocksdb `restore_from_backup`.
@@ -183,9 +184,15 @@ impl BackupEngine {
         _opts: &RestoreOptions,
         backup_id: u32,
     ) -> Result<()> {
+        let list = self.inner.list_backups().map_err(map_ops)?;
+        let meta = list.iter().find(|b| b.id == u64::from(backup_id));
         self.inner
-            .restore(u64::from(backup_id), db_dir)
-            .map_err(map_ops)
+            .restore(u64::from(backup_id), db_dir.as_ref())
+            .map_err(map_ops)?;
+        if let Some(m) = meta {
+            copy_compat_sidecars(&m.path, db_dir.as_ref())?;
+        }
+        Ok(())
     }
 
     /// rust-rocksdb `verify_backup` — at-rest scrub + checksums (stronger

@@ -172,9 +172,10 @@ pub fn point_version_fate(
     newer_kept_seq: Option<u64>,
     oldest_snapshot: u64,
 ) -> VersionFate {
-    // `this_seq` identifies the version under decision; the fate itself
-    // depends only on the newer sibling and the oldest snapshot.
-    let _ = this_seq;
+    // Bug 5 fix: Any version >= oldest_snapshot is visible to active/future snapshots
+    if this_seq >= oldest_snapshot {
+        return VersionFate::Keep;
+    }
     match newer_kept_seq {
         // Newest version of the key is always kept.
         None => VersionFate::Keep,

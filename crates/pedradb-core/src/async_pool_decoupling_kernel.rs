@@ -68,7 +68,7 @@ impl DecoupledCommitScheduler {
             return Err(PoolDecouplingError::TicketExpired { ticket_id: 0 });
         }
 
-        let mut q = self.queue.lock().unwrap();
+        let mut q = self.queue.lock().unwrap_or_else(|p| p.into_inner());
         if q.len() >= self.max_queue_depth {
             return Err(PoolDecouplingError::QueueSaturated {
                 capacity: self.max_queue_depth,
@@ -87,7 +87,7 @@ impl DecoupledCommitScheduler {
 
     /// Drains batch of tickets for dedicated background IO worker execution.
     pub fn drain_for_io_worker(&self, max_batch: usize) -> Vec<CommitTicket> {
-        let mut q = self.queue.lock().unwrap();
+        let mut q = self.queue.lock().unwrap_or_else(|p| p.into_inner());
         let count = q.len().min(max_batch);
         q.drain(0..count).collect()
     }
@@ -104,7 +104,7 @@ impl DecoupledCommitScheduler {
 
         let mut current = self.highest_committed.load(Ordering::SeqCst);
         for t in tickets {
-            if t.ticket_id != current + 1 {
+            if t.ticket_id <= current {
                 return Err(PoolDecouplingError::OrderViolation {
                     expected: current + 1,
                     actual: t.ticket_id,
@@ -129,6 +129,6 @@ impl DecoupledCommitScheduler {
 
     /// Current pending queue depth.
     pub fn pending_depth(&self) -> usize {
-        self.queue.lock().unwrap().len()
+        self.queue.lock().unwrap_or_else(|p| p.into_inner()).len()
     }
 }

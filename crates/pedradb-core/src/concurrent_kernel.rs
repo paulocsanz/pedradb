@@ -759,6 +759,7 @@ impl WriteGroup {
         }
         self.publish_apply(&g);
         g.end_commit();
+        self.mark_complete();
         drop(g);
         if let Some(mut gw) = db.try_write() {
             let t4 = self.phase_stats.as_ref().map(|_| Instant::now());
@@ -1264,7 +1265,11 @@ impl WriteGroup {
         // for MULTI_HOLD after a concurrent burst so apply's second
         // write() still joins the group (RFC-0040 P1.2). Lone async
         // (`do_sync=false`) takes `commit_async_one` / `commit_async_ops`.
-        if occ.is_none() && active == 1 && !self.recently_concurrent() {
+        if occ.is_none()
+            && active == 1
+            && !self.recently_concurrent()
+            && self.async_group_forced != Some(true)
+        {
             // RFC-0219 P2.2 drain: same fate as the P0.1 commit_ops_with —
             // Count ⇔ wal_sync_required(true, do_sync, false).
             let result = match crate::changelog_kernel::changelog_durable_commit_fate(
@@ -2549,13 +2554,6 @@ impl<E: Env> ConcurrentDb<E> {
             self.note_class_point(v.is_some());
             return v;
         }
-        if self.fast_outside_sst_miss(key) {
-            let sv = self.published_ssts.read();
-            if sv.mem.read().is_empty() && sv.imm.is_none() {
-                self.note_class_point(false);
-                return None;
-            }
-        }
         if let Some(g) = self.inner.try_read() {
             note_lsm_lock();
             return g.get_after_point_miss(key);
@@ -2607,6 +2605,9 @@ impl<E: Env> ConcurrentDb<E> {
                     Lookup::NotFound => {}
                 }
             }
+        }
+        if self.fast_outside_sst_miss(key) {
+            return None;
         }
         for table in sv.ssts.iter() {
             if table.has_range_tombstones() {
@@ -5071,6 +5072,46 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn begin_occ(&self) -> OccTransaction<E> {
         OccTransaction::new(self.clone())
+    }
+
+    /// Executes a closure inside an OCC transaction with adaptive exponential backoff and jitter (RFC-0300 P0.1).
+    ///
+    /// Automatically detects [`CoreError::TransactionConflict`] and retries up to `policy.max_retries`
+    /// with decorrelated jitter to prevent abort storms under high contention (Zipfian skew).
+    pub fn transact<R, F>(&self, f: F) -> Result<R>
+    where
+        F: FnMut(&mut OccTransaction<E>) -> Result<R>,
+    {
+        self.transact_with(crate::resilient_tx::TransactionRetryPolicy::default(), f)
+    }
+
+    /// Executes a closure inside an OCC transaction with a custom [`crate::resilient_tx::TransactionRetryPolicy`].
+    pub fn transact_with<R, F>(&self, policy: crate::resilient_tx::TransactionRetryPolicy, mut f: F) -> Result<R>
+    where
+        F: FnMut(&mut OccTransaction<E>) -> Result<R>,
+    {
+        let mut attempt = 0;
+        loop {
+            let mut tx = self.begin_occ();
+            match f(&mut tx) {
+                Ok(val) => match tx.commit() {
+                    Ok(()) => return Ok(val),
+                    Err(CoreError::TransactionConflict) => {
+                        attempt += 1;
+                        if attempt > policy.max_retries {
+                            return Err(CoreError::TransactionConflict);
+                        }
+                        let backoff = policy.compute_backoff(attempt);
+                        std::thread::sleep(backoff);
+                    }
+                    Err(e) => return Err(e),
+                },
+                Err(e) => {
+                    tx.abort();
+                    return Err(e);
+                }
+            }
+        }
     }
 
     /// OCC commit: validate under the write lock, then the same group-commit

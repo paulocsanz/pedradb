@@ -640,7 +640,9 @@ impl<E: Env> Db<E> {
                     records.push(WriteOp::delete(seq, key));
                 }
                 BatchOp::DeleteRange { start, end } => {
-                    records.push(WriteOp::delete_range(seq, start, end));
+                    if !crate::write_admission_kernel::range_inverted(start >= end) {
+                        records.push(WriteOp::delete_range(seq, start, end));
+                    }
                 }
             }
         }

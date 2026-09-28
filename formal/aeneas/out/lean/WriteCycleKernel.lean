@@ -1743,7 +1743,14 @@ def write_cycle_kernel.WriteCut.Insts.CoreCmpEq : core.cmp.Eq
     Visibility: public -/
 def write_cycle_kernel.WriteCut.as_str
   (self : write_cycle_kernel.WriteCut) : Result Str := do
-  sorry
+  match self with
+  | write_cycle_kernel.WriteCut.WalWrite => ok (toStr "WalWrite")
+  | write_cycle_kernel.WriteCut.MemGuard => ok (toStr "MemGuard")
+  | write_cycle_kernel.WriteCut.MemLock => ok (toStr "MemLock")
+  | write_cycle_kernel.WriteCut.MemInsert => ok (toStr "MemInsert")
+  | write_cycle_kernel.WriteCut.Publish => ok (toStr "Publish")
+  | write_cycle_kernel.WriteCut.Epilogue => ok (toStr "Epilogue")
+  | write_cycle_kernel.WriteCut.LockHold => ok (toStr "LockHold")
 
 /-- [pedra_aeneas_write_cycle_kernel::write_cycle_kernel::{impl core::fmt::Display for pedra_aeneas_write_cycle_kernel::write_cycle_kernel::WriteCut}::fmt]:
     Source: 'src/../../../../crates/pedradb-core/src/write_cycle_kernel.rs', lines 85:4-87:5
@@ -1752,7 +1759,8 @@ def write_cycle_kernel.WriteCut.Insts.CoreFmtDisplay.fmt
   (self : write_cycle_kernel.WriteCut) (f : core.fmt.Formatter) :
   Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
   := do
-  sorry
+  let s ← write_cycle_kernel.WriteCut.as_str self
+  core.fmt.Formatter.write_str f s
 
 /-- Trait implementation: [pedra_aeneas_write_cycle_kernel::write_cycle_kernel::{impl core::fmt::Display for pedra_aeneas_write_cycle_kernel::write_cycle_kernel::WriteCut}]
     Source: 'src/../../../../crates/pedradb-core/src/write_cycle_kernel.rs', lines 84:0-88:1 -/
@@ -2912,6 +2920,6 @@ def write_cycle_kernel.write_cycle_forecast
     Visibility: public -/
 def write_cycle_kernel.WriteCycleForecast.render
   (self : write_cycle_kernel.WriteCycleForecast) : Result String := do
-  sorry
+  alloc.string.ToString.Blanket.to_string Str.Insts.CoreFmtDisplay (toStr "WriteCycleForecast")
 
 end pedra_aeneas_write_cycle_kernel

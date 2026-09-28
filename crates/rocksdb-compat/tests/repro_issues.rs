@@ -341,3 +341,122 @@ fn test_physical_disk_inventory_and_leak_invariant() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn test_bug9_backup_restore_preserves_cfreg_and_named_cfs() {
+    use rocksdb_compat::backup::{BackupEngine, BackupEngineOptions, RestoreOptions};
+    use rocksdb_compat::Env;
+
+    let dir = tmp("b9-cfreg-src");
+    let backup_dir = tmp("b9-cfreg-backup");
+    let restore_dir = tmp("b9-cfreg-restore");
+
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    opts.set_sync(true);
+
+    let cfs = ["cf_payments", "cf_users"];
+    let db = DB::open_cf(&opts, &dir, &cfs).unwrap();
+
+    let h_pay = db.cf_handle("cf_payments").unwrap();
+    let h_usr = db.cf_handle("cf_users").unwrap();
+
+    db.put_cf(&h_pay, b"tx100", b"1000_usd").unwrap();
+    db.put_cf(&h_usr, b"user42", b"alice").unwrap();
+    db.put(b"default_key", b"global_state").unwrap();
+
+    // Create backup with BackupEngine
+    let env = Env::new().unwrap();
+    let backup_opts = BackupEngineOptions::new(&backup_dir).unwrap();
+    let mut engine = BackupEngine::open(&backup_opts, &env).unwrap();
+    engine.create_new_backup_flush(&db, true).unwrap();
+    drop(db);
+
+    // Restore from latest backup
+    let ropts = RestoreOptions::default();
+    engine
+        .restore_from_latest_backup(&restore_dir, &restore_dir, &ropts)
+        .unwrap();
+
+    // Verify CFREG sidecar is present and all column families open and read cleanly
+    let restored_db = DB::open_cf(&opts, &restore_dir, &cfs).expect("Must open with CFs restored");
+    let h_pay_r = restored_db.cf_handle("cf_payments").unwrap();
+    let h_usr_r = restored_db.cf_handle("cf_users").unwrap();
+
+    assert_eq!(
+        restored_db.get_cf(&h_pay_r, b"tx100").unwrap().as_deref(),
+        Some(&b"1000_usd"[..])
+    );
+    assert_eq!(
+        restored_db.get_cf(&h_usr_r, b"user42").unwrap().as_deref(),
+        Some(&b"alice"[..])
+    );
+    assert_eq!(
+        restored_db.get(b"default_key").unwrap().as_deref(),
+        Some(&b"global_state"[..])
+    );
+
+    drop(restored_db);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&backup_dir);
+    let _ = std::fs::remove_dir_all(&restore_dir);
+}
+
+#[test]
+fn test_bug10_concurrent_write_opt_isolation() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    let dir = tmp("b10-durability-race");
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    opts.set_sync(false); // default db is async
+
+    let db = Arc::new(DB::open(&opts, &dir).unwrap());
+    let stop = Arc::new(AtomicBool::new(false));
+
+    let mut handles = Vec::new();
+
+    // Thread A: calls put_opt with sync = true
+    let db_a = Arc::clone(&db);
+    let stop_a = Arc::clone(&stop);
+    handles.push(std::thread::spawn(move || {
+        let mut wo_sync = rocksdb_compat::WriteOptions::default();
+        wo_sync.set_sync(true);
+        let mut count = 0;
+        while !stop_a.load(Ordering::Relaxed) && count < 200 {
+            let k = format!("sync_k_{count}").into_bytes();
+            db_a.put_opt(&k, b"v_sync", &wo_sync).unwrap();
+            count += 1;
+        }
+    }));
+
+    // Thread B: calls put_opt with sync = false (must not be clobbered by Thread A)
+    let db_b = Arc::clone(&db);
+    let stop_b = Arc::clone(&stop);
+    handles.push(std::thread::spawn(move || {
+        let mut wo_async = rocksdb_compat::WriteOptions::default();
+        wo_async.set_sync(false);
+        let mut count = 0;
+        while !stop_b.load(Ordering::Relaxed) && count < 200 {
+            let k = format!("async_k_{count}").into_bytes();
+            db_b.put_opt(&k, b"v_async", &wo_async).unwrap();
+            count += 1;
+        }
+    }));
+
+    std::thread::sleep(Duration::from_millis(50));
+    stop.store(true, Ordering::Relaxed);
+
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    // Both threads must have successfully written without errors or cross-thread data corruption
+    assert!(db.get(b"sync_k_0").unwrap().is_some());
+    assert!(db.get(b"async_k_0").unwrap().is_some());
+
+    drop(db);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+

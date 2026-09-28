@@ -114,15 +114,26 @@ impl PrefixDeltaBlock {
         num_restarts_bytes.copy_from_slice(&block[block.len() - 4..]);
         let num_restarts = u32::from_le_bytes(num_restarts_bytes) as usize;
 
-        let restart_array_bytes = num_restarts * 4;
+        let restart_array_bytes = num_restarts
+            .checked_mul(4)
+            .ok_or(PrefixDeltaViolation::CorruptTrailer)?;
         if block.len() < 4 + restart_array_bytes {
             return Err(PrefixDeltaViolation::CorruptTrailer);
         }
 
         let restart_start = block.len() - 4 - restart_array_bytes;
-        let mut restarts = Vec::with_capacity(num_restarts);
+        let mut restarts = Vec::with_capacity(num_restarts.min(block.len() / 4));
         for i in 0..num_restarts {
-            let offset_bytes: [u8; 4] = block[restart_start + i * 4..restart_start + (i + 1) * 4]
+            let offset_start = restart_start
+                .checked_add(i.checked_mul(4).ok_or(PrefixDeltaViolation::CorruptTrailer)?)
+                .ok_or(PrefixDeltaViolation::CorruptTrailer)?;
+            let offset_end = offset_start
+                .checked_add(4)
+                .ok_or(PrefixDeltaViolation::CorruptTrailer)?;
+            if offset_end > block.len() - 4 {
+                return Err(PrefixDeltaViolation::CorruptTrailer);
+            }
+            let offset_bytes: [u8; 4] = block[offset_start..offset_end]
                 .try_into()
                 .map_err(|_| PrefixDeltaViolation::CorruptTrailer)?;
             let offset = u32::from_le_bytes(offset_bytes) as usize;
@@ -137,11 +148,12 @@ impl PrefixDeltaBlock {
 
         // Reconstruct records sequentially
         let mut entries = Vec::new();
-        let mut pos = 0;
+        let mut cur = crate::codec::SafeCursor::new(&block[..restart_start]);
         let mut prev_key: Vec<u8> = Vec::new();
         let mut entry_idx = 0;
 
-        while pos < restart_start {
+        while !cur.is_empty() {
+            let pos = cur.position();
             let is_restart = entry_idx % restart_interval == 0;
             if is_restart {
                 let restart_idx = entry_idx / restart_interval;
@@ -153,16 +165,15 @@ impl PrefixDeltaBlock {
                 }
             }
 
-            if pos + 12 > restart_start {
-                return Err(PrefixDeltaViolation::CorruptTrailer);
-            }
-
-            let shared_len = u32::from_le_bytes(block[pos..pos + 4].try_into().unwrap()) as usize;
-            let unshared_len =
-                u32::from_le_bytes(block[pos + 4..pos + 8].try_into().unwrap()) as usize;
-            let val_len =
-                u32::from_le_bytes(block[pos + 8..pos + 12].try_into().unwrap()) as usize;
-            pos += 12;
+            let shared_len = cur
+                .read_u32_le()
+                .map_err(|_| PrefixDeltaViolation::CorruptTrailer)? as usize;
+            let unshared_len = cur
+                .read_u32_le()
+                .map_err(|_| PrefixDeltaViolation::CorruptTrailer)? as usize;
+            let val_len = cur
+                .read_u32_le()
+                .map_err(|_| PrefixDeltaViolation::CorruptTrailer)? as usize;
 
             if is_restart && shared_len != 0 {
                 return Err(PrefixDeltaViolation::NonZeroSharedAtRestartPoint { shared_len });
@@ -175,17 +186,17 @@ impl PrefixDeltaBlock {
                 });
             }
 
-            if pos + unshared_len + val_len > restart_start {
-                return Err(PrefixDeltaViolation::CorruptTrailer);
-            }
+            let unshared_bytes = cur
+                .read_exact(unshared_len)
+                .map_err(|_| PrefixDeltaViolation::CorruptTrailer)?;
+            let val = cur
+                .read_exact(val_len)
+                .map_err(|_| PrefixDeltaViolation::CorruptTrailer)?
+                .to_vec();
 
-            let mut key = Vec::with_capacity(shared_len + unshared_len);
+            let mut key = Vec::with_capacity(shared_len.saturating_add(unshared_len));
             key.extend_from_slice(&prev_key[..shared_len]);
-            key.extend_from_slice(&block[pos..pos + unshared_len]);
-            pos += unshared_len;
-
-            let val = block[pos..pos + val_len].to_vec();
-            pos += val_len;
+            key.extend_from_slice(unshared_bytes);
 
             if let Some(last) = entries.last() {
                 let last_key: &BlockKvEntry = last;

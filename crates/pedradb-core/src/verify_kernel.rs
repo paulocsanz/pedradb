@@ -102,20 +102,28 @@ fn read_all<E: Env>(env: &E, path: &Path) -> Result<Vec<u8>, String> {
 
 fn walk_vlog(buf: &[u8]) -> Result<u64, (u64, String)> {
     const MAGIC: &[u8; 8] = b"PDBVLOG1";
-    if buf.len() < MAGIC.len() || &buf[..MAGIC.len()] != MAGIC {
+    let mut cur = crate::codec::SafeCursor::new(buf);
+    let magic = cur
+        .read_exact(MAGIC.len())
+        .map_err(|_| (0, "bad vlog magic".into()))?;
+    if magic != MAGIC {
         return Err((0, "bad vlog magic".into()));
     }
-    let mut off = MAGIC.len();
     let mut n = 0u64;
-    while off + 8 <= buf.len() {
-        let rec_off = off as u64;
-        let len = u32::from_le_bytes(buf[off..off + 4].try_into().unwrap()) as usize;
-        let stored = u32::from_le_bytes(buf[off + 4..off + 8].try_into().unwrap());
-        off += 8;
-        if off.checked_add(len).is_none_or(|end| end > buf.len()) {
+    while cur.remaining() >= 8 {
+        let rec_off = cur.position() as u64;
+        let len = cur
+            .read_u32_le()
+            .map_err(|_| (rec_off, "truncated vlog header".into()))? as usize;
+        let stored = cur
+            .read_u32_le()
+            .map_err(|_| (rec_off, "truncated vlog header".into()))?;
+        if cur.remaining() < len {
             return Err((rec_off, format!("truncated vlog record len={len}")));
         }
-        let data = &buf[off..off + len];
+        let data = cur
+            .read_exact(len)
+            .map_err(|_| (rec_off, format!("truncated vlog record len={len}")))?;
         let computed = crc32c::crc32c(data);
         if !crate::wal::crc::crc_match_ok(stored, computed) {
             return Err((
@@ -123,11 +131,10 @@ fn walk_vlog(buf: &[u8]) -> Result<u64, (u64, String)> {
                 format!("vlog crc mismatch stored={stored:#010x} computed={computed:#010x}"),
             ));
         }
-        off += len;
         n = n.saturating_add(1);
     }
-    if off < buf.len() {
-        return Err((off as u64, "trailing truncated vlog record".into()));
+    if !cur.is_eof() {
+        return Err((cur.position() as u64, "trailing truncated vlog record".into()));
     }
     Ok(n)
 }
