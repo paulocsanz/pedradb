@@ -1743,7 +1743,9 @@ impl WriteGroup {
             #[cfg(feature = "pct")]
             crate::pct_hooks::maybe_yield("lead_write_lock");
             let mut guard = db.write();
-            Self::validate_occ_batch(&mut guard, &mut batch);
+            let mut accepted_keys: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+            let mut accepted_ranges: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+            Self::validate_occ_batch_acc(&mut guard, &mut batch, &mut accepted_keys, &mut accepted_ranges);
             let inputs: Vec<(Vec<BatchOp>, bool)> = batch
                 .iter_mut()
                 .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
@@ -1763,7 +1765,7 @@ impl WriteGroup {
                             }
                             q.pending.drain(..).collect()
                         };
-                        Self::validate_occ_batch(&mut guard, &mut extra);
+                        Self::validate_occ_batch_acc(&mut guard, &mut extra, &mut accepted_keys, &mut accepted_ranges);
                         let more: Vec<(Vec<BatchOp>, bool)> = extra
                             .iter_mut()
                             .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
@@ -1782,6 +1784,8 @@ impl WriteGroup {
                             q.pending.drain(..).collect()
                         },
                         None,
+                        &mut accepted_keys,
+                        &mut accepted_ranges,
                     )
                 }
             };
@@ -1809,10 +1813,17 @@ impl WriteGroup {
     }
 
     fn validate_occ_batch<E: Env>(guard: &mut Db<E>, batch: &mut [PendingWrite]) {
-        // Track accumulated writes of accepted transactions within this batch (intra-group OCC)
         let mut accepted_keys: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
         let mut accepted_ranges: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+        Self::validate_occ_batch_acc(guard, batch, &mut accepted_keys, &mut accepted_ranges);
+    }
 
+    fn validate_occ_batch_acc<E: Env>(
+        guard: &mut Db<E>,
+        batch: &mut [PendingWrite],
+        accepted_keys: &mut std::collections::HashSet<Vec<u8>>,
+        accepted_ranges: &mut Vec<(Vec<u8>, Vec<u8>)>,
+    ) {
         for p in batch.iter_mut() {
             let Some((snap, keys)) = p.occ.as_ref() else {
                 // Non-OCC write (raw batch): always commits and updates accepted writes for subsequent OCC transactions
@@ -1942,7 +1953,9 @@ impl WriteGroup {
                     BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
                         guard.key_has_write_after(key, *snap)
                     }
-                    BatchOp::DeleteRange { .. } => false,
+                    BatchOp::DeleteRange { start, end } => {
+                        guard.range_has_write_after(start, end, *snap)
+                    }
                 });
             // RFC-0057 P2.1: first-committer-wins is the kernel plan,
             // not an inline predicate (same `occ_batch_plan` as the group).
@@ -2034,6 +2047,8 @@ impl WriteGroup {
         mut batch: Option<&mut Vec<PendingWrite>>,
         mut drain: impl FnMut() -> Vec<PendingWrite>,
         mut lone: Option<&mut [u64; 4]>,
+        accepted_keys: &mut std::collections::HashSet<Vec<u8>>,
+        accepted_ranges: &mut Vec<(Vec<u8>, Vec<u8>)>,
     ) -> Vec<Result<SequenceNumber>> {
         enum Chunk {
             Fly(crate::db::GroupInFlight),
@@ -2059,7 +2074,7 @@ impl WriteGroup {
                 if crate::write_admission_kernel::batch_is_empty(extra.len() as u64) {
                     break;
                 }
-                Self::validate_occ_batch(&mut guard, &mut extra);
+                Self::validate_occ_batch_acc(&mut guard, &mut extra, accepted_keys, accepted_ranges);
                 let more: Vec<(Vec<BatchOp>, bool)> = extra
                     .iter_mut()
                     .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
@@ -4186,8 +4201,11 @@ impl<E: Env> ConcurrentDb<E> {
         vals: Vec<Bytes>,
         tail: Vec<BatchOp>,
     ) -> Result<SequenceNumber> {
-        // Latched bulk does not park memtables; skip assist/debt (two
-        // read locks per 1024-op hydrate batch).
+        while self.inner.read().parked_bulk_len() >= 16 {
+            if !self.materialize_bulk_off_lock() {
+                granted_sleep("bulk_parked_debt", FLUSH_DEBT_POLL);
+            }
+        }
         self.writes
             .submit_latched_bulk(&self.inner, family, keys, vals, tail)
     }
