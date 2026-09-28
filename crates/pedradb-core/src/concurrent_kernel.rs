@@ -6710,13 +6710,13 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// v29: debt cap is TWO staging thresholds — one chunk of runway so
+    /// Flush debt cap is eight staging thresholds — runway so
     /// fill and materialize overlap instead of stop-and-wait per park.
     #[test]
-    fn flush_debt_cap_is_two_thresholds() {
+    fn flush_debt_cap_is_eight_thresholds() {
         let dir = temp_dir();
         let db = open_debt(&dir); // auto_flush_bytes: Some(1)
-        assert_eq!(db.flush_debt_cap(), Some(2));
+        assert_eq!(db.flush_debt_cap(), Some(8));
         let _ = fs::remove_dir_all(&dir);
     }
 

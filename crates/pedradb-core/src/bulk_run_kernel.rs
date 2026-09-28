@@ -186,16 +186,29 @@ pub(crate) fn sort_bulk_key_vals(keys: &mut Vec<Bytes>, vals: &mut Vec<Bytes>) {
     if keys.windows(2).all(|w| w[0].as_ref() < w[1].as_ref()) {
         return;
     }
-    let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_unstable_by(|&a, &b| keys[a].as_ref().cmp(keys[b].as_ref()));
-    let mut nk = Vec::with_capacity(n);
-    let mut nv = Vec::with_capacity(n);
-    for i in idx {
-        nk.push(std::mem::take(&mut keys[i]));
-        nv.push(std::mem::take(&mut vals[i]));
+    thread_local! {
+        static SCRATCH: std::cell::RefCell<(Vec<usize>, Vec<Bytes>, Vec<Bytes>)> =
+            std::cell::RefCell::new((Vec::with_capacity(1024), Vec::with_capacity(1024), Vec::with_capacity(1024)));
     }
-    *keys = nk;
-    *vals = nv;
+    SCRATCH.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let (idx, nk, nv) = &mut *borrow;
+        idx.clear();
+        idx.extend(0..n);
+        idx.sort_unstable_by(|&a, &b| keys[a].as_ref().cmp(keys[b].as_ref()));
+        nk.clear();
+        nv.clear();
+        nk.reserve(n);
+        nv.reserve(n);
+        for &i in idx.iter() {
+            nk.push(std::mem::take(&mut keys[i]));
+            nv.push(std::mem::take(&mut vals[i]));
+        }
+        keys.clear();
+        keys.extend(nk.drain(..));
+        vals.clear();
+        vals.extend(nv.drain(..));
+    });
 }
 
 #[cfg(test)]

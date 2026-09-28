@@ -3266,6 +3266,7 @@ fn append_bulk_entry(buf: &mut Vec<u8>, k: &[u8], seq: SequenceNumber, v: &[u8])
     // Hydrate keys/vals are tens/hundreds of bytes; skip try_from / Result.
     let ikey_len = (k.len() + 8) as u32;
     let val_len = v.len() as u32;
+    buf.reserve(16 + k.len() + v.len());
     buf.extend_from_slice(&ikey_len.to_le_bytes());
     buf.extend_from_slice(k);
     buf.extend_from_slice(&pack_sequence_and_type(seq, ValueType::Value).to_be_bytes());
