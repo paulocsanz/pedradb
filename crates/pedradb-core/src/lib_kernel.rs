@@ -21,6 +21,7 @@
 pub mod batch;
 #[path = "bloom_kernel.rs"]
 pub mod bloom;
+pub use bloom as bloom_kernel;
 /// Optional DST buggify annotation sites (RFC-0018 P2.5; no-op unless feature).
 #[path = "buggify_hooks_kernel.rs"]
 pub mod buggify_hooks;
@@ -191,6 +192,26 @@ pub mod fd_quota_governor_kernel;
 pub mod boot_id_lockfile_kernel;
 /// RFC-0285 Pilar 10: Bidirectional Schema Homomorphism and Unknown-Field Preservation Kernel.
 pub mod rolling_upgrade_homomorphism_kernel;
+/// RFC-0286: Range Tombstone Fragmentation and Point Coverage Invariant Kernel.
+pub mod range_tombstone_fragmentation_kernel;
+/// RFC-0286: Compaction Merge Operator Join-Semilattice Confluence Kernel.
+pub mod compaction_merge_semilattice_kernel;
+/// RFC-0286: RUM Conjecture Pareto Boundary and IOPS Budget Kernel.
+pub mod rum_amplification_pareto_kernel;
+/// RFC-0286: Decompression Scratch Arena Strict Isolation and Purge Kernel.
+pub mod decompression_scratch_isolation_kernel;
+/// RFC-0286: Linearizable MemTable Retirement and VersionSet Handshake Kernel.
+pub mod memtable_retirement_handshake_kernel;
+/// RFC-0287: SST Topological Entropy and Epsilon-Approximation Partition Kernel.
+pub mod sst_topological_entropy_kernel;
+/// RFC-0287: ENOSPC Drain Headroom and Acyclic Deallocation Liveness Kernel.
+pub mod enospc_drain_headroom_kernel;
+/// RFC-0287: Non-Zenonian Monotonic Clock and Anti-Resurrection TTL Kernel.
+pub mod non_zeno_monotonic_clock_kernel;
+/// RFC-0287: DMA Generation Fence and Ghost Block Invalidation Kernel.
+pub mod dma_generation_fence_kernel;
+/// RFC-0287: WAL Cryptographic Chain Recovery and Non-Torn Corruption Kernel.
+pub mod wal_crypto_chain_recovery_kernel;
 pub mod product_crown_kernel;
 pub mod rmw_sched_kernel;
 pub mod wal_buffer_kernel;

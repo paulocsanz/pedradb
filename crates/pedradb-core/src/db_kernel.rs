@@ -6248,9 +6248,9 @@ impl<E: Env> Db<E> {
         if over {
             if let Some(run) = self.bulk_runs.remove(family) {
                 // Park even while the worker is encoding the previous
-                // chunk so fill overlaps SST. Two parked + one encoding
+                // chunk so fill overlaps SST. Three parked + one encoding
                 // + the open tail is the RAM runway (matching RocksDB's 4 write buffers).
-                if self.parked_bulk.len() < 3 {
+                if self.parked_bulk.len() < 4 {
                     self.parked_bulk
                         .push_back((family.to_string(), Arc::new(run)));
                 } else {
@@ -9509,13 +9509,14 @@ impl<E: Env> Db<E> {
         // chunks after leveled settle measured ~10 µs/get of pure candidate
         // checking (25M guest).
         let ssts = &self.ssts;
+        let (key_h1, key_h2) = crate::bloom_kernel::hash_pair(key);
         let mut probe = |table: &SstTable| -> Option<(SequenceNumber, Lookup)> {
             if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
                 if key < lo || key > hi {
                     return None;
                 }
             }
-            match table.point_at_seeking(key, snapshot, &mut seek_scratch) {
+            match table.point_at_seeking_with_hashes(key, snapshot, &mut seek_scratch, key_h1, key_h2) {
                 Ok(Some((seq, look))) => Some((seq, look)),
                 Ok(None) => None,
                 Err(e) => fail_stop_corrupt_block(table.path(), &e),
@@ -22502,6 +22503,7 @@ mod tests {
             }
         }
         let mut seek_scratch = PointSeekScratch::default();
+        let (key_h1, key_h2) = crate::bloom_kernel::hash_pair(key);
         for &sst_i in db.sst_indices_newest_first() {
             let table = &db.ssts[sst_i];
             table.collect_range_tombstones(snapshot, &mut range_tombs);
@@ -22510,7 +22512,7 @@ mod tests {
                     continue;
                 }
             }
-            match table.point_at_seeking(key, snapshot, &mut seek_scratch) {
+            match table.point_at_seeking_with_hashes(key, snapshot, &mut seek_scratch, key_h1, key_h2) {
                 Ok(Some((seq, look))) => {
                     best_point_seq = Some(seq);
                     best_point = look;
