@@ -1675,7 +1675,13 @@ mod tests {
         let body = src
             .split("pub fn key_has_write_after")
             .nth(1)
-            .and_then(|s| s.split("fn resolve_stored_value").next())
+            .and_then(|s| {
+                if let Some(part) = s.split("pub fn range_has_write_after").next() {
+                    Some(part)
+                } else {
+                    s.split("fn resolve_stored_value").next()
+                }
+            })
             .expect("key_has_write_after");
         assert!(
             body.contains("write_op_covers_key("),

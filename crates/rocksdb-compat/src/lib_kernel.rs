@@ -2733,11 +2733,7 @@ impl<E: PedraEnv> DB<E> {
     /// TLS-warmed point get on a CF name already known valid.
     fn get_cached(&self, cf: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         let key = key.as_ref();
-        if self.inner.is_settled_sst_only()
-            && self.codec.encode_with(cf, key, |enc| self.inner.fast_outside_sst_miss(enc))
-        {
-            return Ok(None);
-        }
+        // Fast-path bypass is delegated to self.inner.get to ensure memtables are checked first
         // RFC-0041 YCSB-C: zipf (θ=0.99, 4096 keys) concentrates on a hot
         // set. Direct-mapped last-N skips CF-prefix encode + point-cache
         // mutex. Bytes stay shared with the point cache; we copy into Vec
@@ -4348,6 +4344,66 @@ impl<E: PedraEnv> DB<E> {
         self.get_cf(cf, key).ok().flatten().is_some()
     }
 
+    fn to_engine_ops(&self, batch: &WriteBatch) -> Result<Vec<BatchOp>> {
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(64 * 1024));
+        }
+        KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            let mut ops = Vec::with_capacity(batch.ops.len());
+            for (cf, op) in &batch.ops {
+                let name = cf.as_deref().unwrap_or(DEFAULT_CF);
+                self.check_cf(name)?;
+                let encoded = match op {
+                    BatchOp::Put { key, value } => BatchOp::Put {
+                        key: self.codec.encode_pooled(name, key, &mut pool),
+                        value: value.clone(),
+                    },
+                    BatchOp::Delete { key } => BatchOp::Delete {
+                        key: self.codec.encode_pooled(name, key, &mut pool),
+                    },
+                    BatchOp::DeleteRange { start, end } => BatchOp::DeleteRange {
+                        start: self.codec.encode_pooled(name, start, &mut pool),
+                        end: self.codec.encode_pooled(name, end, &mut pool),
+                    },
+                };
+                ops.push(encoded);
+            }
+            Ok(ops)
+        })
+    }
+
+    fn to_engine_ops_owned(&self, batch: WriteBatch) -> Result<Vec<BatchOp>> {
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(64 * 1024));
+        }
+        KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            let mut ops = Vec::with_capacity(batch.ops.len());
+            for (cf, op) in batch.ops {
+                let name = cf.as_deref().unwrap_or(DEFAULT_CF);
+                self.check_cf(name)?;
+                let encoded = match op {
+                    BatchOp::Put { key, value } => BatchOp::Put {
+                        key: self.codec.encode_pooled(name, key.as_ref(), &mut pool),
+                        value,
+                    },
+                    BatchOp::Delete { key } => BatchOp::Delete {
+                        key: self.codec.encode_pooled(name, key.as_ref(), &mut pool),
+                    },
+                    BatchOp::DeleteRange { start, end } => BatchOp::DeleteRange {
+                        start: self.codec.encode_pooled(name, start.as_ref(), &mut pool),
+                        end: self.codec.encode_pooled(name, end.as_ref(), &mut pool),
+                    },
+                };
+                ops.push(encoded);
+            }
+            Ok(ops)
+        })
+    }
+
     /// rust-rocksdb `put_opt`.
     pub fn put_opt(
         &self,
@@ -4355,45 +4411,69 @@ impl<E: PedraEnv> DB<E> {
         value: impl AsRef<[u8]>,
         wo: &WriteOptions,
     ) -> Result<()> {
-        let prev = self.inner.default_write_sync();
-        self.inner.set_default_write_sync(wo.sync);
-        let r = self.put(key, value);
-        self.inner.set_default_write_sync(prev);
-        r
+        let key = key.as_ref();
+        let value = value.as_ref();
+        let interned = intern_put_value(value);
+        let opts = pedradb_core::WriteOptions {
+            sync: Some(wo.sync),
+        };
+        self.codec
+            .encode_with(DEFAULT_CF, key, |enc| {
+                self.inner.put_with(enc, interned.as_ref(), opts)
+            })
+            .map_err(Error::from)?;
+        if interned.len() <= 1024 {
+            let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
+            LAST_GET.with(|t| t.borrow_mut().store_key(epoch, gen, key, Some(interned)));
+        }
+        Ok(())
     }
 
     /// rust-rocksdb `delete_opt`.
     pub fn delete_opt(&self, key: impl AsRef<[u8]>, wo: &WriteOptions) -> Result<()> {
-        let prev = self.inner.default_write_sync();
-        self.inner.set_default_write_sync(wo.sync);
-        let r = self.delete(key);
-        self.inner.set_default_write_sync(prev);
-        r
+        self.check_cf(DEFAULT_CF)?;
+        let encoded = self.codec.encode(DEFAULT_CF, key.as_ref());
+        let opts = pedradb_core::WriteOptions {
+            sync: Some(wo.sync),
+        };
+        self.inner.delete_with(encoded, opts).map(|_| ()).map_err(Error::from)
     }
 
     /// rust-rocksdb `write_opt`.
     pub fn write_opt(&self, batch: &WriteBatch, wo: &WriteOptions) -> Result<()> {
-        let prev = self.inner.default_write_sync();
-        self.inner.set_default_write_sync(wo.sync);
-        let r = self.write(batch);
-        self.inner.set_default_write_sync(prev);
-        r
+        if !wo.sync && self.try_write_latched(batch)? {
+            return Ok(());
+        }
+        let ops = self.to_engine_ops(batch)?;
+        let opts = pedradb_core::WriteOptions {
+            sync: Some(wo.sync),
+        };
+        self.inner
+            .apply_batch_vec_with(ops, opts)
+            .map(|_| ())
+            .map_err(Error::from)
     }
 
     /// rust-rocksdb `write_opt_owned` — consumes `batch` to avoid cloning `Bytes`.
-    pub fn write_opt_owned(&self, batch: WriteBatch, wo: &WriteOptions) -> Result<()> {
-        let prev = self.inner.default_write_sync();
-        self.inner.set_default_write_sync(wo.sync);
-        let r = self.write_owned(batch);
-        self.inner.set_default_write_sync(prev);
-        r
+    pub fn write_opt_owned(&self, mut batch: WriteBatch, wo: &WriteOptions) -> Result<()> {
+        if !wo.sync && self.try_write_latched_mut(&mut batch)? {
+            return Ok(());
+        }
+        let ops = self.to_engine_ops_owned(batch)?;
+        let opts = pedradb_core::WriteOptions {
+            sync: Some(wo.sync),
+        };
+        self.inner
+            .apply_batch_vec_with(ops, opts)
+            .map(|_| ())
+            .map_err(Error::from)
     }
 
     /// rust-rocksdb `write_without_wal` — Pedra still WAL-appends; sync is off.
     pub fn write_without_wal(&self, batch: WriteBatch) -> Result<()> {
         let mut wo = WriteOptions::default();
         wo.set_sync(false);
-        self.write_opt(&batch, &wo)
+        self.write_opt_owned(batch, &wo)
     }
 
     /// rust-rocksdb `merge`.
@@ -7138,6 +7218,58 @@ mod tests {
             i = end;
         }
         assert!(db.inner.family_is_latched_async("data"));
+        let last = format!("route.svc-{:06}", i - 1);
+        assert_eq!(
+            db.get_named("data", last.as_bytes()).unwrap().as_deref(),
+            Some(val.as_slice())
+        );
+        db.flush().unwrap();
+        assert_eq!(
+            db.get_named("data", last.as_bytes()).unwrap().as_deref(),
+            Some(val.as_slice())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slipstream path: `WriteBatch` + `write_opt_owned` before and after latch.
+    #[test]
+    fn write_opt_owned_latched_hydrate_roundtrip() {
+        let dir = tmp("writeopt-owned-bulk");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_sync(false);
+        let db = DB::open_cf(&opts, &dir, &["data", "meta"]).unwrap();
+        let data = db.cf_handle("data").unwrap();
+        let meta = db.cf_handle("meta").unwrap();
+        let val = vec![b'w'; 64];
+        let mut wo = WriteOptions::default();
+        wo.set_sync(false);
+        let mut i = 0u32;
+        // First 12 batches latch the family
+        for _ in 0..12u32 {
+            let end = i + 32;
+            let mut wb = WriteBatch::default();
+            for j in i..end {
+                wb.put_cf(&data, format!("route.svc-{j:06}").as_bytes(), &val);
+            }
+            wb.put_cf(&meta, b"cursor", i.to_le_bytes());
+            db.write_opt_owned(wb, &wo).unwrap();
+            i = end;
+        }
+        assert!(db.inner.family_is_latched_async("data"));
+
+        // Subsequent batches exercise try_write_latched_mut fast-path
+        for _ in 0..12u32 {
+            let end = i + 32;
+            let mut wb = WriteBatch::default();
+            for j in i..end {
+                wb.put_cf(&data, format!("route.svc-{j:06}").as_bytes(), &val);
+            }
+            wb.put_cf(&meta, b"cursor", i.to_le_bytes());
+            db.write_opt_owned(wb, &wo).unwrap();
+            i = end;
+        }
+
         let last = format!("route.svc-{:06}", i - 1);
         assert_eq!(
             db.get_named("data", last.as_bytes()).unwrap().as_deref(),

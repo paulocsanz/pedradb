@@ -485,11 +485,11 @@ fn pack32(key: &[u8]) -> (u128, u128) {
     let mut a = [0u8; 32];
     let n = key.len().min(32);
     a[..n].copy_from_slice(&key[..n]);
-    let (l, r) = a.split_at(16);
-    (
-        u128::from_be_bytes(l.try_into().unwrap()),
-        u128::from_be_bytes(r.try_into().unwrap()),
-    )
+    let mut l_arr = [0u8; 16];
+    let mut r_arr = [0u8; 16];
+    l_arr.copy_from_slice(&a[..16]);
+    r_arr.copy_from_slice(&a[16..]);
+    (u128::from_be_bytes(l_arr), u128::from_be_bytes(r_arr))
 }
 
 /// `tail_idx` shard key: integer-compare fast path + full-key tiebreak
@@ -522,12 +522,16 @@ impl Hasher for FxHasher {
     fn write(&mut self, mut bytes: &[u8]) {
         while bytes.len() >= 8 {
             let (chunk, rest) = bytes.split_at(8);
-            self.mix(u64::from_ne_bytes(chunk.try_into().unwrap()));
+            if let Ok(arr) = chunk.try_into() {
+                self.mix(u64::from_ne_bytes(arr));
+            }
             bytes = rest;
         }
         if bytes.len() >= 4 {
             let (chunk, rest) = bytes.split_at(4);
-            self.mix(u32::from_ne_bytes(chunk.try_into().unwrap()) as u64);
+            if let Ok(arr) = chunk.try_into() {
+                self.mix(u32::from_ne_bytes(arr) as u64);
+            }
             bytes = rest;
         }
         for &b in bytes {

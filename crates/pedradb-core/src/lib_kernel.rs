@@ -33,6 +33,8 @@ pub(crate) mod bulk_run;
 #[path = "cache_kernel.rs"]
 pub mod cache;
 pub mod cf_kernel;
+#[path = "codec_kernel.rs"]
+pub mod codec;
 #[path = "change_feed_kernel.rs"]
 pub mod change_feed;
 pub mod changelog_kernel;
@@ -426,6 +428,9 @@ pub use merge::{
     RangeTombstone, StreamingVisibleIter, VisibleKv, WindowKv, WindowKvIter,
 };
 pub use occ::OccTransaction;
+#[path = "resilient_tx_kernel.rs"]
+pub mod resilient_tx;
+pub use resilient_tx::{ContentionStats, ContentionTracker, TransactionRetryPolicy};
 pub use prefix::{key_in_prefix_range, prefix_exclusive_end, prefix_exclusive_end_as_is};
 pub use rng::{mix_seed, Rng, SeedRng, SystemRng};
 pub use sst::{

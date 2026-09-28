@@ -25,6 +25,7 @@ pub const WAL_RING_CAPACITY_BYTES: usize = 4 * 1024 * 1024;
 pub struct LockFreeWalRing {
     buffer: parking_lot::Mutex<Vec<u8>>,
     head: AtomicU64,
+    committed_head: AtomicU64,
     tail: AtomicU64,
     commit_inflight: AtomicUsize,
 }
@@ -42,6 +43,7 @@ impl LockFreeWalRing {
         Self {
             buffer: parking_lot::Mutex::new(vec![0u8; WAL_RING_CAPACITY_BYTES]),
             head: AtomicU64::new(0),
+            committed_head: AtomicU64::new(0),
             tail: AtomicU64::new(0),
             commit_inflight: AtomicUsize::new(0),
         }
@@ -53,9 +55,8 @@ impl LockFreeWalRing {
         WAL_RING_CAPACITY_BYTES
     }
 
-    /// Reserve space in the ring buffer atomically.
-    /// Returns `Some(offset_in_ring)` if reservation fits within available space.
-    pub fn reserve(&self, len: usize) -> Option<usize> {
+    /// Reserve space in the ring buffer atomically, returning the absolute start byte position.
+    pub fn reserve_abs(&self, len: usize) -> Option<u64> {
         let cap = self.capacity() as u64;
         let mut cur_head = self.head.load(Ordering::Acquire);
         loop {
@@ -69,49 +70,101 @@ impl LockFreeWalRing {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(pos) => return Some((pos % cap) as usize),
+                Ok(pos) => return Some(pos),
                 Err(h) => cur_head = h,
             }
         }
     }
 
+    /// Reserve space in the ring buffer atomically.
+    /// Returns `Some(offset_in_ring)` if reservation fits within available space.
+    pub fn reserve(&self, len: usize) -> Option<usize> {
+        let cap = self.capacity() as u64;
+        self.reserve_abs(len).map(|pos| (pos % cap) as usize)
+    }
+
     /// Direct append fast path for single-client 1c: writes header and payload
-    /// directly into the circular buffer.
+    /// directly into the circular buffer, properly padding to 32 KB block boundaries.
     pub fn append_record_fast(&self, seq: u64, payload: &[u8]) -> Option<usize> {
         self.commit_inflight.fetch_add(1, Ordering::SeqCst);
         let rec_len = HEADER_SIZE + 8 + payload.len(); // header + seq + payload
-        let offset = self.reserve(rec_len)?;
+        if rec_len > BLOCK_SIZE {
+            self.commit_inflight.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+
+        let (abs_pos, pad) = loop {
+            let cur_head = self.head.load(Ordering::Acquire);
+            let blk_offset = (cur_head % (BLOCK_SIZE as u64)) as usize;
+            let leftover = BLOCK_SIZE - blk_offset;
+            let pad = if leftover < HEADER_SIZE || rec_len > leftover {
+                leftover
+            } else {
+                0
+            };
+            let total_len = pad + rec_len;
+            let cap = self.capacity() as u64;
+            let cur_tail = self.tail.load(Ordering::Acquire);
+            if cur_head + total_len as u64 > cur_tail + cap {
+                self.commit_inflight.fetch_sub(1, Ordering::SeqCst);
+                return None;
+            }
+            if self.head.compare_exchange_weak(
+                cur_head,
+                cur_head + total_len as u64,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ).is_ok() {
+                break (cur_head, pad);
+            }
+        };
 
         let cap = self.capacity();
-        let crc = crc::crc32c(payload);
+        let offset = ((abs_pos + pad as u64) % (cap as u64)) as usize;
+
+        // WAL record payload consists of seq_num || user_payload
+        let mut record_data = Vec::with_capacity(8 + payload.len());
+        record_data.extend_from_slice(&seq.to_le_bytes());
+        record_data.extend_from_slice(payload);
+
+        let crc = crc::record_checksum(
+            RecordType::Full as u8,
+            record_data.len() as u16,
+            &record_data,
+        );
 
         let h_crc = crc.to_le_bytes();
-        let h_len = ((payload.len() + 8) as u16).to_le_bytes();
+        let h_len = (record_data.len() as u16).to_le_bytes();
         let h_type = RecordType::Full as u8;
 
         {
             let mut guard = self.buffer.lock();
-            let mut write_pos = offset;
+            let mut write_pos = (abs_pos % (cap as u64)) as usize;
             let mut write_byte = |b: u8| {
                 guard[write_pos] = b;
                 write_pos = (write_pos + 1) % cap;
             };
 
+            for _ in 0..pad {
+                write_byte(0);
+            }
+
             for b in h_crc { write_byte(b); }
             for b in h_len { write_byte(b); }
             write_byte(h_type);
 
-            for b in seq.to_le_bytes() { write_byte(b); }
-            for &b in payload { write_byte(b); }
+            for &b in &record_data { write_byte(b); }
         }
 
+        // Advance committed_head so drain_to can safely read the written record
+        self.committed_head.fetch_max(abs_pos + pad as u64 + rec_len as u64, Ordering::Release);
         self.commit_inflight.fetch_sub(1, Ordering::SeqCst);
         Some(offset)
     }
 
     /// Drain staged bytes to the sink.
-    pub fn drain_to<W: std::io::Write>(&self, sink: &mut W) -> std::io::Result<usize> {
-        let cur_head = self.head.load(Ordering::Acquire);
+    pub fn drain_to<W: Write>(&self, sink: &mut W) -> std::io::Result<usize> {
+        let cur_head = self.committed_head.load(Ordering::Acquire);
         let cur_tail = self.tail.load(Ordering::Acquire);
         if cur_tail >= cur_head {
             return Ok(0);
@@ -137,7 +190,7 @@ impl LockFreeWalRing {
     /// Returns number of pending bytes in the ring buffer.
     #[must_use]
     pub fn pending_bytes(&self) -> u64 {
-        self.head.load(Ordering::Acquire).saturating_sub(self.tail.load(Ordering::Acquire))
+        self.committed_head.load(Ordering::Acquire).saturating_sub(self.tail.load(Ordering::Acquire))
     }
 
     /// Checks if there are active in-flight commits.

@@ -660,12 +660,16 @@ impl std::hash::Hasher for FxHasher {
     fn write(&mut self, mut bytes: &[u8]) {
         while bytes.len() >= 8 {
             let (chunk, rest) = bytes.split_at(8);
-            self.combine(u64::from_le_bytes(chunk.try_into().unwrap()));
+            if let Ok(arr) = chunk.try_into() {
+                self.combine(u64::from_le_bytes(arr));
+            }
             bytes = rest;
         }
         if bytes.len() >= 4 {
             let (chunk, rest) = bytes.split_at(4);
-            self.combine(u32::from_le_bytes(chunk.try_into().unwrap()) as u64);
+            if let Ok(arr) = chunk.try_into() {
+                self.combine(u32::from_le_bytes(arr) as u64);
+            }
             bytes = rest;
         }
         for &b in bytes {

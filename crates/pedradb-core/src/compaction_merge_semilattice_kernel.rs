@@ -44,16 +44,16 @@ pub struct MaxU64MergeOperator;
 
 impl MergeSemilatticeOperator for MaxU64MergeOperator {
     fn merge(&self, a: &[u8], b: &[u8]) -> Vec<u8> {
-        let val_a = if a.len() == 8 {
-            u64::from_be_bytes(a.try_into().unwrap())
-        } else {
-            0
-        };
-        let val_b = if b.len() == 8 {
-            u64::from_be_bytes(b.try_into().unwrap())
-        } else {
-            0
-        };
+        let val_a = a
+            .get(..8)
+            .and_then(|s| s.try_into().ok())
+            .map(u64::from_be_bytes)
+            .unwrap_or(0);
+        let val_b = b
+            .get(..8)
+            .and_then(|s| s.try_into().ok())
+            .map(u64::from_be_bytes)
+            .unwrap_or(0);
         std::cmp::max(val_a, val_b).to_be_bytes().to_vec()
     }
 

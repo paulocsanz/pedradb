@@ -89,80 +89,52 @@ impl Manifest {
         if buf.len() < 32 || &buf[0..4] != b"PHST" {
             return Err(bad());
         }
-        let version = u32::from_le_bytes(buf[4..8].try_into().unwrap());
-        if version != 2 && version != 3 {
-            return Err(bad());
-        }
         let body_len = buf.len() - 4;
-        let crc = u32::from_le_bytes(buf[body_len..].try_into().unwrap());
+        let mut crc_cur = crate::codec::SafeCursor::new(&buf[body_len..]);
+        let crc = crc_cur.read_u32_le().map_err(|_| bad())?;
         if !crate::wal::crc::crc_match_ok(crc32c(&buf[..body_len]), crc) {
             return Err(CoreError::CorruptManifest(
                 "history manifest crc mismatch".into(),
             ));
         }
-        let next_id = u64::from_le_bytes(buf[8..16].try_into().unwrap());
-        let archive_floor = u64::from_le_bytes(buf[16..24].try_into().unwrap());
-        let n = u32::from_le_bytes(buf[24..28].try_into().unwrap()) as usize;
+        let mut cur = crate::codec::SafeCursor::new(&buf[4..body_len]);
+        let version = cur.read_u32_le().map_err(|_| bad())?;
+        if version != 2 && version != 3 {
+            return Err(bad());
+        }
+        let next_id = cur.read_u64_le().map_err(|_| bad())?;
+        let archive_floor = cur.read_u64_le().map_err(|_| bad())?;
+        let n = cur.read_u32_le().map_err(|_| bad())? as usize;
         // F199: `n` is untrusted (remote manifests decode through here).
-        // Each entry consumes at least 36 body bytes (v2: id + name len +
-        // from/through/bytes; v3 adds the keyed flag), so a count the body
-        // cannot possibly hold is a corrupt/attack manifest — reject it
-        // BEFORE the `with_capacity` allocation: n = u32::MAX otherwise
-        // reserves ~446 GB (`n × sizeof(SegmentMeta)`) and strict-overcommit
-        // hosts abort the process on a 36-byte remote object.
         const MIN_ENTRY_BYTES: usize = 36;
         if n > (body_len - 28) / MIN_ENTRY_BYTES {
             return Err(bad());
         }
         let mut segs = VecDeque::with_capacity(n);
-        let mut off = 28;
         for _ in 0..n {
-            let g = |off: &mut usize| -> Result<u64> {
-                if *off + 8 > body_len {
-                    return Err(bad());
-                }
-                let v = u64::from_le_bytes(buf[*off..*off + 8].try_into().unwrap());
-                *off += 8;
-                Ok(v)
-            };
-            let id = g(&mut off)?;
-            if off + 4 > body_len {
-                return Err(bad());
-            }
-            let nlen = u32::from_le_bytes(buf[off..off + 4].try_into().unwrap()) as usize;
-            off += 4;
-            if off + nlen + 24 > body_len {
-                return Err(bad());
-            }
-            let name = String::from_utf8_lossy(&buf[off..off + nlen]).into_owned();
-            off += nlen;
-            let from_seq = g(&mut off)?;
-            let through_seq = g(&mut off)?;
-            let bytes = g(&mut off)?;
+            let id = cur.read_u64_le().map_err(|_| bad())?;
+            let nlen = cur.read_u32_le().map_err(|_| bad())? as usize;
+            let name_bytes = cur.read_exact(nlen).map_err(|_| bad())?;
+            let name = String::from_utf8_lossy(name_bytes).into_owned();
+            let from_seq = cur.read_u64_le().map_err(|_| bad())?;
+            let through_seq = cur.read_u64_le().map_err(|_| bad())?;
+            let bytes = cur.read_u64_le().map_err(|_| bad())?;
             let (key_lo, key_hi) = if version >= 3 {
-                if off >= body_len {
-                    return Err(bad());
-                }
-                let keyed = buf[off] == 1;
-                off += 1;
+                let keyed = cur.read_u8().map_err(|_| bad())? == 1;
                 if !keyed {
                     (None, None)
                 } else {
-                    let take = |off: &mut usize| -> Result<Vec<u8>> {
-                        if *off + 4 > body_len {
-                            return Err(bad());
-                        }
-                        let l =
-                            u32::from_le_bytes(buf[*off..*off + 4].try_into().unwrap()) as usize;
-                        *off += 4;
-                        if *off + l > body_len {
-                            return Err(bad());
-                        }
-                        let v = buf[*off..*off + l].to_vec();
-                        *off += l;
-                        Ok(v)
-                    };
-                    (Some(take(&mut off)?), Some(take(&mut off)?))
+                    let rem1 = cur.remaining();
+                    let k1 = cur
+                        .read_length_prefixed_bytes(rem1)
+                        .map_err(|_| bad())?
+                        .to_vec();
+                    let rem2 = cur.remaining();
+                    let k2 = cur
+                        .read_length_prefixed_bytes(rem2)
+                        .map_err(|_| bad())?
+                        .to_vec();
+                    (Some(k1), Some(k2))
                 }
             } else {
                 (None, None)
@@ -177,6 +149,7 @@ impl Manifest {
                 key_hi,
             });
         }
+        cur.ensure_fully_consumed().map_err(|_| bad())?;
         Ok(Self {
             next_id,
             segs,
@@ -455,29 +428,54 @@ impl HistoryTier {
         if buf.len() < 8 + footer_len || &buf[0..4] != b"PHB1" {
             return true;
         }
-        if u32::from_le_bytes(buf[4..8].try_into().unwrap()) != 1 {
+        let mut cur = crate::codec::SafeCursor::new(buf);
+        let _magic = match cur.read_exact(4) {
+            Ok(m) => m,
+            Err(_) => return true,
+        };
+        let ver = match cur.read_u32_le() {
+            Ok(v) => v,
+            Err(_) => return true,
+        };
+        if ver != 1 {
             return true;
         }
-        let body_len = u64::from_le_bytes(
-            buf[buf.len() - footer_len..buf.len() - 4]
-                .try_into()
-                .unwrap(),
-        ) as usize;
-        if body_len + 8 + footer_len != buf.len() {
+        let footer_start = buf.len() - footer_len;
+        let mut footer_cur = crate::codec::SafeCursor::new(&buf[footer_start..]);
+        let body_len = match footer_cur.read_u64_le() {
+            Ok(l) => l as usize,
+            Err(_) => return true,
+        };
+        let crc = match footer_cur.read_u32_le() {
+            Ok(c) => c,
+            Err(_) => return true,
+        };
+        if body_len.saturating_add(8).saturating_add(footer_len) != buf.len() {
             return true;
         }
         let body = &buf[8..8 + body_len];
-        let crc = u32::from_le_bytes(buf[buf.len() - 4..].try_into().unwrap());
         if !crate::wal::crc::crc_match_ok(crc, crc32c(body)) {
             return true; // corrupt sidecar — never prune
         }
-        // Bloom blob is self-framed: nbits/k/nbytes then bits.
-        if body.len() < 12 {
-            return true;
-        }
-        let nbytes = u32::from_le_bytes(body[8..12].try_into().unwrap()) as usize;
-        let bloom_end = 12 + nbytes;
-        if bloom_end + 4 > body.len() {
+        let mut bcur = crate::codec::SafeCursor::new(body);
+        let _nbits = match bcur.read_u32_le() {
+            Ok(n) => n,
+            Err(_) => return true,
+        };
+        let _k = match bcur.read_u32_le() {
+            Ok(k) => k,
+            Err(_) => return true,
+        };
+        let nbytes = match bcur.read_u32_le() {
+            Ok(nb) => nb as usize,
+            Err(_) => return true,
+        };
+        let _bloom_bytes = match bcur.read_exact(nbytes) {
+            Ok(bb) => bb,
+            Err(_) => return true,
+        };
+        let bloom_end = 12usize.saturating_add(nbytes);
+        if bloom_end > body.len() {
             return true;
         }
         let bloom = match crate::bloom::BloomFilter::decode(&body[..bloom_end]) {
@@ -487,28 +485,19 @@ impl HistoryTier {
         if bloom.may_contain(key) {
             return true;
         }
-        let mut off = bloom_end;
-        let rd_count = u32::from_le_bytes(body[off..off + 4].try_into().unwrap()) as usize;
-        off += 4;
+        let rd_count = match bcur.read_u32_le() {
+            Ok(rc) => rc as usize,
+            Err(_) => return true,
+        };
         for _ in 0..rd_count {
-            if off + 4 > body.len() {
-                return true; // truncated interval list — fail open
-            }
-            let sl = u32::from_le_bytes(body[off..off + 4].try_into().unwrap()) as usize;
-            off += 4;
-            if off + sl + 4 > body.len() {
-                return true;
-            }
-            let start = &body[off..off + sl];
-            off += sl;
-            let el = u32::from_le_bytes(body[off..off + 4].try_into().unwrap()) as usize;
-            off += 4;
-            if off + el > body.len() {
-                return true;
-            }
-            let end = &body[off..off + el];
-            off += el;
-            // Range delete hides [start, end): affects keys in it.
+            let start = match bcur.read_length_prefixed_bytes(body.len()) {
+                Ok(s) => s,
+                Err(_) => return true,
+            };
+            let end = match bcur.read_length_prefixed_bytes(body.len()) {
+                Ok(e) => e,
+                Err(_) => return true,
+            };
             if key >= start && key < end {
                 return true;
             }
@@ -693,39 +682,24 @@ pub fn archive_kind_tag_as_is(kind: ValueType) -> u8 {
 pub fn walk_segment_records(bytes: &[u8]) -> Result<Vec<HistoryRecord>> {
     let bad = |why: &str| CoreError::CorruptHistory(format!("segment record {why}"));
     let mut out = Vec::new();
-    let mut off = 0usize;
-    while off < bytes.len() {
-        let start = off;
-        let rd_u32 = |off: &mut usize| -> Result<u32> {
-            if *off + 4 > bytes.len() {
-                return Err(bad("truncated header"));
-            }
-            let v = u32::from_le_bytes(bytes[*off..*off + 4].try_into().unwrap());
-            *off += 4;
-            Ok(v)
-        };
-        let klen = rd_u32(&mut off)? as usize;
-        if off + klen > bytes.len() {
-            return Err(bad("truncated key"));
-        }
-        let key = bytes[off..off + klen].to_vec();
-        off += klen;
-        let vlen = rd_u32(&mut off)? as usize;
-        if off + vlen > bytes.len() {
-            return Err(bad("truncated value"));
-        }
-        let val = bytes[off..off + vlen].to_vec();
-        off += vlen;
-        if off + 8 + 1 + 4 > bytes.len() {
-            return Err(bad("truncated tail"));
-        }
-        let seq = u64::from_le_bytes(bytes[off..off + 8].try_into().unwrap());
-        off += 8;
-        let kind = bytes[off];
-        off += 1;
-        let stored = u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
-        off += 4;
-        if !crate::wal::crc::crc_match_ok(crc32c(&bytes[start..off - 4]), stored) {
+    let mut cur = crate::codec::SafeCursor::new(bytes);
+    while !cur.is_eof() {
+        let start = cur.position();
+        let rem = cur.remaining();
+        let key = cur
+            .read_length_prefixed_bytes(rem)
+            .map_err(|_| bad("truncated key"))?
+            .to_vec();
+        let rem = cur.remaining();
+        let val = cur
+            .read_length_prefixed_bytes(rem)
+            .map_err(|_| bad("truncated value"))?
+            .to_vec();
+        let seq = cur.read_u64_le().map_err(|_| bad("truncated tail"))?;
+        let kind = cur.read_u8().map_err(|_| bad("truncated tail"))?;
+        let end_of_payload = cur.position();
+        let stored = cur.read_u32_le().map_err(|_| bad("truncated tail"))?;
+        if !crate::wal::crc::crc_match_ok(crc32c(&bytes[start..end_of_payload]), stored) {
             return Err(bad("crc mismatch"));
         }
         out.push(HistoryRecord {
@@ -757,19 +731,19 @@ pub fn verify_bloom_sidecar(bytes: &[u8]) -> Result<()> {
     if bytes.len() < 8 + FOOTER || &bytes[0..4] != b"PHB1" {
         return Err(bad());
     }
-    if u32::from_le_bytes(bytes[4..8].try_into().unwrap()) != 1 {
+    let mut head = crate::codec::SafeCursor::new(bytes);
+    let _ = head.read_exact(4).map_err(|_| bad())?;
+    let ver = head.read_u32_le().map_err(|_| bad())?;
+    if ver != 1 {
         return Err(bad());
     }
-    let body_len = u64::from_le_bytes(
-        bytes[bytes.len() - FOOTER..bytes.len() - 4]
-            .try_into()
-            .unwrap(),
-    ) as usize;
+    let mut footer = crate::codec::SafeCursor::new(&bytes[bytes.len() - FOOTER..]);
+    let body_len = footer.read_u64_le().map_err(|_| bad())? as usize;
+    let crc = footer.read_u32_le().map_err(|_| bad())?;
     if body_len.saturating_add(8).saturating_add(FOOTER) != bytes.len() {
         return Err(bad());
     }
     let body = &bytes[8..8 + body_len];
-    let crc = u32::from_le_bytes(bytes[bytes.len() - 4..].try_into().unwrap());
     if !crate::wal::crc::crc_match_ok(crc32c(body), crc) {
         return Err(CoreError::CorruptHistory(
             "bloom sidecar crc mismatch".into(),
