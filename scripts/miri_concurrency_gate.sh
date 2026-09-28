@@ -30,6 +30,9 @@ cargo +nightly miri test -q -p pedradb-core --test rfc0287_cinco_fronteiras_lsm
 cargo +nightly miri test -q -p pedradb-core --test rfc0288_cinco_fronteiras_nucleo_lsm
 cargo +nightly miri test -q -p pedradb-core --test rfc0289_cinco_fronteiras_avancadas_lsm
 cargo +nightly miri test -q -p pedradb-core --test rfc0290_cinco_fronteiras_estruturais_lsm
+cargo +nightly miri test -q -p pedradb-core --test rfc0291_dez_fronteiras_matematicas_lsm
+cargo +nightly miri test -q -p pedradb-core --test rfc0292_dez_fronteiras_matematicas_lsm
+cargo +nightly miri test -q -p pedradb-core --test rfc0294_dez_fronteiras_fundacionais_lsm
 
 echo "=========================================================="
 echo "   GATE miri_concurrency: GREEN (0 Data-Races, 0 UB)      "

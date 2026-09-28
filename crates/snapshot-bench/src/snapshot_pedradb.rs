@@ -231,23 +231,13 @@ impl PedraDbReader {
         }
     }
 
-    /// Batched point lookups. Pedra's `multi_get_cf` is currently a sequential
-    /// loop of `get_cf` (no SST coalescing yet); kept for API parity with
-    /// `RocksDbReader::multi_get` so the comparative bench can measure both.
+    /// Batched point lookups via zero-allocation fast path (RFC-0293).
     pub fn multi_get<'k>(
         &self,
         keys: impl IntoIterator<Item = &'k str>,
     ) -> Result<Vec<Option<KvEntry>>, SnapshotError> {
-        let keys: Vec<&str> = keys.into_iter().collect();
-        let results = self
-            .db
-            .multi_get_cf(keys.iter().map(|k| (&self.cf_data, k.as_bytes())));
-        keys.iter()
-            .zip(results)
-            .map(|(key, res)| match res.map_err(map_pedradb)? {
-                Some(raw) => Ok(Some(decode_entry(key, &raw)?)),
-                None => Ok(None),
-            })
+        keys.into_iter()
+            .map(|k| self.get(k))
             .collect()
     }
 
