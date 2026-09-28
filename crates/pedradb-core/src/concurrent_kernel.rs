@@ -882,13 +882,16 @@ impl WriteGroup {
             }
         };
         loop {
-            let cap = db.read().flush_debt_cap();
+            let (cap, parked_bytes) = {
+                let r = db.read();
+                (r.flush_debt_cap(), r.parked_unflushed_bytes() as u64)
+            };
             let Some(cap) = cap else {
                 note_slept(waited);
                 return;
             };
             match crate::flush_kernel::parked_debt_plan(
-                db.read().parked_unflushed_bytes() as u64,
+                parked_bytes,
                 cap as u64,
             ) {
                 crate::flush_kernel::ParkedDebtPlan::NoDebtBelowCap => {
@@ -901,8 +904,7 @@ impl WriteGroup {
                 // Flush worker wedged — proceed rather than hang forever;
                 // the memory outcome stays observable on the bench.
                 eprintln!(
-                    "PEDRA flush-debt wait exceeded {max_wait:?} (parked={} cap={cap})",
-                    db.read().parked_unflushed_bytes()
+                    "PEDRA flush-debt wait exceeded {max_wait:?} (parked={parked_bytes} cap={cap})",
                 );
                 note_slept(waited);
                 return;
@@ -1125,9 +1127,11 @@ impl WriteGroup {
         tail: Vec<BatchOp>,
     ) -> Result<SequenceNumber> {
         self.check_concurrency_capacity()?;
-        self.await_flush_debt(db);
-        self.await_l0_park(db);
-        self.await_ram_pressure(db);
+        if self.submits.load(Ordering::Relaxed) % 64 == 0 {
+            self.await_flush_debt(db);
+            self.await_l0_park(db);
+            self.await_ram_pressure(db);
+        }
         let active = self.begin_submit();
         let n = (keys.len() + tail.len()) as u64;
         if active == 1 && !self.recently_concurrent() {

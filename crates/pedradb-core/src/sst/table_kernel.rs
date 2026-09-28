@@ -3136,7 +3136,7 @@ fn write_sst_bulk_arrays_body(
         if crate::write_admission_kernel::batch_is_empty(
             staged.len().saturating_sub(block_start) as u64
         ) {
-            block_first_user = Some(Bytes::copy_from_slice(keys[i].as_ref()));
+            block_first_user = Some(keys[i].clone());
         }
         append_bulk_entry(&mut staged, k, seq, v);
     }
@@ -3156,8 +3156,8 @@ fn write_sst_bulk_arrays_body(
         file.write_all(&staged)?;
         staged.clear();
     }
-    let smallest_user_key = Some(Bytes::copy_from_slice(keys[0].as_ref()));
-    let largest_user_key = Some(Bytes::copy_from_slice(keys[n_entries - 1].as_ref()));
+    let smallest_user_key = Some(keys[0].clone());
+    let largest_user_key = Some(keys[n_entries - 1].clone());
     let data_len = pos - BULK_SST_HEADER_LEN as u64;
     let key_cp = SstTable::derive_index_accel(&mut index);
     let mut tail = Vec::with_capacity(index.len().saturating_mul(48).saturating_add(64));
@@ -3249,7 +3249,7 @@ fn finish_staged_block(
     index.push(BlockHandle {
         offset: *pos,
         length: stored,
-        first_user_key: Bytes::copy_from_slice(first_key.as_ref()),
+        first_user_key: first_key,
         p8: 0,
     });
     *pos += u64::from(stored);

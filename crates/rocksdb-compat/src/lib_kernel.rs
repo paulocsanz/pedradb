@@ -2848,12 +2848,90 @@ impl<E: PedraEnv> DB<E> {
         Ok(true)
     }
 
+    /// Consuming counterpart to [`Self::try_write_latched`] — moves values via
+    /// `std::mem::take` and drains tail ops with zero refcount clones.
+    fn try_write_latched_mut(&self, batch: &mut WriteBatch) -> Result<bool> {
+        let (family_arc, n) = {
+            let Some((Some(first_cf), BatchOp::Put { .. })) = batch.ops.first() else {
+                return Ok(false);
+            };
+            if !self.inner.family_is_latched_async(first_cf) {
+                return Ok(false);
+            }
+            let fam = Arc::clone(first_cf);
+            let mut count = 0usize;
+            for (cf, op) in &batch.ops {
+                match (cf.as_deref(), op) {
+                    (Some(cf), BatchOp::Put { .. }) if cf == fam.as_ref() => count += 1,
+                    _ => break,
+                }
+            }
+            (fam, count)
+        };
+        if pedradb_core::write_admission_kernel::batch_is_empty(n as u64) {
+            return Ok(false);
+        }
+        let family = family_arc.as_ref();
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+        }
+        KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            self.check_cf(family)?;
+            let mut pfx = Vec::with_capacity(16);
+            self.codec.fill_run_prefix(family, &mut pfx);
+            let mut keys = Vec::with_capacity(n);
+            let mut vals = Vec::with_capacity(n);
+            for (_, op) in batch.ops.iter_mut().take(n) {
+                if let BatchOp::Put { key, value } = op {
+                    keys.push(self.codec.encode_run(&pfx, key.as_ref(), &mut pool));
+                    vals.push(std::mem::take(value));
+                }
+            }
+            let mut tail = Vec::with_capacity(batch.ops.len().saturating_sub(n));
+            let mut last_ok: Option<Arc<str>> = None;
+            let mut pfx2 = Vec::with_capacity(16);
+            for (cf, op) in batch.ops.drain(n..) {
+                let name_arc = cf.unwrap_or_else(|| Arc::clone(&DEFAULT_CF_ARC));
+                if last_ok.as_ref() != Some(&name_arc) {
+                    self.check_cf(&name_arc)?;
+                    self.codec.fill_run_prefix(&name_arc, &mut pfx2);
+                    last_ok = Some(Arc::clone(&name_arc));
+                }
+                tail.push(match op {
+                    BatchOp::Put { key, value } => BatchOp::Put {
+                        key: self.codec.encode_run(&pfx2, key.as_ref(), &mut pool),
+                        value,
+                    },
+                    BatchOp::Delete { key } => BatchOp::Delete {
+                        key: self.codec.encode_run(&pfx2, key.as_ref(), &mut pool),
+                    },
+                    BatchOp::DeleteRange { start, end } => BatchOp::DeleteRange {
+                        start: self.codec.encode_run(&pfx2, start.as_ref(), &mut pool),
+                        end: self.codec.encode_run(&pfx2, end.as_ref(), &mut pool),
+                    },
+                });
+            }
+            let res = self.inner
+                .apply_latched_bulk(family, keys, vals, tail)
+                .map(|_| ())
+                .map_err(Error::from);
+            self.notify_compact();
+            res
+        })?;
+        Ok(true)
+    }
+
     /// Consume a [`WriteBatch`] so values move into the WAL encode (RFC-0041:
     /// `write(&batch)` cloned every 1 KiB payload; apply/raftlog is 16–64 ops).
     ///
     /// # Errors
     /// Unknown CF or WAL I/O.
-    pub fn write_owned(&self, batch: WriteBatch) -> Result<()> {
+    pub fn write_owned(&self, mut batch: WriteBatch) -> Result<()> {
+        if self.try_write_latched_mut(&mut batch)? {
+            return Ok(());
+        }
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
                 std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
@@ -4189,6 +4267,15 @@ impl<E: PedraEnv> DB<E> {
         let prev = self.inner.default_write_sync();
         self.inner.set_default_write_sync(wo.sync);
         let r = self.write(batch);
+        self.inner.set_default_write_sync(prev);
+        r
+    }
+
+    /// rust-rocksdb `write_opt_owned` — consumes `batch` to avoid cloning `Bytes`.
+    pub fn write_opt_owned(&self, batch: WriteBatch, wo: &WriteOptions) -> Result<()> {
+        let prev = self.inner.default_write_sync();
+        self.inner.set_default_write_sync(wo.sync);
+        let r = self.write_owned(batch);
         self.inner.set_default_write_sync(prev);
         r
     }
