@@ -242,6 +242,66 @@ pub mod group_commit_fair_share_kernel;
 pub mod readahead_consumption_feedback_kernel;
 /// RFC-0290: Transactional Overlay Read View and Read-Your-Own-Writes Kernel.
 pub mod transactional_overlay_read_view_kernel;
+/// RFC-0291: Lyapunov Write Stall Asymptotic Stability Kernel.
+pub mod lyapunov_write_stall_kernel;
+/// RFC-0291: Prefix Seek Homomorphism and Strict Monotonicity Kernel.
+pub mod prefix_seek_homomorphism_kernel;
+/// RFC-0291: Long-Lived Snapshot Non-Interference and Hazard Pointer Kernel.
+pub mod snapshot_gc_hazard_pointer_kernel;
+/// RFC-0291: Manifest VersionEdit Delta Monoidal Collapse Kernel.
+pub mod manifest_delta_collapse_kernel;
+/// RFC-0291: Disaggregated vLog Blob GC Two-Phase Safe Purge Kernel.
+pub mod vlog_blob_gc_refinement_kernel;
+/// RFC-0291: Non-Commutative Merge Operator Semiring and Absorption Kernel.
+pub mod merge_operator_semiring_kernel;
+/// RFC-0291: Network Calculus and Quota Conservation Rate Limiter Kernel.
+pub mod io_rate_limiter_conservation_kernel;
+/// RFC-0291: NVMe Multi-Queue Poset Reorder and FUA Barrier Kernel.
+pub mod nvme_queue_poset_reorder_kernel;
+/// RFC-0291: Two-Stage Compression Dictionary Integrity Kernel.
+pub mod two_stage_compression_dictionary_kernel;
+/// RFC-0291: Fault Isolation Refinement for Physical Bit-Rot Scrubbing Kernel.
+pub mod fault_isolation_bitrot_kernel;
+/// RFC-0292: Topological Quotient Key-Space Homomorphism Kernel.
+pub mod key_space_quotient_kernel;
+/// RFC-0292: Stochastic Foster-Lyapunov Heavy-Tailed Stall Kernel.
+pub mod foster_lyapunov_stochastic_stall_kernel;
+/// RFC-0292: Trans-Crash Causal Bisimulation Kernel.
+pub mod trans_crash_bisimulation_kernel;
+/// RFC-0292: Range Delete and Merge Operator Semiring Kernel.
+pub mod range_delete_merge_semiring_kernel;
+/// RFC-0292: Bounded Extent Dispersal VFS Kernel.
+pub mod extent_dispersal_vfs_kernel;
+/// RFC-0292: Atomic Generation Quiescence MemTable Kernel.
+pub mod atomic_generation_quiescence_kernel;
+/// RFC-0292: Release-Acquire Trans-Thread Cache Coherence Kernel.
+pub mod release_acquire_cache_coherence_kernel;
+/// RFC-0292: SST Metadata Measure Monoid Kernel.
+pub mod sst_metadata_measure_monoid_kernel;
+/// RFC-0292: Petri Net Background Worker Liveness Kernel.
+pub mod petri_net_background_liveness_kernel;
+/// RFC-0292: FTL Anti-Amnesia Flash Translation Token Kernel.
+pub mod ftl_anti_amnesia_token_kernel;
+/// RFC-0294: Delta Restart Monotonicity and Prefix Invertibility Kernel.
+pub mod delta_restart_monotonicity_kernel;
+/// RFC-0294: Leveled Tombstone Vacuum Paradox and Active Draining Kernel.
+pub mod tombstone_vacuum_cascade_kernel;
+/// RFC-0294: Stable Snapshot Visibility under Concurrent Compaction Kernel.
+pub mod snapshot_compaction_stability_kernel;
+/// RFC-0294: Order-Preserving Prefix-Free Composite Key Framing Kernel.
+pub mod composite_key_framing_kernel;
+/// RFC-0294: Generational Arena Tagging and ABA Immunity Kernel.
+pub mod arena_generational_aba_kernel;
+/// RFC-0294: Multi-Level Compaction Spectral Decoupling and Damping Kernel.
+pub mod compaction_spectral_decoupling_kernel;
+/// RFC-0294: Hot-Backup Inode Coherence Closure and Hard-Link Consistency Kernel.
+pub mod hot_backup_inode_closure_kernel;
+/// RFC-0294: Hysteretic Block Cache Partitioning and Anti-Thrashing Kernel.
+pub mod block_cache_hysteretic_partition_kernel;
+/// RFC-0294: Column Family Epochal Isolation in Shared WAL Kernel.
+pub mod column_family_epoch_wal_kernel;
+/// RFC-0294: Preemptible Atomic I/O Lease and Pre-Syscall Guard Kernel.
+pub mod preemptible_io_lease_kernel;
 pub mod product_crown_kernel;
 pub mod rmw_sched_kernel;
 pub mod wal_buffer_kernel;
