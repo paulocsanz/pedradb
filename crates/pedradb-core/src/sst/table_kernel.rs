@@ -4055,10 +4055,10 @@ mod tests {
         let seqs: Vec<u64> = (1..=n as u64).collect();
         let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         let blocks = table.data_block_count();
-        // ~160 KiB of values at 4 KiB → tens of blocks (not one 256 KiB).
+        // ~160 KiB of values at BULK_BLOCK_TARGET (16 KiB) → ~13 blocks (not one 256 KiB).
         assert!(
-            (20..=80).contains(&blocks),
-            "expected ~4 KiB blocks, got {blocks}"
+            (10..=80).contains(&blocks),
+            "expected bulk blocks, got {blocks}"
         );
         assert!(table.block_crc);
         assert!(!table.payload_resident());

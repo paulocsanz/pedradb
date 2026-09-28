@@ -124,6 +124,18 @@ echo ">>> [STAGE 25] Cinco Fronteiras Estruturais Finais do LSM (RFC-0290)"
 cargo test -q -p pedradb-core --test rfc0290_cinco_fronteiras_estruturais_lsm
 
 echo ""
+echo ">>> [STAGE 26] Dez Fronteiras Matemáticas Avançadas do LSM (RFC-0291)"
+cargo test -q -p pedradb-core --test rfc0291_dez_fronteiras_matematicas_lsm
+
+echo ""
+echo ">>> [STAGE 27] Dez Fronteiras Matemáticas, Físicas e Estruturais do LSM (RFC-0292)"
+cargo test -q -p pedradb-core --test rfc0292_dez_fronteiras_matematicas_lsm
+
+echo ""
+echo ">>> [STAGE 28] Dez Fronteiras Fundacionais de Verificação do LSM (RFC-0294)"
+cargo test -q -p pedradb-core --test rfc0294_dez_fronteiras_fundacionais_lsm
+
+echo ""
 echo "================================================================="
 echo "  CONTINUOUS VERIFICATION CHAIN: 100% UNIFIED & SOUND (ALL GREEN) "
 echo "================================================================="

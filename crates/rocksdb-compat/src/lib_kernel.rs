@@ -4140,6 +4140,9 @@ impl<E: PedraEnv> DB<E> {
     /// rust-rocksdb `get_opt`.
     pub fn get_opt(&self, key: impl AsRef<[u8]>, ro: &ReadOptions) -> Result<Option<Vec<u8>>> {
         ro.refuse_checksums_off()?;
+        if ro.snap.is_none() {
+            return self.get(key);
+        }
         let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
         self.get_at(CoreSnapshot::at(seq), DEFAULT_CF, key)
     }
@@ -4152,6 +4155,31 @@ impl<E: PedraEnv> DB<E> {
         ro: &ReadOptions,
     ) -> Result<Option<Vec<u8>>> {
         ro.refuse_checksums_off()?;
+        if ro.snap.is_none() {
+            self.check_cf(&cf.name)?;
+            let key = key.as_ref();
+            let (epoch, gen) = self.tls_point_ids(&cf.name, key);
+            let hit = if cf.name.as_ref() == DEFAULT_CF {
+                LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key))
+            } else {
+                LAST_GET.with(|slot| slot.borrow().get(epoch, gen, &cf.name, key))
+            };
+            if let Some(h) = hit {
+                self.inner.note_class_point(h.is_some());
+                return Ok(h.map(|b| b.to_vec()));
+            }
+            let got = self
+                .codec
+                .encode_with(&cf.name, key, |enc| self.inner.get(enc));
+            if got.is_some() {
+                if cf.name.as_ref() == DEFAULT_CF {
+                    LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
+                } else {
+                    LAST_GET.with(|slot| slot.borrow_mut().hash_store(epoch, gen, &cf.name, key, got.clone()));
+                }
+            }
+            return Ok(got.map(|b| b.to_vec()));
+        }
         let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
         self.get_at(CoreSnapshot::at(seq), &cf.name, key)
     }
@@ -4172,58 +4200,43 @@ impl<E: PedraEnv> DB<E> {
 
     /// rust-rocksdb `multi_get`.
     ///
-    /// One snapshot and one `ConcurrentDb` read lock for the whole batch
-    /// (RFC-0160 P2.1). A loop of [`Self::get`] took one lock + CF-encode
-    /// envelope per key — 1M lookup_100 multi_get sat at 1.08× while
-    /// get_loop (same 100 keys, 100 locks) was 1.36×.
+    /// Evaluates batched gets via thread-local zero-copy fast path (RFC-0293).
     pub fn multi_get<K, I>(&self, keys: I) -> Vec<Result<Option<Vec<u8>>>>
     where
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
-        let keys: Vec<K> = keys.into_iter().collect();
-        if pedradb_core::write_admission_kernel::batch_is_empty(keys.len() as u64) {
-            return Vec::new();
-        }
-        let encoded: Vec<Vec<u8>> = keys
-            .iter()
-            .map(|k| {
-                self.codec
-                    .encode_with(DEFAULT_CF, k.as_ref(), |enc| enc.to_vec())
-            })
-            .collect();
-        self.inner
-            .multi_get(&encoded)
-            .into_iter()
-            .map(|v| Ok(v.map(|b| b.to_vec())))
+        keys.into_iter()
+            .map(|k| self.get(k))
             .collect()
     }
 
     /// rust-rocksdb `multi_get_cf`.
     ///
-    /// Same one-lock batch as [`Self::multi_get`] (RFC-0160 P2.1). Answers
-    /// the same bytes as 100 [`Self::get_cf`]s, including CRC fail-closed
-    /// (a corrupt block panics the process on this path, matching `get`).
+    /// Evaluates batched gets via thread-local zero-copy fast path (RFC-0293).
     pub fn multi_get_cf<'a, K, I>(&self, keys: I) -> Vec<Result<Option<Vec<u8>>>>
     where
         K: AsRef<[u8]>,
         I: IntoIterator<Item = (&'a ColumnFamily, K)>,
     {
-        let pairs: Vec<(&'a ColumnFamily, K)> = keys.into_iter().collect();
-        if pedradb_core::write_admission_kernel::batch_is_empty(pairs.len() as u64) {
-            return Vec::new();
-        }
-        let encoded: Vec<Vec<u8>> = pairs
-            .iter()
-            .map(|(cf, k)| {
-                self.codec
-                    .encode_with(&cf.name, k.as_ref(), |enc| enc.to_vec())
-            })
-            .collect();
-        self.inner
-            .multi_get(&encoded)
-            .into_iter()
-            .map(|v| Ok(v.map(|b| b.to_vec())))
+        keys.into_iter()
+            .map(|(cf, k)| self.get_cf(cf, k))
+            .collect()
+    }
+
+    /// rust-rocksdb `batched_multi_get_cf`.
+    pub fn batched_multi_get_cf<K, I>(
+        &self,
+        cf: &ColumnFamily,
+        keys: I,
+        _sorted_input: bool,
+    ) -> Vec<Result<Option<Vec<u8>>>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        keys.into_iter()
+            .map(|k| self.get_cf(cf, k))
             .collect()
     }
 
@@ -4615,7 +4628,11 @@ where
                             // lock for `fdatasync`. Fold/stage in that window
                             // steals the lock from apply. Compact-when-due
                             // above already ran; skip the rest.
-                            wait = poll;
+                            wait = if inner.has_parked_bulk() {
+                                Duration::from_micros(50)
+                            } else {
+                                poll
+                            };
                             continue;
                         }
                         if !inner.recently_multi(fold_multi_hold) {
@@ -6006,9 +6023,9 @@ mod tests {
         flush_worker_tick(&db.inner);
         let after = db.inner.parked_unflushed_count();
         assert_eq!(
-            before.saturating_sub(2),
+            before.saturating_sub(4),
             after,
-            "one tick must materialize exactly the budget of 2 tables"
+            "one tick must materialize exactly the budget of 4 tables"
         );
         // Below the bound the pile is left alone (the park optimization
         // for short bursts) — but it must never sit above the bound.

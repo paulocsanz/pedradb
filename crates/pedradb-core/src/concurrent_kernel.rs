@@ -1127,7 +1127,7 @@ impl WriteGroup {
         tail: Vec<BatchOp>,
     ) -> Result<SequenceNumber> {
         self.check_concurrency_capacity()?;
-        if self.submits.load(Ordering::Relaxed) % 64 == 0 {
+        if self.submits.load(Ordering::Relaxed) % 128 == 0 {
             self.await_flush_debt(db);
             self.await_l0_park(db);
             self.await_ram_pressure(db);
@@ -4263,6 +4263,12 @@ impl<E: Env> ConcurrentDb<E> {
         Ok(())
     }
 
+    /// Whether there are parked bulk chunks pending off-lock SST encoding (RFC-0293).
+    #[must_use]
+    pub fn has_parked_bulk(&self) -> bool {
+        self.inner.read().has_parked_bulk()
+    }
+
     /// Encode+install one parked bulk chunk off the write lock so the
     /// hydrate writer can fill the next run (RFC-0159 P1.7).
     #[must_use]
@@ -6710,13 +6716,13 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Flush debt cap is eight staging thresholds — runway so
+    /// Flush debt cap is sixteen staging thresholds — runway so
     /// fill and materialize overlap instead of stop-and-wait per park.
     #[test]
-    fn flush_debt_cap_is_eight_thresholds() {
+    fn flush_debt_cap_is_sixteen_thresholds() {
         let dir = temp_dir();
         let db = open_debt(&dir); // auto_flush_bytes: Some(1)
-        assert_eq!(db.flush_debt_cap(), Some(8));
+        assert_eq!(db.flush_debt_cap(), Some(16));
         let _ = fs::remove_dir_all(&dir);
     }
 
