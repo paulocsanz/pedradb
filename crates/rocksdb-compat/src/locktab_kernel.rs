@@ -136,7 +136,7 @@ pub(crate) fn wait_for_deadlock(
         }
         owner = next;
     }
-    true
+    false
 }
 
 /// AS-IS: miss the cycle (wait forever / grant overlapping locks).
@@ -245,6 +245,158 @@ mod tests {
         assert!(
             !wait_for_deadlock_as_is(&owned, &waiting, 1, 2),
             "AS-IS tooth: miss the 3-cycle"
+        );
+    }
+
+    /// Regression test for Bug 1: external innocent waiter T3 waiting on T1
+    /// must not be flagged as deadlocked when T1 and T2 are in a separate cycle (T1 <-> T2).
+    #[test]
+    fn external_innocent_waiter_does_not_deadlock() {
+        let mut owned = HashMap::new();
+        let mut waiting = HashMap::new();
+        // T1 owns "a", T2 owns "b"
+        owned.insert(Bytes::from_static(b"a"), 1);
+        owned.insert(Bytes::from_static(b"b"), 2);
+        // T1 waits for "b" (owned by T2)
+        // T2 waits for "a" (owned by T1) -> Cycle between T1 and T2!
+        waiting.insert(1, Bytes::from_static(b"b"));
+        waiting.insert(2, Bytes::from_static(b"a"));
+
+        // T3 wants to lock "a" (owned by T1). T3 is an external innocent waiter.
+        assert!(
+            !wait_for_deadlock(&owned, &waiting, 3, 1),
+            "T3 is NOT in the cycle T1<->T2; must NOT be falsely marked deadlocked!"
+        );
+    }
+
+    /// Mathematical Property-Based Test (Barreira 4):
+    /// Verifies that for 10,000 arbitrary pseudo-random directed graph topologies,
+    /// `wait_for_deadlock` matches the formal reachability definition:
+    /// `wait_for_deadlock(waiter, owner) <=> waiter in Reachable(owner)`.
+    #[test]
+    fn proptest_wait_for_deadlock_exact_reachability() {
+        // Simple deterministic xorshift PRNG for reproducible property-based testing
+        struct Lcg(u64);
+        impl Lcg {
+            fn next_u64(&mut self) -> u64 {
+                self.0 ^= self.0 << 13;
+                self.0 ^= self.0 >> 7;
+                self.0 ^= self.0 << 17;
+                self.0
+            }
+            fn gen_range(&mut self, low: usize, high: usize) -> usize {
+                if low >= high { return low; }
+                low + (self.next_u64() as usize % (high - low))
+            }
+        }
+
+        let mut rng = Lcg(0xDEAD_BEEF_CAFE_BABE);
+
+        // Reference oracle: independent Breadth-First-Search reachability
+        fn oracle_reachability(
+            owned: &HashMap<Bytes, u64>,
+            waiting: &HashMap<u64, Bytes>,
+            start: u64,
+            target: u64,
+        ) -> bool {
+            let mut visited = HashSet::new();
+            let mut curr = start;
+            while visited.insert(curr) {
+                if let Some(key) = waiting.get(&curr) {
+                    if let Some(&next_tx) = owned.get(key) {
+                        if next_tx == target {
+                            return true;
+                        }
+                        curr = next_tx;
+                        continue;
+                    }
+                }
+                break;
+            }
+            false
+        }
+
+        // Buggy mutant from the original code (Barreira 4 / Anti-vacuity check)
+        fn buggy_mutant_false_deadlock(
+            owned: &HashMap<Bytes, u64>,
+            waiting: &HashMap<u64, Bytes>,
+            waiter: u64,
+            mut owner: u64,
+        ) -> bool {
+            let mut seen = HashSet::new();
+            while seen.insert(owner) {
+                let Some(k) = waiting.get(&owner) else { return false; };
+                let Some(&next) = owned.get(k) else { return false; };
+                if next == waiter { return true; }
+                owner = next;
+            }
+            true // The bug: returns true on ANY cycle, even if waiter is not in it
+        }
+
+        let mut killed_false_deadlock_mutant = 0usize;
+        let mut killed_as_is_mutant = 0usize;
+        let mut positive_deadlocks_found = 0usize;
+
+        for _iteration in 0..10_000 {
+            let num_txs = rng.gen_range(2, 25);
+            let num_keys = rng.gen_range(2, 25);
+
+            let mut owned: HashMap<Bytes, u64> = HashMap::new();
+            let mut waiting: HashMap<u64, Bytes> = HashMap::new();
+
+            for k in 0..num_keys {
+                if rng.next_u64() % 3 != 0 {
+                    let owner_tx = (rng.gen_range(0, num_txs) + 1) as u64;
+                    owned.insert(Bytes::from(format!("key_{k}")), owner_tx);
+                }
+            }
+
+            for t in 1..=num_txs {
+                let tx_id = t as u64;
+                if rng.next_u64() % 2 == 0 {
+                    let waited_key = Bytes::from(format!("key_{}", rng.gen_range(0, num_keys)));
+                    waiting.insert(tx_id, waited_key);
+                }
+            }
+
+            let waiter = (rng.gen_range(0, num_txs) + 1) as u64;
+            let owner = (rng.gen_range(0, num_txs) + 1) as u64;
+
+            let expected = oracle_reachability(&owned, &waiting, owner, waiter);
+            let actual = wait_for_deadlock(&owned, &waiting, waiter, owner);
+
+            assert_eq!(
+                actual, expected,
+                "Invariant violation: wait_for_deadlock failed graph reachability contract! waiter={waiter}, owner={owner}"
+            );
+
+            if actual {
+                positive_deadlocks_found += 1;
+            }
+
+            // Anti-vacuity: verify that mutant implementations are caught
+            let mutant_bug = buggy_mutant_false_deadlock(&owned, &waiting, waiter, owner);
+            if mutant_bug != expected {
+                killed_false_deadlock_mutant += 1;
+            }
+
+            let mutant_as_is = wait_for_deadlock_as_is(&owned, &waiting, waiter, owner);
+            if mutant_as_is != expected {
+                killed_as_is_mutant += 1;
+            }
+        }
+
+        assert!(
+            positive_deadlocks_found > 0,
+            "Property test must generate at least some actual deadlocks to be sound!"
+        );
+        assert!(
+            killed_false_deadlock_mutant > 0,
+            "Anti-vacuity check failed: false-deadlock mutant was never killed!"
+        );
+        assert!(
+            killed_as_is_mutant > 0,
+            "Anti-vacuity check failed: as-is mutant was never killed!"
         );
     }
 }
