@@ -477,7 +477,7 @@ impl<E: Env> Deref for TransactionDB<E> {
 pub struct Transaction<'a, E: Env = IoUringEnv> {
     occ: Mutex<OccTransaction<E>>,
     /// Version-GC pin held from begin to drop (F186) — see [`Self::new`].
-    pin: pedradb_core::SnapshotPin,
+    pin: Mutex<Option<pedradb_core::SnapshotPin>>,
     codec: KeyCodec,
     db: &'a DB<E>,
     /// `Some` = pessimistic 2PL ([`TransactionDB`]). `None` = OCC.
@@ -501,7 +501,9 @@ impl<E: Env> Drop for Transaction<'_, E> {
             let held = std::mem::take(&mut *p.held.lock());
             p.table.unlock_all(&held, p.id);
         }
-        self.db.inner.release_snapshot_pin(self.pin);
+        if let Some(pin) = self.pin.lock().take() {
+            self.db.inner.release_snapshot_pin(pin);
+        }
     }
 }
 
@@ -514,7 +516,7 @@ impl<'a, E: Env> Transaction<'a, E> {
         let pin = db.inner.pin_snapshot();
         Self {
             occ: Mutex::new(db.inner.begin_occ()),
-            pin,
+            pin: Mutex::new(Some(pin)),
             codec: db.codec.clone(),
             db,
             pess: None,
@@ -532,7 +534,7 @@ impl<'a, E: Env> Transaction<'a, E> {
         let id = table.alloc_id();
         Self {
             occ: Mutex::new(db.inner.begin_occ()),
-            pin,
+            pin: Mutex::new(Some(pin)),
             codec: db.codec.clone(),
             db,
             pess: Some(Pess {
@@ -826,6 +828,9 @@ impl<'a, E: Env> Transaction<'a, E> {
         if let Some(p) = &self.pess {
             let held = std::mem::take(&mut *p.held.lock());
             p.table.unlock_all(&held, p.id);
+        }
+        if let Some(pin) = self.pin.lock().take() {
+            self.db.inner.release_snapshot_pin(pin);
         }
         Ok(())
     }

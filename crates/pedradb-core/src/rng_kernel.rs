@@ -3,8 +3,6 @@
 //! Production: [`SystemRng`] (process-local xorshift seeded from time+counter).
 //! Tests / sim: [`SeedRng`] — fully deterministic from a `u64` seed (replayable).
 
-use std::cell::Cell;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -53,12 +51,14 @@ impl Rng for SystemRng {
     }
 }
 
+use std::sync::Arc;
+
 /// Deterministic RNG: same seed ⇒ same stream (DST / election tests).
 ///
-/// Clones share the same `Cell` state so consumers of a shared host advance one stream.
+/// Clones share the same atomic state so consumers of a shared host advance one stream.
 #[derive(Debug, Clone)]
 pub struct SeedRng {
-    state: Rc<Cell<u64>>,
+    state: Arc<AtomicU64>,
 }
 
 impl SeedRng {
@@ -72,14 +72,14 @@ impl SeedRng {
     #[must_use]
     pub fn new(seed: u64) -> Self {
         Self {
-            state: Rc::new(Cell::new(mix_seed(seed))),
+            state: Arc::new(AtomicU64::new(mix_seed(seed))),
         }
     }
 
     /// Current internal state (for debugging / logging only).
     #[must_use]
     pub fn state(&self) -> u64 {
-        self.state.get()
+        self.state.load(Ordering::Relaxed)
     }
 }
 
@@ -99,12 +99,17 @@ pub fn mix_seed(seed: u64) -> u64 {
 
 impl Rng for SeedRng {
     fn next_u64(&self) -> u64 {
-        let mut s = self.state.get();
-        s ^= s >> 12;
-        s ^= s << 25;
-        s ^= s >> 27;
-        self.state.set(s);
-        s.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        let mut s = self.state.load(Ordering::Relaxed);
+        loop {
+            let mut next = s;
+            next ^= next >> 12;
+            next ^= next << 25;
+            next ^= next >> 27;
+            match self.state.compare_exchange_weak(s, next, Ordering::Relaxed, Ordering::Relaxed) {
+                Ok(_) => return next.wrapping_mul(0x2545_F491_4F6C_DD1D),
+                Err(actual) => s = actual,
+            }
+        }
     }
 }
 
