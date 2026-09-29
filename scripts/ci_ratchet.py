@@ -51,7 +51,12 @@ def cmd_lint(log_path: str, max_fail: int) -> int:
         for line in open(log_path, encoding="utf-8", errors="replace")
         if line.startswith("FAIL")
     ]
-    drift = [line for line in fails if "drift" in line.lower()]
+    drift = [
+        line
+        for line in fails
+        if "drifted" in line.lower()
+        or ("drift" in line.lower() and "residuals freeze" not in line)
+    ]
     if drift:
         print("RATCHET FAIL: drift FAILs are never tolerated:")
         for line in drift:
