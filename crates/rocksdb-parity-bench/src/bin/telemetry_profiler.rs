@@ -9,13 +9,14 @@
 
 use std::fs::{self, File, OpenOptions as FsOpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use pedradb_core::write_admission_kernel::write_pacing_delay_micros;
 use pedradb_core::{
-    ConcurrentDb, ContentionTracker, TransactionRetryPolicy, WriteOptions,
+    ConcurrentDb, ContentionTracker, OpenOptions, TransactionRetryPolicy, WriteOptions,
 };
 
 #[derive(Clone, Debug)]
@@ -93,7 +94,8 @@ fn main() {
     // -------------------------------------------------------------------------
     {
         let db_dir = temp_db_dir("sync");
-        let db = ConcurrentDb::open(&db_dir).expect("open db");
+        let opts = OpenOptions::default();
+        let db = ConcurrentDb::open_with(&db_dir, opts).expect("open db");
         let sync_write_opts = WriteOptions {
             sync: Some(true),
         };
@@ -143,7 +145,8 @@ fn main() {
     // -------------------------------------------------------------------------
     {
         let db_dir = temp_db_dir("async");
-        let db = ConcurrentDb::open(&db_dir).expect("open db");
+        let opts = OpenOptions::default();
+        let db = ConcurrentDb::open_with(&db_dir, opts).expect("open db");
         let async_write_opts = WriteOptions {
             sync: Some(false),
         };
@@ -193,7 +196,8 @@ fn main() {
     // -------------------------------------------------------------------------
     {
         let db_dir = temp_db_dir("zipfian");
-        let db = ConcurrentDb::open(&db_dir).expect("open db");
+        let opts = OpenOptions::default();
+        let db = ConcurrentDb::open_with(&db_dir, opts).expect("open db");
 
         // Seed hot keys
         let num_hot_keys = 5;
@@ -294,7 +298,8 @@ fn main() {
     // -------------------------------------------------------------------------
     {
         let db_dir = temp_db_dir("ycsb_b");
-        let db = ConcurrentDb::open(&db_dir).expect("open db");
+        let opts = OpenOptions::default();
+        let db = ConcurrentDb::open_with(&db_dir, opts).expect("open db");
 
         // Pre-load 5,000 keys
         let seed_count = 5_000;

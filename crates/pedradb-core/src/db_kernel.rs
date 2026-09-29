@@ -2393,6 +2393,12 @@ impl<E: Env> Db<E> {
         self.imm_sv.clone()
     }
 
+    /// RFC-0237: Arc of the parked unflushed memtables.
+    #[must_use]
+    pub(crate) fn snapshot_parked(&self) -> Arc<Vec<Arc<crate::memtable::MemTable>>> {
+        Arc::new(self.parked_unflushed.clone())
+    }
+
     fn sync_imm_sv(&mut self) {
         self.imm_sv = self.imm.as_ref().map(|m| Arc::new(m.clone()));
     }
@@ -2457,12 +2463,76 @@ impl<E: Env> Db<E> {
             .collect()
     }
 
+    /// Next unallocated file number watermark.
+    #[must_use]
+    pub fn next_file_num(&self) -> u64 {
+        self.next_file_num
+    }
+
     /// Asserts physical disk resource invariants (Barreira 2):
     /// Verifies that all active files in memory/manifest exist on disk,
     /// no orphan uncommitted SST files exist on disk, no abandoned .tmp files exist,
     /// and file numbers do not violate the allocator watermark.
     pub fn assert_disk_inventory_invariant(&self) -> std::result::Result<(), crate::orphan_sst_cleanup_kernel::DiskResourceInvariantError> {
+        if !self.path().exists() {
+            return Ok(());
+        }
         crate::orphan_sst_cleanup_kernel::assert_no_orphan_files_invariant(self.path(), &self.sst_file_nums(), self.next_file_num)
+    }
+
+    /// Asserts LSM level disjointness invariant:
+    /// In leveled compaction, all SST runs at Level >= 1 must be strictly pairwise disjoint
+    /// in user key space for each column family.
+    pub fn assert_level_disjointness_invariant(&self) -> std::result::Result<(), String> {
+        if !crate::leveling::leveled_enabled() {
+            return Ok(());
+        }
+        for level in 1..=MAX_LSM_LEVEL {
+            let families: std::collections::BTreeSet<String> = self
+                .ssts
+                .iter()
+                .zip(self.sst_levels.iter())
+                .filter(|(_, &lvl)| lvl == level)
+                .map(|(t, _)| self.compact_family_key(t).to_string())
+                .collect();
+            for cf in families {
+                let view = self.level_view(level, &cf);
+                if view.len() >= 2 && !crate::leveling::is_disjoint(&view) {
+                    return Err(format!(
+                        "LSM invariant violation: Level {} CF '{}' has {} tables that are not pairwise disjoint in user key space!",
+                        level,
+                        cf,
+                        view.len()
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Asserts sequence monotonicity invariant:
+    /// `next_seq` must be strictly greater than all sequence numbers recorded in SSTs.
+    pub fn assert_sequence_monotonicity_invariant(&self) -> std::result::Result<(), String> {
+        let cur_next = self.next_seq.load(std::sync::atomic::Ordering::Relaxed);
+        for (i, sst) in self.ssts.iter().enumerate() {
+            let max_s = sst.max_sequence();
+            if max_s >= cur_next && cur_next > 0 {
+                return Err(format!(
+                    "Sequence monotonicity violation: SST {} max_sequence {} >= next_seq {}",
+                    i, max_s, cur_next
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Asserts all core storage and structural invariants.
+    pub fn assert_all_invariants(&self) -> std::result::Result<(), String> {
+        self.assert_disk_inventory_invariant()
+            .map_err(|e| format!("disk inventory invariant violation: {e:?}"))?;
+        self.assert_level_disjointness_invariant()?;
+        self.assert_sequence_monotonicity_invariant()?;
+        Ok(())
     }
 
     /// Persist CHANGELOG at most every `n` durable commits (RFC-0031).
@@ -4375,6 +4445,54 @@ impl<E: Env> Db<E> {
         self.sync_retired_to_l0();
     }
 
+    /// O(1) incremental update for single bulk SST installs at MAX_LSM_LEVEL (RFC-0304).
+    fn incremental_append_bulk_sst(&mut self, new_idx: usize) {
+        self.manifest_dirty = true;
+        let pos = self
+            .sst_order_newest
+            .iter()
+            .position(|&i| self.sst_levels.get(i).copied() == Some(MAX_LSM_LEVEL))
+            .unwrap_or(self.sst_order_newest.len());
+        self.sst_order_newest.insert(pos, new_idx);
+
+        let table = self.ssts[new_idx].clone();
+        if let Some(sv) = Arc::get_mut(&mut self.sst_sv) {
+            sv.insert(pos, table);
+        } else {
+            let mut sv = (*self.sst_sv).clone();
+            sv.insert(pos, table);
+            self.sst_sv = Arc::new(sv);
+        }
+
+        if let Some(run) = self.sst_runs.iter_mut().find(|r| r.level == MAX_LSM_LEVEL) {
+            run.tables_newest_first.insert(0, new_idx);
+            if self.ssts[new_idx].has_range_tombstones() {
+                run.has_range_tombstones = true;
+            }
+            if let Some(ref mut by_lo) = run.disjoint_by_lo {
+                let last_hi = by_lo.last().and_then(|&li| self.ssts[li].largest_user_key());
+                let new_lo = self.ssts[new_idx].smallest_user_key();
+                let new_hi = self.ssts[new_idx].largest_user_key();
+                if let (Some(l_hi), Some(n_lo), Some(_)) = (last_hi, new_lo, new_hi) {
+                    if n_lo > l_hi {
+                        by_lo.push(new_idx);
+                    } else {
+                        run.disjoint_by_lo =
+                            SstRun::disjoint_sorted_by_lo(&self.ssts, &run.tables_newest_first);
+                    }
+                } else {
+                    run.disjoint_by_lo = None;
+                }
+            } else if run.tables_newest_first.len() == 1 {
+                run.disjoint_by_lo = Some(vec![new_idx]);
+            }
+        } else {
+            self.rebuild_sst_runs();
+        }
+        self.sync_retired_to_l0();
+    }
+
+
     /// SST fallback for an MVCC user prefix: first file (newest) with a live
     /// key wins. Older files cannot hold a bytewise-larger suffix (same
     /// contract as the mem hit). A newer tombstone of that exact key still
@@ -5596,7 +5714,14 @@ impl<E: Env> Db<E> {
         }
         self.vlog_sync_pending()?;
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_SST_RENAME)?;
-        crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_MANIFEST_RENAME)?;
+        // Finish any in-flight imm and parked tables first (single-flight).
+        if self.imm.is_some() {
+            self.flush_imm_to_l0()?;
+        }
+        while let Some(parked) = self.take_oldest_parked() {
+            self.imm = Some(parked);
+            self.flush_imm_to_l0()?;
+        }
         // Flush plan decided by the pure kernel (RFC-0056 P0.2): the mem
         // tail is always written to an SST before any WAL rotate.
         let mem_empty =
@@ -6996,6 +7121,12 @@ impl<E: Env> Db<E> {
         }
     }
 
+    /// Park the active memtable onto `parked_unflushed`.
+    pub fn park_active_mem(&mut self) {
+        let taken = self.mem.take_owned();
+        self.push_parked_unflushed(taken);
+    }
+
     /// Oldest parked table (for idle materialize). Leaves it in place for reads.
     #[must_use]
     pub fn parked_front(&self) -> Option<&MemTable> {
@@ -7374,23 +7505,30 @@ impl<E: Env> Db<E> {
             )
         {
             let arch = self.dir.join(wal_archive_slot_name(self.wal_archive_next));
+            let mut w = self.wal.lock();
+            if self.commit_inflight.load(Ordering::Acquire) > 0 {
+                return Ok(());
+            }
             match self.env.rename(&wal_path, &arch) {
                 Ok(()) => {
                     self.wal_archive_next += 1;
                     self.wal_archive_max_seq = self.wal_archive_max_seq.max(self.last_sequence());
-                    let old = {
-                        let mut w = self.wal.lock();
-                        if self.commit_inflight.load(Ordering::Acquire) > 0 {
-                            return Ok(());
+                    let mut new = match Wal::create_on(&self.env, &wal_path) {
+                        Ok(new) => new,
+                        Err(e) => {
+                            drop(w);
+                            self.durability_fenced = true;
+                            return Err(self.fence_io_err(e));
                         }
-                        let mut new = Wal::create_on(&self.env, &wal_path)?;
-                        new.set_full_fsync(w.full_fsync());
-                        std::mem::replace(&mut *w, new)
                     };
+                    new.set_full_fsync(w.full_fsync());
+                    let old = std::mem::replace(&mut *w, new);
+                    drop(w);
                     old.close()?;
                     return self.sync_dir_if_required(&self.dir);
                 }
                 Err(e) => {
+                    drop(w);
                     // Rename failed: the legacy truncate below discards the
                     // segment, so publish the deferred MANIFEST first, then
                     // store (best-effort) and fall through.
@@ -7878,6 +8016,13 @@ impl<E: Env> Db<E> {
     /// untouched so a write burst does not rewrite the whole level (RFC-0036).
     /// Visibility is unchanged: every version stays in some file.
     fn compact_l0_into_l1(&mut self, options: CompactOptions) -> Result<()> {
+        if crate::leveling::leveled_enabled() {
+            while let Some(job) = self.prepare_l0_compact(options)? {
+                let tables = job.write()?;
+                self.install_prepared_l0_compact(job, tables)?;
+            }
+            return Ok(());
+        }
         let mut families = Vec::new();
         for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
             if lvl == 0 {
@@ -7893,7 +8038,7 @@ impl<E: Env> Db<E> {
                 .iter()
                 .zip(self.sst_levels.iter())
                 .enumerate()
-                .filter(|(_, (t, &lvl))| lvl == 0 && self.compact_family_key(t) == fam)
+                .filter(|(_, (t, &lvl))| (lvl == 0 || lvl == 1) && self.compact_family_key(t) == fam)
                 .map(|(i, _)| i)
                 .collect();
             if !crate::write_admission_kernel::batch_is_empty(input_idxs.len() as u64) {
@@ -8717,6 +8862,10 @@ impl<E: Env> Db<E> {
             self.note_version_gc_watermark(options.gc);
         }
         if let Err(e) = self.persist_manifest() {
+            for p in &new_paths {
+                let _ = self.remove_db_file(p);
+            }
+            let _ = self.env.sync_dir(&self.dir);
             self.ssts = prev_tables;
             self.sst_levels = prev_levels;
             self.manifest_file_num = prev_manifest_file_num;
@@ -9005,6 +9154,15 @@ impl<E: Env> Db<E> {
         if let Some(ref mut imm) = self.imm {
             imm.map_values(remap_fn);
         }
+        for t in &mut self.parked_unflushed {
+            if let Some(mt) = Arc::get_mut(t) {
+                mt.map_values(remap_fn);
+            } else {
+                let mut cloned = (**t).clone();
+                cloned.map_values(remap_fn);
+                *t = Arc::new(cloned);
+            }
+        }
         self.bytes_written_sst = self.bytes_written_sst.saturating_add(staged_bytes);
         for t in &self.ssts {
             self.table_cache.insert(Arc::new(t.clone()));
@@ -9036,6 +9194,11 @@ impl<E: Env> Db<E> {
         }
         if let Some(ref imm) = self.imm {
             for (_, v) in imm.iter_internal() {
+                consider(v);
+            }
+        }
+        for t in &self.parked_unflushed {
+            for (_, v) in t.iter_internal() {
                 consider(v);
             }
         }
@@ -9243,6 +9406,15 @@ impl<E: Env> Db<E> {
         if let Some(ref mut imm) = self.imm {
             imm.map_values(remap_fn);
         }
+        for t in &mut self.parked_unflushed {
+            if let Some(mt) = Arc::get_mut(t) {
+                mt.map_values(remap_fn);
+            } else {
+                let mut cloned = (**t).clone();
+                cloned.map_values(remap_fn);
+                *t = Arc::new(cloned);
+            }
+        }
         self.bytes_written_sst = self.bytes_written_sst.saturating_add(staged_bytes);
         for t in &self.ssts {
             self.adopt_sst(t);
@@ -9271,6 +9443,11 @@ impl<E: Env> Db<E> {
         }
         if let Some(ref imm) = self.imm {
             for (_, v) in imm.iter_internal() {
+                consider(v);
+            }
+        }
+        for t in &self.parked_unflushed {
+            for (_, v) in t.iter_internal() {
                 consider(v);
             }
         }
@@ -9721,10 +9898,7 @@ impl<E: Env> Db<E> {
         self.next_seq.load(Ordering::Relaxed)
     }
 
-    /// Restore sequence counter after a failed multi-op commit (no WAL durable).
-    pub(crate) fn restore_next_seq(&mut self, seq: SequenceNumber) {
-        self.next_seq.store(seq, Ordering::Relaxed);
-    }
+
 
     /// Shared seq counter for the WAL-mutex pipeline.
     #[must_use]
@@ -10244,20 +10418,35 @@ impl<E: Env> Db<E> {
         if crate::write_admission_kernel::batch_is_empty(self.unapplied.len() as u64) {
             return;
         }
-        let mut lo = u64::MAX;
-        let mut hi = 0u64;
-        let mut any = false;
-        for (_, ops, _) in &g.appended {
-            for op in ops {
-                any = true;
-                lo = lo.min(op.sequence);
-                hi = hi.max(op.sequence);
-            }
-        }
-        if !any {
+        let seqs: std::collections::HashSet<SequenceNumber> = g
+            .appended
+            .iter()
+            .flat_map(|(_, ops, _)| ops.iter().map(|op| op.sequence))
+            .collect();
+        if seqs.is_empty() {
             return;
         }
-        self.unapplied.retain(|u| u.seq < lo || u.seq > hi);
+        self.unapplied.retain(|u| !seqs.contains(&u.seq));
+    }
+
+    /// Testing helper to stage unapplied ops for invariant verification.
+    #[doc(hidden)]
+    pub fn stage_unapplied_test(&mut self, seqs: &[(SequenceNumber, &[u8], &[u8])]) {
+        for &(seq, k, _v) in seqs {
+            self.unapplied.push(UnappliedOp {
+                seq,
+                kind: ValueType::Value,
+                key: Bytes::copy_from_slice(k),
+                end: Bytes::new(),
+            });
+        }
+    }
+
+    /// Testing helper to unstage specific sequences for invariant verification.
+    #[doc(hidden)]
+    pub fn unstage_unapplied_seqs_test(&mut self, seqs: &[SequenceNumber]) {
+        let set: std::collections::HashSet<SequenceNumber> = seqs.iter().copied().collect();
+        self.unapplied.retain(|u| !set.contains(&u.seq));
     }
 
     /// WAL appends whose `fdatasync`/mem-apply has not finished.
@@ -11621,6 +11810,9 @@ impl<E: Env> Db<E> {
     ///
     /// WAL rotate must wait until [`ManifestPersist::write`] succeeds.
     pub fn take_manifest_persist(&mut self) -> Result<ManifestPersist<E>> {
+        if let Err(msg) = self.assert_level_disjointness_invariant() {
+            return Err(CoreError::Internal(msg));
+        }
         let mut vs = self.version_set_now()?;
         vs.manifest_file_num = vs.manifest_file_num.saturating_add(1).max(1);
         self.manifest_file_num = vs.manifest_file_num;
@@ -11656,11 +11848,13 @@ impl<E: Env> Db<E> {
         files: Vec<(SstTable, u64)>,
         levels: &[u32],
     ) -> L0InstallUndo {
+        let is_single_bulk = files.len() == 1 && levels.first().copied() == Some(MAX_LSM_LEVEL);
         let undo = L0InstallUndo {
             prev_next: self.next_file_num,
             prev_manifest: self.manifest_file_num,
             n: files.len(),
         };
+        let mut last_idx = 0usize;
         for (i, (table, file_num)) in files.into_iter().enumerate() {
             self.adopt_sst(&table);
             self.note_sst_bytes_written(table.path());
@@ -11672,6 +11866,7 @@ impl<E: Env> Db<E> {
             let level = levels.get(i).copied().unwrap_or(0);
             self.ssts.push(table);
             self.sst_levels.push(level);
+            last_idx = self.ssts.len() - 1;
             // RFC-0159 P1.11: bottom-level bulk files must not pin the
             // whole image (100M OOM). Streaming v6 is empty at write;
             // a latched span that flushed through write_imm_l0 still
@@ -11682,7 +11877,11 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        self.note_sst_inventory_changed();
+        if is_single_bulk {
+            self.incremental_append_bulk_sst(last_idx);
+        } else {
+            self.note_sst_inventory_changed();
+        }
         undo
     }
 

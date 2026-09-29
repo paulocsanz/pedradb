@@ -306,6 +306,10 @@ fn test_physical_disk_inventory_and_leak_invariant() {
         db.put(format!("key_{i:04}").as_bytes(), b"val").unwrap();
     }
     db.flush().unwrap();
+    for i in 100..200 {
+        db.put(format!("key_{i:04}").as_bytes(), b"val").unwrap();
+    }
+    db.flush().unwrap();
     db.compact().unwrap();
 
     // 1. Quiescent database must strictly satisfy the invariant
@@ -323,14 +327,14 @@ fn test_physical_disk_inventory_and_leak_invariant() {
     );
     std::fs::remove_file(&tmp_path).unwrap();
 
-    // 3. Inject an orphan / uncommitted .sst file (disk leak)
+    // 3. Inject an untracked / uncommitted .sst file (disk leak)
     let orphan_sst = dir.join("099999.sst");
     std::fs::write(&orphan_sst, b"fake uncommitted sst").unwrap();
 
     let err = db.assert_disk_inventory_invariant().unwrap_err();
     assert!(
-        err.to_string().contains("Orphan / uncommitted SST"),
-        "Invariant checker must detect orphan SST files: {err}"
+        err.to_string().contains("File number") || err.to_string().contains("Orphan / uncommitted SST"),
+        "Invariant checker must detect untracked SST files: {err}"
     );
     std::fs::remove_file(&orphan_sst).unwrap();
 

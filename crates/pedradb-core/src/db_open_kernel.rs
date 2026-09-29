@@ -162,7 +162,10 @@ impl<E: Env> Db<E> {
         // causes silent data loss for unflushed CFs whose sequences are below another CF's SST floor.
         let mut cf_manifest_floors: std::collections::BTreeMap<String, SequenceNumber> = std::collections::BTreeMap::new();
         for table in &ssts {
-            let cf = if table.cf().is_empty() { "default".to_string() } else { table.cf().to_string() };
+            let cf = match table.cf() {
+                "" => "default".to_string(),
+                other => other.to_string(),
+            };
             let cur = cf_manifest_floors.entry(cf).or_insert(0);
             *cur = (*cur).max(table.max_sequence());
         }

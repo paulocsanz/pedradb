@@ -40,10 +40,10 @@ impl TestRng {
     }
 }
 
-/// Reference Oracle maintaining the ground-truth multi-CF key-value state.
 #[derive(Debug, Default, Clone)]
 struct CfModelStore {
     cfs: BTreeMap<String, BTreeMap<Vec<u8>, Vec<u8>>>,
+    history: BTreeMap<(String, Vec<u8>), Vec<String>>,
 }
 
 impl CfModelStore {
@@ -53,10 +53,17 @@ impl CfModelStore {
         for &name in cf_names {
             cfs.insert(name.to_string(), BTreeMap::new());
         }
-        Self { cfs }
+        Self {
+            cfs,
+            history: BTreeMap::new(),
+        }
     }
 
-    fn put(&mut self, cf: &str, key: &[u8], val: &[u8]) {
+    fn put(&mut self, step: usize, cf: &str, key: &[u8], val: &[u8]) {
+        self.history
+            .entry((cf.to_string(), key.to_vec()))
+            .or_default()
+            .push(format!("step {step}: PUT val={}", String::from_utf8_lossy(val)));
         self.cfs
             .entry(cf.to_string())
             .or_default()
@@ -67,25 +74,37 @@ impl CfModelStore {
         self.cfs.get(cf).and_then(|m| m.get(key).cloned())
     }
 
-    fn delete(&mut self, cf: &str, key: &[u8]) {
+    fn delete(&mut self, step: usize, cf: &str, key: &[u8]) {
+        self.history
+            .entry((cf.to_string(), key.to_vec()))
+            .or_default()
+            .push(format!("step {step}: DELETE"));
         if let Some(m) = self.cfs.get_mut(cf) {
             m.remove(key);
         }
     }
 
-    fn delete_range(&mut self, cf: &str, start: &[u8], end: &[u8]) {
+    fn delete_range(&mut self, step: usize, cf: &str, start: &[u8], end: &[u8]) {
         if let Some(m) = self.cfs.get_mut(cf) {
             let to_remove: Vec<Vec<u8>> = m
                 .range(start.to_vec()..end.to_vec())
                 .map(|(k, _)| k.clone())
                 .collect();
             for k in to_remove {
+                self.history
+                    .entry((cf.to_string(), k.clone()))
+                    .or_default()
+                    .push(format!("step {step}: DELETE_RANGE [{}, {})", String::from_utf8_lossy(start), String::from_utf8_lossy(end)));
                 m.remove(&k);
             }
         }
     }
 
-    fn merge(&mut self, cf: &str, key: &[u8], operand: &[u8]) {
+    fn merge(&mut self, step: usize, cf: &str, key: &[u8], operand: &[u8]) {
+        self.history
+            .entry((cf.to_string(), key.to_vec()))
+            .or_default()
+            .push(format!("step {step}: MERGE operand={:?}", operand));
         let m = self.cfs.entry(cf.to_string()).or_default();
         let entry = m.entry(key.to_vec()).or_default();
         entry.extend_from_slice(operand);
@@ -179,7 +198,7 @@ fn differential_oracle_randomized_workload() {
                 let key = &key_pool[k_idx];
                 let val = format!("val_step_{step}_{}", rng.next_u64()).into_bytes();
 
-                model.put(cf, key, &val);
+                model.put(step, cf, key, &val);
                 if let Some(ref h) = cf_handle {
                     db.put_cf(h, key, &val).unwrap();
                 } else {
@@ -191,7 +210,7 @@ fn differential_oracle_randomized_workload() {
                 let k_idx = rng.gen_range(0, key_pool.len());
                 let key = &key_pool[k_idx];
 
-                model.delete(cf, key);
+                model.delete(step, cf, key);
                 if let Some(ref h) = cf_handle {
                     db.delete_cf(h, key).unwrap();
                 } else {
@@ -206,7 +225,7 @@ fn differential_oracle_randomized_workload() {
                 let start = &key_pool[lo];
                 let end = &key_pool[hi];
 
-                model.delete_range(cf, start, end);
+                model.delete_range(step, cf, start, end);
                 if let Some(ref h) = cf_handle {
                     db.delete_range_cf(h, start, end).unwrap();
                 } else {
@@ -220,12 +239,25 @@ fn differential_oracle_randomized_workload() {
                 let key = &key_pool[k_idx];
                 let operand = b"+op";
 
-                model.merge(cf, key, operand);
+                model.merge(step, cf, key, operand);
                 if let Some(ref h) = cf_handle {
                     db.merge_cf(h, key, operand).unwrap();
                 } else {
                     db.merge(key, operand).unwrap();
                 }
+                let post_expected = model.get(cf, key);
+                let post_actual = if let Some(ref h) = cf_handle {
+                    db.get_cf(h, key).unwrap()
+                } else {
+                    db.get(key).unwrap()
+                };
+                if post_actual != post_expected {
+                    eprintln!("=== MISMATCH IMMEDIATELY AFTER MERGE step={step} cf={cf} key={} actual={:?} expected={:?} ===", String::from_utf8_lossy(key), post_actual.as_ref().map(|x| String::from_utf8_lossy(x)), post_expected.as_ref().map(|x| String::from_utf8_lossy(x)));
+                    if let Some(hist) = model.history.get(&(cf.to_string(), key.to_vec())) {
+                        eprintln!("  KEY HISTORY: {:#?}", hist);
+                    }
+                }
+                assert_eq!(post_actual, post_expected, "Mismatch immediately after merge! step={step}");
             }
             6 => {
                 // Point Get check
@@ -239,6 +271,12 @@ fn differential_oracle_randomized_workload() {
                     db.get(key).unwrap()
                 };
 
+                if actual != expected {
+                    eprintln!("=== GET MISMATCH step={step} cf={cf} key={} actual={:?} expected={:?} ===", String::from_utf8_lossy(key), actual.as_ref().map(|x| String::from_utf8_lossy(x)), expected.as_ref().map(|x| String::from_utf8_lossy(x)));
+                    if let Some(hist) = model.history.get(&(cf.to_string(), key.to_vec())) {
+                        eprintln!("  KEY HISTORY: {:#?}", hist);
+                    }
+                }
                 assert_eq!(
                     actual, expected,
                     "Differential mismatch on get! step={step}, cf={cf}, key={:?}",
@@ -296,6 +334,27 @@ fn differential_oracle_randomized_workload() {
                         actual.push((iter.key().to_vec(), iter.value().to_vec()));
                         iter.next();
                     }
+                    if actual != expected {
+                        eprintln!("=== MISMATCH FORWARD ITERATOR step={step} cf={cf} ===");
+                        for (k, v) in &actual {
+                            let exp_v = model.get(cf, k);
+                            if exp_v.as_ref() != Some(v) {
+                                eprintln!("KEY DIFF: {} actual={:?} expected={:?}", String::from_utf8_lossy(k), String::from_utf8_lossy(v), exp_v.as_ref().map(|x| String::from_utf8_lossy(x)));
+                                if let Some(hist) = model.history.get(&(cf.to_string(), k.clone())) {
+                                    eprintln!("  HISTORY: {:#?}", hist);
+                                }
+                            }
+                        }
+                        for (k, exp_v) in &expected {
+                            let act_v = actual.iter().find(|(ak, _)| ak == k).map(|(_, v)| v);
+                            if act_v != Some(exp_v) {
+                                eprintln!("MISSING/DIFF KEY: {} actual={:?} expected={:?}", String::from_utf8_lossy(k), act_v.map(|x| String::from_utf8_lossy(x)), String::from_utf8_lossy(exp_v));
+                                if let Some(hist) = model.history.get(&(cf.to_string(), k.clone())) {
+                                    eprintln!("  HISTORY: {:#?}", hist);
+                                }
+                            }
+                        }
+                    }
                     assert_eq!(
                         actual, expected,
                         "Differential mismatch on forward iterator! step={step}, cf={cf}"
@@ -312,6 +371,27 @@ fn differential_oracle_randomized_workload() {
                     while iter.valid() {
                         actual.push((iter.key().to_vec(), iter.value().to_vec()));
                         iter.next();
+                    }
+                    if actual != expected {
+                        eprintln!("=== MISMATCH REVERSE ITERATOR step={step} cf={cf} ===");
+                        for (k, v) in &actual {
+                            let exp_v = model.get(cf, k);
+                            if exp_v.as_ref() != Some(v) {
+                                eprintln!("KEY DIFF: {} actual={:?} expected={:?}", String::from_utf8_lossy(k), String::from_utf8_lossy(v), exp_v.as_ref().map(|x| String::from_utf8_lossy(x)));
+                                if let Some(hist) = model.history.get(&(cf.to_string(), k.clone())) {
+                                    eprintln!("  HISTORY: {:#?}", hist);
+                                }
+                            }
+                        }
+                        for (k, exp_v) in &expected {
+                            let act_v = actual.iter().find(|(ak, _)| ak == k).map(|(_, v)| v);
+                            if act_v != Some(exp_v) {
+                                eprintln!("MISSING/DIFF KEY: {} actual={:?} expected={:?}", String::from_utf8_lossy(k), act_v.map(|x| String::from_utf8_lossy(x)), String::from_utf8_lossy(exp_v));
+                                if let Some(hist) = model.history.get(&(cf.to_string(), k.clone())) {
+                                    eprintln!("  HISTORY: {:#?}", hist);
+                                }
+                            }
+                        }
                     }
                     assert_eq!(
                         actual, expected,

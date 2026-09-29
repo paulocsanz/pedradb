@@ -404,10 +404,18 @@ impl SstPayloadPool {
     }
 }
 
+const BLOCK_CACHE_SHARDS: usize = 16;
+
 /// Block cache for decompressed SST blocks (keyed by absolute path + block index).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BlockCache {
-    inner: Mutex<BlockCacheInner>,
+    shards: Box<[Mutex<BlockCacheInner>]>,
+}
+
+impl Default for BlockCache {
+    fn default() -> Self {
+        Self::new(0)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -425,12 +433,7 @@ struct BlockCacheInner {
     map: HashMap<(u64, usize), CachedSlot>,
     /// Recency queue, least-recent-first: `(key, epoch)` in push order. A
     /// hit re-pushes with a fresh epoch (lazy LRU); the entry's earlier
-    /// queue slots become ghosts that eviction skips and drains. This
-    /// replaces the old `min_by_key(tick)` full-map scan, which made every
-    /// insert O(capacity) once the cache filled — on a byte-budgeted
-    /// 256 MiB cache (~65k blocks) each post-fill point get paid the whole
-    /// scan (~500 µs; slipstream fold, guest v9f). Hit and evict are now
-    /// both O(1) amortized.
+    /// queue slots become ghosts that eviction skips and drains.
     order: VecDeque<((u64, usize), u64)>,
     /// Monotonic push epoch (ghost matching).
     epoch: u64,
@@ -443,6 +446,21 @@ struct BlockCacheInner {
     misses: u64,
 }
 
+impl BlockCacheInner {
+    fn new(capacity: usize, budget_bytes: u64) -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+            epoch: 0,
+            capacity,
+            budget_bytes,
+            used_bytes: 0,
+            hits: 0,
+            misses: 0,
+        }
+    }
+}
+
 fn block_payload_bytes(block: &[(InternalKey, Bytes)]) -> u64 {
     block.iter().fold(0u64, |acc, (k, v)| {
         acc.saturating_add((k.user_key.len() + v.len() + 16) as u64)
@@ -453,18 +471,21 @@ impl BlockCache {
     /// Create with max cached blocks (`0` = unlimited entry count).
     #[must_use]
     pub fn new(capacity: usize) -> Self {
-        Self {
-            inner: Mutex::new(BlockCacheInner {
-                map: HashMap::new(),
-                order: VecDeque::new(),
-                epoch: 0,
-                capacity,
-                budget_bytes: 0,
-                used_bytes: 0,
-                hits: 0,
-                misses: 0,
-            }),
-        }
+        let (num_shards, cap) = if capacity == 0 {
+            (BLOCK_CACHE_SHARDS, 0)
+        } else if capacity < BLOCK_CACHE_SHARDS {
+            (1, capacity)
+        } else {
+            (
+                BLOCK_CACHE_SHARDS,
+                (capacity + BLOCK_CACHE_SHARDS - 1) / BLOCK_CACHE_SHARDS,
+            )
+        };
+        let shards = (0..num_shards)
+            .map(|_| Mutex::new(BlockCacheInner::new(cap, 0)))
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Self { shards }
     }
 
     /// Rocks-shaped LRU: cap by payload bytes, no entry cap (RFC-0153).
@@ -473,49 +494,64 @@ impl BlockCache {
     /// does not get the unlimited convention of [`Self::new(0)`].
     #[must_use]
     pub fn with_budget_bytes(bytes: u64) -> Self {
-        Self {
-            inner: Mutex::new(BlockCacheInner {
-                map: HashMap::new(),
-                order: VecDeque::new(),
-                epoch: 0,
-                capacity: 0,
-                budget_bytes: bytes.max(1),
-                used_bytes: 0,
-                hits: 0,
-                misses: 0,
-            }),
+        let (num_shards, b) = if bytes == 0 {
+            (1, 1)
+        } else if bytes < (BLOCK_CACHE_SHARDS as u64) * 1024 {
+            (1, bytes)
+        } else {
+            (
+                BLOCK_CACHE_SHARDS,
+                (bytes + BLOCK_CACHE_SHARDS as u64 - 1) / (BLOCK_CACHE_SHARDS as u64),
+            )
+        };
+        let shards = (0..num_shards)
+            .map(|_| Mutex::new(BlockCacheInner::new(0, b)))
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Self { shards }
+    }
+
+    #[inline]
+    fn shard_idx(&self, id: u64, block_idx: usize) -> usize {
+        if self.shards.len() == 1 {
+            0
+        } else {
+            let h = id.wrapping_mul(FX_SEED) ^ (block_idx as u64);
+            (h as usize) & (self.shards.len() - 1)
         }
     }
 
     /// Hit count.
     #[must_use]
     pub fn hits(&self) -> u64 {
-        self.inner.lock().hits
+        self.shards.iter().map(|s| s.lock().hits).sum()
     }
 
     /// Miss count.
     #[must_use]
     pub fn misses(&self) -> u64 {
-        self.inner.lock().misses
+        self.shards.iter().map(|s| s.lock().misses).sum()
     }
 
     /// Occupancy in bytes (Rocks `block-cache-usage`).
     #[must_use]
     pub fn used_bytes(&self) -> u64 {
-        self.inner.lock().used_bytes
+        self.shards.iter().map(|s| s.lock().used_bytes).sum()
     }
 
     /// Configured byte budget (`0` = no byte cap).
     #[must_use]
     pub fn budget_bytes(&self) -> u64 {
-        self.inner.lock().budget_bytes
+        self.shards.iter().map(|s| s.lock().budget_bytes).sum()
     }
 
     /// Reset hit/miss counters.
     pub fn reset_stats(&self) {
-        let mut g = self.inner.lock();
-        g.hits = 0;
-        g.misses = 0;
+        for s in &self.shards {
+            let mut g = s.lock();
+            g.hits = 0;
+            g.misses = 0;
+        }
     }
 
     /// Lookup or insert via `load` on miss.
@@ -535,8 +571,9 @@ impl BlockCache {
         F: FnOnce() -> Vec<(InternalKey, Bytes)>,
     {
         let key = (id, block_idx);
+        let shard = &self.shards[self.shard_idx(id, block_idx)];
         {
-            let mut guard = self.inner.lock();
+            let mut guard = shard.lock();
             let g = &mut *guard;
             let live = g.map.len();
             if let Some(slot) = g.map.get_mut(&key) {
@@ -546,7 +583,7 @@ impl BlockCache {
             }
         }
         let block = Arc::new(load());
-        let mut guard = self.inner.lock();
+        let mut guard = shard.lock();
         let g = &mut *guard;
         let live = g.map.len();
         if let Some(slot) = g.map.get_mut(&key) {
@@ -619,11 +656,13 @@ impl BlockCache {
 
     /// Clear all blocks.
     pub fn clear(&self) {
-        let mut g = self.inner.lock();
-        g.map.clear();
-        g.order.clear();
-        g.epoch = 0;
-        g.used_bytes = 0;
+        for s in &self.shards {
+            let mut g = s.lock();
+            g.map.clear();
+            g.order.clear();
+            g.epoch = 0;
+            g.used_bytes = 0;
+        }
     }
 }
 

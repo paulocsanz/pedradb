@@ -125,15 +125,14 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
             self.db
                 .observe_bulk_staged(key, matches!(stage, Stage::Put(_)));
         }
-        // Sequence checkpoint: if WAL append fails mid-commit, restore so we do
-        // not burn sequence numbers for a non-durable TX (denser fail accounting).
-        let seq_checkpoint = self.db.next_seq_peek();
+        // RFC-0303: Sequence burn contract. Sequences are strictly monotonic.
+        // If staging fails, allocated sequences are burned; sequence numbers
+        // never roll back.
         let mut records = Vec::with_capacity(staging.len());
         for (key, stage) in staging {
             let seq = match self.db.alloc_seq() {
                 Ok(s) => s,
                 Err(e) => {
-                    self.db.restore_next_seq(seq_checkpoint);
                     // Staging was taken — leave finished so Drop does not double-free.
                     self.finished = true;
                     return Err(e);
@@ -150,7 +149,6 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
                     let stored = match self.db.maybe_spill_large_value(value) {
                         Ok(v) => v,
                         Err(e) => {
-                            self.db.restore_next_seq(seq_checkpoint);
                             self.finished = true;
                             return Err(e);
                         }
@@ -169,7 +167,10 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
                 Ok(last_seq)
             }
             Err(e) => {
-                self.db.restore_next_seq(seq_checkpoint);
+                // Never roll back next_seq after records reached commit_ops_with:
+                // partial WAL writes or durability fencing mean sequence numbers
+                // may already be in the WAL file or burned; rolling back creates
+                // sequence collisions or violates monotonicity upon replay.
                 self.finished = true;
                 Err(e)
             }

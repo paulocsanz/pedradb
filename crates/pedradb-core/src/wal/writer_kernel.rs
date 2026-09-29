@@ -522,7 +522,6 @@ impl<W: EnvFile> WalWriter<W> {
                 let staged_len = st.buf.len() as u64;
                 let staged_max = st.max;
                 let n = buf.len() as u64;
-                drop(st);
                 self.note_sink_write(n);
                 if crate::wal_buffer_kernel::should_flush(staged_len, staged_max) {
                     return self.drain_staged();

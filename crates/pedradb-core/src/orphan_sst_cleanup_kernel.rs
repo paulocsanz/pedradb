@@ -166,18 +166,18 @@ pub fn assert_no_orphan_files_invariant(
         }
     }
 
-    // 4. Verify that NO orphan SST exists on disk
+    // 4. Verify that NO file violates allocator watermark, and NO orphan SST exists on disk
     for (num, path) in &disk_ssts {
-        if !manifest_set.contains(num) {
-            return Err(DiskResourceInvariantError::OrphanSstFile {
-                file_number: *num,
-                path: path.clone(),
-            });
-        }
         if *num >= next_file_num {
             return Err(DiskResourceInvariantError::WatermarkViolation {
                 file_number: *num,
                 next_file_number: next_file_num,
+            });
+        }
+        if !manifest_set.contains(num) {
+            return Err(DiskResourceInvariantError::OrphanSstFile {
+                file_number: *num,
+                path: path.clone(),
             });
         }
     }
