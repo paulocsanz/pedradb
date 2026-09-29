@@ -1,0 +1,12 @@
+[package]
+name = "rocksdb-compat-alias-smoke"
+description = "Consumer that depends on `rocksdb` and gets rocksdb-compat (alias swap proof)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+# The swap: consumer code says `rocksdb::…` but the crate is Pedra underneath.
+rocksdb = { package = "rocksdb-compat", path = "../rocksdb-compat" }

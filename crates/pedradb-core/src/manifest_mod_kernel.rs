@@ -536,12 +536,17 @@ pub fn gc_orphan_ssts<E: Env>(env: &E, dir: &Path, live: &[u64]) -> Result<()> {
     if !env.exists(dir) {
         return Ok(());
     }
+    let mut removed_any = false;
     for name in env.read_dir_names(dir)? {
         if let Some(n) = parse_sst_name(&name) {
             if !live.contains(&n) {
                 let _ = env.remove_file(&dir.join(name));
+                removed_any = true;
             }
         }
+    }
+    if removed_any {
+        let _ = env.sync_dir(dir);
     }
     Ok(())
 }

@@ -14,13 +14,63 @@ In production, virtually nobody runs RocksDB with `sync = true` per single-write
 
 PedraDB enforces the registered product decision:
 - **The Only Benchmark That Counts**: Async Pedra vs RocksDB **default** (`sync = false`).
-- **Durability Asymmetry**: Pedra performs `fdatasync` before returning `Ok`. That is the product: strictly higher durability *and* competitive speed.
-- **The Single-Client Wall**: Single-client write-per-op shapes are physically below 1.0x by construction (one full hardware barrier per op vs RocksDB's zero barriers). Group commit only closes the gap under concurrency (e.g. `apply_mc4` 2.788x).
+- **Durability Asymmetry**: Pedra performs `fdatasync` before returning `Ok` (G1 default). That is the product: strictly higher durability *and* competitive speed.
+- **The Single-Client Wall**: Single-client write-per-op shapes are physically below 1.0x by construction (one full hardware barrier per op vs RocksDB's zero barriers). Group commit closes and inverts the gap under concurrency (e.g. `apply_mc4` 2.788x).
 - **The Rule**: Never quote single-client sync-vs-async as a win; never hide it; and never use `sync: true` peer data to claim victory. Automated gates exit with code 2 if a peer JSON has `sync: true`.
 
 ---
 
-## Case Study 2: The "100% Verificado" Fallacy & The Axiom Ratchet
+## Case Study 2: The Complexity Paradox & Synchronization Glue (RFC-0304)
+
+### The Fallacy
+Believing that because pure mathematical kernels (monotonic WAL sequence, key ordering, LSM levels) are formally proven in Lean 4 and Kani, the engine is free from concurrency races.
+
+### The Reality
+In real database engines, bugs almost never reside in the pure algebra of the tree. They lurk in the **synchronization glue** (`concurrent_kernel.rs`) that orchestrates off-lock I/O, SuperVersion publishing, and thread-local read caches:
+1. **The Dropped Lock Gap**: A compaction job executed off-lock and took the write lock to install newly generated SSTs, but dropped the lock *before* invoking `publish_from(&g)` to update the live SuperVersion. Concurrent readers continued querying stale SST manifests or read from unlinked files.
+2. **Lone Write Path Missing Publish**: Fast-path write pipelines (`submit_latched_bulk`) omitted `publish_apply`, causing concurrent reads on other threads to lag behind committed writes.
+3. **The Defense**: Routing all transitions through atomic SuperVersion publishing under strict lock fences, verified via continuous differential oracles (1,000 random operations checking linearizability against reference models) and deterministic simulation testing.
+
+---
+
+## Case Study 3: Asymmetric Bursts & Group Commit Tail Latency Jitter
+
+### The Fallacy
+Optimizing solely for aggregate steady-state write throughput under uniform benchmark traffic.
+
+### The Reality
+Group commit pipeline shines when concurrent clients amortize `fdatasync` across dozens of operations. However, in production:
+1. **The Burst Boundary**: Traffic is rarely uniform. When an isolated writer arrives, waiting for a coalescing timer window causes severe tail latency jitter (p99 / p99.9).
+2. **Lone-Commit Fast-Path**: A dedicated `lone_commit` path allows isolated writers to bypass the group queue and immediately issue the barrier.
+3. **Admission Races**: When sudden bursts arrive while a lone-commit is in flight, the queue must transition atomically without lock contention or thread starvation.
+
+---
+
+## Case Study 4: Linux VFS, Mmap WAL, and Storage Faults
+
+### The Vulnerability Pattern
+Using mmap for write logs reduces syscall overhead, but exposes the engine to Linux kernel VFS quirks:
+1. **Dirty Page Writeback**: When background compaction writes dozens of megabytes, the Linux writeback flusher throttles mmap page dirtiers, generating unexpected 100ms+ latency spikes.
+2. **Fallocate Exhaustion & SIGBUS**: If the filesystem runs out of space (`ENOSPC`) while touching an mmapped page, the OS sends `SIGBUS`, terminating the daemon abruptly.
+3. **The Defense**: Pre-allocating log segments with explicit `fallocate`, isolating compaction I/O via rate limiters, and handling POSIX storage faults before they trigger kernel signals.
+
+---
+
+## Case Study 5: RocksDB-Compat & 15-Year Quirks (Tombstone Collapsing & Snapshots)
+
+### The Fallacy
+Treating compatibility as a simple wrapper around basic `get`, `put`, and `delete`.
+
+### The Reality
+Production users migrating from RocksDB rely on 15 years of implicit semantics:
+1. **Merge Operators**: Associative vs partial merge operands require exact sequence ordering and accumulation semantics.
+2. **DeleteRange & Iterators**: Range deletions must mask keys within their range instantaneously without invalidating active bidirectional iterators.
+3. **Tombstone Collapsing vs Snapshot Isolation**: During manual or automated compaction, tombstones cannot be collapsed if any active snapshot was created prior to the tombstone's sequence number. Premature deletion resurrects superseded keys in active transactions.
+4. **The Defense**: Rigorous differential test harnesses (`differential_oracle`) that fuzz randomized sequences of puts, deletes, delete_ranges, merges, and snapshots against a reference store.
+
+---
+
+## Case Study 6: The "100% Verificado" Fallacy & The Axiom Ratchet
 
 ### The Fallacy
 Announcing *"100% formal verification with Lean 4 and zero sorries"*.
@@ -36,7 +86,7 @@ Announcing *"100% formal verification with Lean 4 and zero sorries"*.
 
 ---
 
-## Case Study 3: Stateright Step Budget Physics ($N + 3$ Rule)
+## Case Study 7: Stateright Step Budget Physics ($N + 3$ Rule)
 
 ### The Fallacy
 Running model checking with an arbitrary step budget (e.g., 6 steps) and claiming *"Liveness and deadlock-freedom mathematically proven for concurrent clients"*.
@@ -56,48 +106,13 @@ With 5 clients, an 8-step budget is the physical minimum to complete a commit cy
 
 ---
 
-## Case Study 4: RFC-0298 & The Storage Parsing Panic Epidemic
+## Case Study 8: RFC-0298 & The Storage Parsing Panic Epidemic
 
 ### The Vulnerability Pattern
-Auditing production storage decoders (`pedradb-core`, `pedradb-store`, `pedradb-raft`) revealed a widespread vulnerability:
-```rust
-// VULNERABLE: Direct slice indexing + unwrap()
-let len = u32::from_le_bytes(buf[pos..pos+4].try_into().unwrap()) as usize;
-let data = &buf[pos+4..pos+4+len];
-```
-Any corrupted block on disk, partial network packet, or adversarial payload triggered `SIGABRT` (immediate daemon crash) instead of an I/O error.
-
-### Integer Overflow Wrap in Slice Arithmetic
-```rust
-// VULNERABLE: Integer wrap
-if pos + len > buf.len() { return Err(...); }
-// If len == usize::MAX, pos + len wraps around to 0, passing the check!
-```
-
-### Unbounded Pre-Allocation Memory Exhaustion
-```rust
-// VULNERABLE: OOM DoS
-let count = cursor.read_u32()? as usize;
-let mut items = Vec::with_capacity(count); // Allocates gigabytes if count = 0xFFFFFFFF
-```
+Auditing production storage decoders (`pedradb-core`, `pedradb-store`, `pedradb-raft`) revealed direct slice indexing with `.unwrap()`. Any corrupted block on disk or adversarial payload triggered `SIGABRT` instead of an I/O error.
 
 ### The Architectural Defense (`SafeCursor`)
 1. **Checked Arithmetic**: Every advance and window calculation uses `pos.checked_add(len)`.
 2. **Residual Bounded Allocations**: Container capacity is strictly bounded by `cursor.remaining() / min_element_size`.
-3. **Mandatory EOF Enforcement**: Network and record decoders enforce `cursor.ensure_fully_consumed()` to prevent command smuggling and unparsed trailing garbage.
+3. **Mandatory EOF Enforcement**: Network and record decoders enforce `cursor.ensure_fully_consumed()` to prevent command smuggling.
 4. **Resilient Locks**: Banning `.lock().unwrap()` in shared async pools to prevent Mutex poisoning cascades.
-
----
-
-## Case Study 5: The Zero-Twin Policy & Anti-Vacuity (RFC-0270 & RFC-0273)
-
-### The Fallacy
-Writing a simplified "model twin" (e.g. `LoomWriteGroup` or `MockStorage`) to pass concurrency and model checks easily.
-
-### The Reality
-Model twins inevitably diverge from production code: they omit error handling, subtle atomic ordering (`Acquire`/`Release` vs `SeqCst`), and ring buffer edge conditions. Bugs hide in the exact details that the twin omitted.
-
-### Strict Verification Rules:
-- **Zero-Twin (RFC-0270)**: Route production concurrency primitives through `crate::sync_kernel`. Verification tools (Loom, Stateright) must invoke the **real** production structs and functions.
-- **Anti-Vacuity Testing**: Always ask *"Would this proof fail if I injected a bug?"*. All core kernels must pass mutation fuzzing killing $\ge 98\%$ of synthetic AST mutants.
-- **Physical DST**: Deterministic Simulation Testing is not complete with `mem_storage=true`. Claims require `PEDRA_SWARM_DISK=1` running on real POSIX filesystems with `pwrite` and `fdatasync` fault injection.

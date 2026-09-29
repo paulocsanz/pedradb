@@ -4,19 +4,18 @@ This checklist contains the 30 questions that elite Hacker News systems engineer
 
 ---
 
-## Category A: Benchmark Rigor & Apples-to-Oranges Traps
+## Category A: Benchmark Rigor & Durability Physics
 
 1. **The Peer Configuration Trap**: Did you benchmark against the peer's actual production defaults?
    - *Example:* Benchmarking against RocksDB with `sync: true` when production workloads use `sync: false` (`ROCKS_PARITY_SYNC=0`).
 2. **Durability Class Alignment**: Are both engines providing identical physical durability at the moment `Ok` is returned to the client?
-   - *The Trap:* Claiming your engine is faster when your engine only writes to OS page cache or user-space ring buffer, while the peer calls `fdatasync`.
+   - *The Trap:* Claiming your engine is faster when your engine only writes to OS page cache or user-space ring buffer, while the peer calls `fdatasync`. Pedra default is G1 (`fdatasync` before `Ok`).
 3. **The Single-Client NVMe Wall**: If you claim high write throughput on single-threaded single-key puts with synchronous persistence, do the numbers violate physical laws?
    - *Reality:* Standard NVMe flash write barrier takes 80µs–500µs. A single thread with synchronous fsync cannot exceed ~2,000–12,000 ops/sec. Any claim of 500k ops/sec on a single client *must* be buffering or batching.
 4. **Group Commit Under Concurrency**: Is your high throughput only achieved when many clients amortize the fsync cost via group commit? If so, is this stated explicitly?
 5. **Memory Sizing vs Dataset Size**: Did the entire benchmark dataset fit in RAM?
    - *The Trap:* Running 10M keys of 100 bytes (1 GB) on a 64 GB workstation. You benchmarked `memcpy` and OS page cache read hits, not storage engine disk I/O.
-6. **Key Distribution & Access Patterns**: What key distribution was used?
-   - *Sequential vs Uniform Random vs Zipfian:* Sequential keys mask LSM-tree compaction cascades. Uniform random keys expose bloom filter effectiveness and cold disk read amplification. Zipfian tests write-buffer skew and latch contention.
+6. **Key Distribution & Skew**: What key distribution was used? Sequential, Uniform Random, or Zipfian? Zipfian tests write-buffer skew and latch contention.
 7. **Warm Cache vs Cold Miss Hydration**: Was the database cold-started before read benchmarks, or was the page cache completely warm?
 8. **Compaction Debt & Run Duration**: Did the write benchmark run long enough to trigger full compaction cascades, write stalls, and WAL recycling? (Minimum 30–60 minutes under steady load).
 9. **Hardware Environment Disclosure**: Was the test executed on bare-metal NVMe, an ephemeral VM instance, or network-attached storage (AWS EBS) with burst IOPS credits?
@@ -24,52 +23,45 @@ This checklist contains the 30 questions that elite Hacker News systems engineer
 
 ---
 
-## Category B: Formal Verification & Proof Denominators
+## Category B: Concurrency, Tail Latency & Synchronization Glue
 
-11. **The TCB (Trusted Computing Base) Definition**: What is left outside the formal proof?
-    - Does the proof trust the hardware, the CPU memory model, the OS kernel (POSIX syscall semantics), the Rust compiler/LLVM, the verification toolchain itself?
-12. **Axiom Ledger**: How many unproven axioms (`axiom` in Lean 4 / Coq) are assumed in the formal spec?
-    - Are standard library methods (e.g. `Option.is_some`, `Slice.len`, `Result.unwrap_or`) axiomatized or constructively defined?
-13. **Extraction & Submodule Gaps**: Are proofs checked across all generated code, including kernel submodules?
-    - *The Trap:* Checking `WriteCycle.lean` while `WriteCycleKernel.lean` hides unproven `sorry` or `admit` in error-handling paths.
-14. **Anti-Vacuity Testing**: If a mutant bug is introduced into the specification or code, does the proof fail?
-    - What is the mutation fuzzer score? (RFC-0273 standard: $\ge 98\%$ mutants killed).
-15. **The Zero-Twin Rule**: Was the proof executed directly against production code, or against an idealized "twin/mock" model?
-    - *The Trap:* Creating a simplified `MockWriteGroup` or `LoomWriteGroup` that strips away error handling, ring wrapping, and OS yields.
+11. **The Complexity Paradox & Glue Boundaries**: Are core mathematical models conflated with the synchronization glue?
+    - If the LSM math is verified, what proves the correctness of `concurrent_kernel.rs` and lock-free coordination?
+12. **SuperVersion Atomic Publishing**: Does compaction or flush publish the new SuperVersion atomically under the exact lock boundary where disk state transitions, or can readers witness inconsistent SST manifests?
+13. **Off-Lock Compaction Races**: If compaction runs off-lock, what prevents an active reader or cleaner from observing unlinked or partially written SSTs?
+14. **Group Commit Tail Latency (p99/p99.9)**: How does the engine behave under **sparse, asymmetric burst workloads**?
+    - Does batch coalescing introduce long latency tails?
+    - When switching between `lone_commit` (fast path for isolated writer) and group commit under sudden burst concurrency, does the ticket admission race cause latency spikes?
+15. **Orphan File Invariants**: If a worker crashes or panics during an off-lock flush, does the engine detect and fail closed on uncommitted or leaked `.sst` files?
 16. **Loom Scope vs Engine Scope**: Is Loom being cited as "proof that the database is race-free"?
     - *Reality:* Loom explores state spaces for isolated atomic primitives with $\le 3$ threads. It cannot verify full engine concurrency; that requires Deterministic Simulation Testing (DST) or Probabilistic Concurrency Testing (PCT).
-17. **Model Step Budgets**: In TLA+ or Stateright models, was the transition step budget large enough to reach actual commit and liveness states?
-    - *The $N+3$ Rule:* For $N$ clients in group commit, exploring $< N+3$ steps cuts off before publish/sync, generating false liveness passes.
-18. **Bit-Precision vs Infinite Abstraction**: Does the proof assume unbounded mathematical integers ($\mathbb{N}, \mathbb{Z}$) that ignore machine integer overflow (`u64::MAX`, `usize::MAX`)?
-    - Bit-vector bounds must be proved via SMT/BMC (e.g. Kani).
 
 ---
 
-## Category C: Physical I/O, Parsing, & Panic Robustness
+## Category C: Physical I/O, VFS, & Memory Mmap Dynamics
 
-19. **The Zero-Panic Invariant**: Can corrupt disk data, bitrot, or malicious wire inputs cause a panic (`SIGABRT`)?
-    - Are raw slices being parsed with `.try_into().unwrap()` instead of checked cursor decoders?
-20. **Integer Overflow in Bounds Checking**: Are boundary checks calculated using addition without checking for overflow?
-    - `pos + len > buf.len()` can wrap when `len = usize::MAX`, bypassing the check. Must use `pos.checked_add(len)`.
-21. **Unbounded Pre-Allocation DoS**: Does the parser allocate memory based on untrusted length headers?
-    - `Vec::with_capacity(n)` from a wire or disk header can trigger immediate OOM if `n` is large and remaining bytes are small.
-22. **Mutex Poisoning Cascades**: Does the codebase use `.lock().unwrap()`?
-    - A single thread panic can poison a central lock, causing all subsequent threads to panic in a catastrophic cascade.
-23. **Crash Consistency Under Real Disk I/O**: Was crash recovery tested on real POSIX filesystems with `pwrite`/`fdatasync` and fault injection (`PEDRA_SWARM_DISK=1`), or solely on in-memory arrays?
-24. **Torn Writes and Partial Blocks**: Does the write path handle power loss midway through a 4KB sector write or WAL frame?
+17. **Mmap WAL & Linux VFS Interactions**: If using mmap for write logs, how does the engine behave when Linux flushes dirty pages in the background?
+    - Does background writeback cause page cache write stalls or latency spikes?
+18. **Fallocate Exhaustion & SIGBUS**: When disk space runs out (`ENOSPC`) on mmap growth, does the process handle `SIGBUS` gracefully or abort?
+19. **Background I/O Device Queue Starvation**: Does background compaction I/O saturate NVMe controller queues and starve read latency?
+20. **Crash Consistency Under Real Disk I/O**: Was crash recovery tested on real POSIX filesystems with `pwrite`/`fdatasync` and fault injection (`PEDRA_SWARM_DISK=1`), or solely on in-memory arrays?
+21. **Torn Writes and Partial Blocks**: Does the write path handle power loss midway through a 4KB sector write or WAL frame?
+22. **The Zero-Panic Invariant**: Can corrupt disk data, bitrot, or malicious wire inputs cause a panic (`SIGABRT`)? Are decoders using checked arithmetic (`SafeCursor`)?
 
 ---
 
-## Category D: Network Protocols & Concurrency Under Adversity
+## Category D: Drop-in RocksDB Parity & 15-Year Edge Cases
 
-25. **Slowloris & Connection Exhaustion**: Does the network server have strict read/write timeouts (`Duration::from_secs(15)`) on all accepted sockets?
-26. **Frame Termination Validation (Command Smuggling)**: Does the protocol parser enforce `ensure_fully_consumed()` at the end of each frame, or are unparsed trailing bytes silently ignored?
-27. **Contention & Thundering Herds**: How does the concurrency model behave under extreme contention on a single key or single range?
+23. **Merge Operator Behavioral Parity**: Does `rocksdb-compat` handle partial merge operands with identical associativity and error semantics as RocksDB?
+24. **DeleteRange Interactions**: How does `DeleteRange` interact with concurrent active iterators and compaction tombstone collapsing?
+25. **Compaction Tombstone Collapsing vs Snapshot Isolation**: When compaction drops superseded keys or tombstones, is it mathematically impossible for an older active snapshot to observe data anomalies or resurrected keys?
+26. **Architecture Decoupling**: Is `rocksdb-compat` isolated as a separate compatibility adapter, or has it leaked legacy C++ quirks into the pure storage kernel?
 
 ---
 
-## Category E: Production Readiness & Honest Scoping
+## Category E: Formal Verification & Proof Rigor
 
-28. **Glue Code & API Trampolines**: Are contracts enforced at the glue boundaries (`db.rs`, `concurrent.rs`, POSIX wrappers), or only inside core kernels?
-29. **Drop-in Compatibility Reality**: If claiming "RocksDB compatibility", does it support exact comparator semantics, column families, prefix seek, merge operators, and transaction 2PL?
-30. **Failure Modes & Blast Radius**: What happens when the disk runs completely out of space (`ENOSPC`) or file descriptors are exhausted (`EMFILE`)? Does the engine fail closed cleanly without corrupting the MANIFEST?
+27. **The TCB Definition**: Is the TCB explicitly declared (Rust compiler, LLVM, Linux syscalls, hardware)?
+28. **Axiom Ledger Ratchet**: How many unproven axioms (`axiom` in Lean 4 / Coq) are assumed? Are standard library methods constructive `def`s?
+29. **Anti-Vacuity Testing**: Have specifications and proofs been mutation-tested with $\ge 98\%$ mutant kill score?
+30. **Bit-Precision vs Infinite Abstraction**: Does the proof check machine integer limits (`u64::MAX`, `usize::MAX`) via BMC/SMT (e.g. Kani) to prevent wrapping?

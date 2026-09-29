@@ -60,6 +60,7 @@ impl DirLock {
         }
 
         write_lock_pid(env, &path, pid)?;
+        let _ = env.sync_dir(dir);
         Ok(Self {
             path,
             pid,
@@ -93,6 +94,9 @@ impl DirLock {
             let holder = read_lock_pid(env, &self.path)?;
             if holder.is_none_or(|h| h == self.pid) {
                 env.remove_file(&self.path)?;
+                if let Some(dir) = self.path.parent() {
+                    let _ = env.sync_dir(dir);
+                }
             }
         }
         self.released = true;

@@ -1,0 +1,18 @@
+[package]
+name = "pedradb-replicate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WAL-shipped read replicas for PedraDB (RFC-0010 Rung 1.5)"
+
+
+[lib]
+path = "src/lib_kernel.rs"
+[dependencies]
+pedradb-core.workspace = true
+pedradb-io-uring.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+pedradb-sim.workspace = true
+stateright = "0.31"

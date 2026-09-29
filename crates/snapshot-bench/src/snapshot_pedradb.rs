@@ -112,6 +112,11 @@ impl PedraDbSnapshot {
         let mut db_opts = Options::default();
         db_opts.create_if_missing(true);
         db_opts.create_missing_column_families(true);
+        let cores = std::thread::available_parallelism()
+            .map(std::num::NonZero::get)
+            .unwrap_or(4)
+            .min(16);
+        db_opts.increase_parallelism(cores as i32);
         // Pedra's Options.sync is the DB-wide default write barrier; keep it
         // false so per-apply WriteOptions.sync is the sole control (matches
         // the RocksDB backend's always-on-WAL + set_sync pattern).

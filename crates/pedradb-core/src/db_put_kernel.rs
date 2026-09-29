@@ -591,14 +591,7 @@ impl<E: Env> Db<E> {
                 }
                 crate::write_admission_kernel::PutHandlerPlan::CommitThenFlush
                 | crate::write_admission_kernel::PutHandlerPlan::RestoreSeqOnCommitErr => {
-                    let seq_checkpoint = self.next_seq.load(Ordering::Relaxed);
-                    return match self.commit_async_one(first) {
-                        Ok(seq) => Ok(seq),
-                        Err(e) => {
-                            self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
-                            Err(e)
-                        }
-                    };
+                    return self.commit_async_one(first);
                 }
             }
         }
@@ -676,7 +669,10 @@ impl<E: Env> Db<E> {
                             ),
                             "commit Err ⇒ RestoreSeqOnCommitErr"
                         );
-                        self.next_seq.store(seq_checkpoint, Ordering::Relaxed);
+                        // Never roll back next_seq after records reached commit_ops_with:
+                        // partial WAL writes or durability fencing mean sequence numbers
+                        // may already be in the WAL file or burned; rolling back creates
+                        // sequence collisions or violates monotonicity upon replay.
                         Err(e)
                     }
                 }
