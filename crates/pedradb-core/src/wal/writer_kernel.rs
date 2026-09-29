@@ -5,7 +5,7 @@
 //! `First`/`Middle`/`Last` physical records, and each physical record carries
 //! a masked CRC32C over `{type, payload}`.
 
-use std::io::{Seek, Write};
+use std::io::Write;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -287,6 +287,12 @@ impl<W: EnvFile> WalWriter<W> {
             staged: None,
             reserved_to: raw_pos,
         })
+    }
+
+    /// Current block offset.
+    #[must_use]
+    pub fn block_offset(&self) -> usize {
+        self.block_offset
     }
 
     /// RFC-0209 P0.2: enable user-space staging with a flush cap of `max`
@@ -688,6 +694,7 @@ impl<W: EnvFile> WalWriter<W> {
     }
 
     /// Borrow the underlying sink mutably (exclusive path only).
+    #[allow(dead_code)]
     pub(crate) fn inner_mut(&mut self) -> Option<&mut W> {
         match &mut self.sink {
             WalSink::Exclusive(w) => Some(w),
@@ -780,7 +787,15 @@ impl<W: crate::env::EnvFile> WalWriter<W> {
         let end = ticket.saturating_add(len);
         if self.position < end {
             self.position = end;
+            self.block_offset = (self.position as usize) % BLOCK_SIZE;
         }
+    }
+
+    /// Abort an in-flight preframed pwrite that failed or cancelled:
+    /// strictly restores `block_offset` to match `position % BLOCK_SIZE`.
+    pub(crate) fn abort_pwrite(&mut self) {
+        self.block_offset = (self.position as usize) % BLOCK_SIZE;
+        self.reserved_to = self.position;
     }
 }
 
@@ -1058,7 +1073,7 @@ mod tests {
         }
     }
 
-    impl Seek for ProbeSink {
+    impl std::io::Seek for ProbeSink {
         fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
             let base = self.shared.pos.get() as i64;
             let next = match pos {

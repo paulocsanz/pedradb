@@ -42,7 +42,6 @@ pub struct ScanReadaheadWindow {
 
 impl ScanReadaheadWindow {
     /// The universal "no readahead" verdict.
-    #[must_use]
     pub const NONE: ScanReadaheadWindow = ScanReadaheadWindow {
         offset: 0,
         len: 0,

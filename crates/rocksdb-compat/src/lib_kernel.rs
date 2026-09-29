@@ -18,6 +18,7 @@
 mod api;
 #[path = "env_kernel.rs"]
 mod env;
+#[allow(dead_code)]
 mod iter_kernel;
 #[path = "knobs_kernel.rs"]
 mod knobs;
@@ -1207,6 +1208,7 @@ impl LastGetTable {
     /// repeating keys never fit the ring, so every named get re-entered
     /// the SST (guest v64 25M get_loop 0.94×). Hash-store on the get
     /// miss keeps the working set; writes stay ring-only.
+    #[cfg_attr(not(test), allow(dead_code))]
     fn hash_store(&mut self, epoch: u64, gen: u64, cf: &str, key: &[u8], val: Option<Bytes>) {
         let Some(cf_t) = TinyBuf::from_slice(cf.as_bytes()) else {
             return;
@@ -1868,6 +1870,7 @@ fn page_last_n_with_checkpoints<E: PedraEnv>(
         .map_err(Error::from)
 }
 
+#[allow(dead_code)]
 fn page_last_n<E: PedraEnv>(
     inner: &ConcurrentDb<E>,
     codec: &KeyCodec,

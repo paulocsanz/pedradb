@@ -67,8 +67,10 @@ pub mod wal_state_kernel;
 #[path = "writer_kernel.rs"]
 pub mod writer;
 
+pub use format::BLOCK_SIZE;
 pub use reader::WalReader;
 pub use writer::WalWriter;
+pub use crate::batch::WriteOp;
 
 /// Space reservation chunk for a WAL segment (Darwin `F_PREALLOCATE`,
 /// Linux `fallocate(FALLOC_FL_KEEP_SIZE)`).
@@ -116,7 +118,7 @@ pub struct Wal<F: EnvFile = <StdEnv as Env>::File> {
 }
 
 /// Off-lock positional write (RFC-0193). The meta lock is not held.
-pub(crate) struct PwriteJob<F: EnvFile> {
+pub struct PwriteJob<F: EnvFile> {
     buf: Vec<u8>,
     ticket: u64,
     file: Arc<F>,
@@ -125,6 +127,12 @@ pub(crate) struct PwriteJob<F: EnvFile> {
 }
 
 impl<F: EnvFile> PwriteJob<F> {
+    /// Reserved ticket offset.
+    #[must_use]
+    pub fn ticket(&self) -> u64 {
+        self.ticket
+    }
+
     /// Write the reserved span on the **same** File (`Arc` clone, not
     /// `dup(2)`). Host File is mmap memcpy (`write_wal_at_shared`) — the
     /// WAL CS is encode+ticket; this I/O does not hold `wal.lock()`.
@@ -132,7 +140,7 @@ impl<F: EnvFile> PwriteJob<F> {
     ///
     /// # Errors
     /// Underlying positional / mmap write.
-    pub(crate) fn run(self) -> Result<(u64, u64)> {
+    pub fn run(self) -> Result<(u64, u64)> {
         let mut this = self;
         let len = this.buf.len() as u64;
         let ticket = this.ticket;
@@ -381,11 +389,17 @@ impl<F: EnvFile> Wal<F> {
         }))
     }
 
+    /// Current physical block offset in the writer.
+    #[must_use]
+    pub fn block_offset(&self) -> usize {
+        self.writer.block_offset()
+    }
+
     /// Ticket a pre-encoded Full record (RFC-0237). Encode/CRC happened
     /// off `wal.lock()`; this CS is pad + `reserve_frame` + Arc clone.
     /// `None` = Exclusive sink or the record does not fit this block —
     /// caller fragments via [`Self::encode_write_op_batches`].
-    pub(crate) fn take_preframed_pwrite_job(
+    pub fn take_preframed_pwrite_job(
         &mut self,
         mut frame: Vec<u8>,
     ) -> Result<Option<PwriteJob<F>>> {
@@ -424,9 +438,11 @@ impl<F: EnvFile> Wal<F> {
     /// Record a completed off-lock pwrite: move the written frontier to
     /// `ticket+len` (not at reserve).
     /// `len == 0` is the I/O-failure path — position stays at the last committed byte.
-    pub(crate) fn finish_pwrite(&mut self, ticket: u64, len: u64) {
+    pub fn finish_pwrite(&mut self, ticket: u64, len: u64) {
         if !crate::write_admission_kernel::batch_is_empty(len) {
             self.writer.commit_pwrite(ticket, len);
+        } else {
+            self.writer.abort_pwrite();
         }
     }
 
@@ -1021,7 +1037,7 @@ mod probe_tests {
     fn rfc0233_pwrite_honors_offset_on_production_append() {
         let dir = rfc0209_dir("rfc0233-rw");
         let path = dir.join("wal.log");
-        let mut f = crate::env::StdEnv.open_rw(&path).unwrap();
+        let f = crate::env::StdEnv.open_rw(&path).unwrap();
         use crate::env::{Env, EnvFile};
         f.write_all_at_shared(b"CD", 2).unwrap();
         f.write_all_at_shared(b"AB", 0).unwrap();

@@ -11,8 +11,7 @@
 #![forbid(unsafe_code)]
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::Mutex;
 
 /// Error in async pool decoupling or ticket scheduling.
 #[derive(Debug, Clone, PartialEq, Eq)]

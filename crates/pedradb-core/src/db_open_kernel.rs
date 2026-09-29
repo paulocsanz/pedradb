@@ -124,11 +124,15 @@ impl<E: Env> Db<E> {
         let sst_payload_pool = Arc::new(crate::cache::SstPayloadPool::with_budget(
             opts.sst_payload_budget_bytes,
         ));
+        let plain_block_cache = Arc::new(crate::cache::PlainBlockCache::with_budget_bytes(
+            plain_block_budget_from_env(),
+        ));
         if let Some(src) = &source {
             sst_payload_pool.arm();
             table_cache.set_payload_kit(crate::cache::PayloadKit {
                 source: Arc::clone(src),
                 pool: Arc::clone(&sst_payload_pool),
+                plain: Arc::clone(&plain_block_cache),
             });
         }
         // Official YCSB records=4096 (zipfian). 2048 FIFO + sequential load
@@ -141,7 +145,7 @@ impl<E: Env> Db<E> {
             sst_levels,
             next_file_num,
             manifest_file_num,
-            vlog_use_new,
+            mut vlog_use_new,
             mut max_seq,
             earliest_readable_seq,
         ) = recover_ssts(&env, &dir, opts.sync, &table_cache)?;
@@ -289,43 +293,67 @@ impl<E: Env> Db<E> {
                             (records, last_good)
                         }
                     }
-                    Err(CoreError::Truncated(0)) => {
+                    Err(CoreError::Truncated(offset)) => {
                         let len = env.metadata_len(&wal_path).unwrap_or(0);
-                        match crate::write_admission_kernel::open_wal_head_plan(true, true, len) {
-                            crate::write_admission_kernel::OpenWalHeadPlan::EmptyTiny
-                            | crate::write_admission_kernel::OpenWalHeadPlan::Skip => {
-                                (Vec::new(), 0)
-                            }
-                            crate::write_admission_kernel::OpenWalHeadPlan::RecoverSpan => {
-                                let escalated = crate::corrupt::escalate_or_fail(
-                                    &env,
-                                    &dir,
-                                    "truncated_head",
-                                    0,
-                                    CoreError::Truncated(0),
-                                );
-                                // RFC-0053 Y3.3: reopen outcome from the pure kernel.
-                                match crate::wal::reopen_kernel::reopen_outcome(
-                                    crate::wal::reopen_kernel::ReopenDamage::TruncatedHead,
-                                    opts.wal_recovery == WalRecovery::PointInTime,
-                                    matches!(escalated, CoreError::CorruptionEscalated { .. }),
-                                ) {
-                                    crate::wal::reopen_kernel::ReopenOutcome::ServePrefixReport => {
-                                        // Re-walk collecting the decoded prefix; the
-                                        // stopping error is the same head error that
-                                        // routed us here (first error is deterministic).
-                                        let (records, last_good, _prefix_err, _resync) =
-                                            Wal::recover_prefix_span_on(&env, &wal_path)?;
-                                        point_in_time_report = Some(RecoveryReport {
-                                            kind: "truncated_head",
-                                            corrupt_offset: 0,
-                                            good_through_offset: last_good,
-                                            discarded_bytes: len.saturating_sub(last_good),
-                                        });
-                                        (records, last_good)
-                                    }
-                                    _ => return Err(escalated),
+                        if offset == 0 {
+                            match crate::write_admission_kernel::open_wal_head_plan(true, true, len) {
+                                crate::write_admission_kernel::OpenWalHeadPlan::EmptyTiny
+                                | crate::write_admission_kernel::OpenWalHeadPlan::Skip => {
+                                    (Vec::new(), 0)
                                 }
+                                crate::write_admission_kernel::OpenWalHeadPlan::RecoverSpan => {
+                                    let escalated = crate::corrupt::escalate_or_fail(
+                                        &env,
+                                        &dir,
+                                        "truncated_head",
+                                        0,
+                                        CoreError::Truncated(0),
+                                    );
+                                    match crate::wal::reopen_kernel::reopen_outcome(
+                                        crate::wal::reopen_kernel::ReopenDamage::TruncatedHead,
+                                        opts.wal_recovery == WalRecovery::PointInTime,
+                                        matches!(escalated, CoreError::CorruptionEscalated { .. }),
+                                    ) {
+                                        crate::wal::reopen_kernel::ReopenOutcome::ServePrefixReport => {
+                                            let (records, last_good, _prefix_err, _resync) =
+                                                Wal::recover_prefix_span_on(&env, &wal_path)?;
+                                            point_in_time_report = Some(RecoveryReport {
+                                                kind: "truncated_head",
+                                                corrupt_offset: 0,
+                                                good_through_offset: last_good,
+                                                discarded_bytes: len.saturating_sub(last_good),
+                                            });
+                                            (records, last_good)
+                                        }
+                                        _ => return Err(escalated),
+                                    }
+                                }
+                            }
+                        } else {
+                            let escalated = crate::corrupt::escalate_or_fail(
+                                &env,
+                                &dir,
+                                "truncated_tail",
+                                offset,
+                                CoreError::Truncated(offset),
+                            );
+                            match crate::wal::reopen_kernel::reopen_outcome(
+                                crate::wal::reopen_kernel::ReopenDamage::TruncatedTail,
+                                opts.wal_recovery == WalRecovery::PointInTime,
+                                matches!(escalated, CoreError::CorruptionEscalated { .. }),
+                            ) {
+                                crate::wal::reopen_kernel::ReopenOutcome::ServePrefixReport => {
+                                    let (records, last_good, _prefix_err, _resync) =
+                                        Wal::recover_prefix_span_on(&env, &wal_path)?;
+                                    point_in_time_report = Some(RecoveryReport {
+                                        kind: "truncated_tail",
+                                        corrupt_offset: offset,
+                                        good_through_offset: last_good,
+                                        discarded_bytes: len.saturating_sub(last_good),
+                                    });
+                                    (records, last_good)
+                                }
+                                _ => return Err(escalated),
                             }
                         }
                     }
@@ -515,7 +543,7 @@ impl<E: Env> Db<E> {
             .max(earliest_readable_seq)
             .saturating_add(1)
             .max(1);
-        if crate::write_admission_kernel::seq_exhausted(next_seq, MAX_SEQUENCE_NUMBER) {
+        if crate::write_admission_kernel::seq_exhausted(next_seq, MAX_ASSIGNABLE_SEQUENCE_NUMBER) {
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
             ));
@@ -540,12 +568,23 @@ impl<E: Env> Db<E> {
             crate::vlog_gc_kernel::VlogRecoverAction::OpenBlob => {
                 Some(Arc::new(Mutex::new(ValueLog::open_blob(&env, &dir, blob_active)?)))
             }
-            crate::vlog_gc_kernel::VlogRecoverAction::OpenNew
-            | crate::vlog_gc_kernel::VlogRecoverAction::OpenPrimary
-            | crate::vlog_gc_kernel::VlogRecoverAction::CreateEmptyPrimary
-            | crate::vlog_gc_kernel::VlogRecoverAction::RefuseOpen => Some(Arc::new(Mutex::new(
-                ValueLog::open_with_flag(&env, &dir, vlog_use_new)?,
+            crate::vlog_gc_kernel::VlogRecoverAction::OpenNew => Some(Arc::new(Mutex::new(
+                ValueLog::open_with_flag(&env, &dir, true)?,
             ))),
+            crate::vlog_gc_kernel::VlogRecoverAction::OpenPrimary => {
+                vlog_use_new = false;
+                Some(Arc::new(Mutex::new(
+                    ValueLog::open_with_flag(&env, &dir, false)?,
+                )))
+            }
+            crate::vlog_gc_kernel::VlogRecoverAction::CreateEmptyPrimary => Some(Arc::new(Mutex::new(
+                ValueLog::open_with_flag(&env, &dir, false)?,
+            ))),
+            crate::vlog_gc_kernel::VlogRecoverAction::RefuseOpen => {
+                return Err(CoreError::Internal(
+                    "vlog missing under vlog_use_new (mid-promote?). refuse empty create".into(),
+                ));
+            }
         };
 
         let mut db = Self {
@@ -590,6 +629,7 @@ impl<E: Env> Db<E> {
             table_cache,
             block_cache,
             sst_payload_pool,
+            plain_block_cache,
             sst_source: source,
             sst_file_cache,
             sst_page_keep_budget: 0,
@@ -704,7 +744,11 @@ impl<E: Env> Db<E> {
             } else {
                 0
             },
-            wal_archive_unlinked: 0,
+            wal_archive_unlinked: if keep_wal_archives {
+                wal_archives.first().copied().unwrap_or(0)
+            } else {
+                0
+            },
             change_log,
             changelog_interval: changelog_interval_from_env(),
             changelog_rebuild_budget_entries:
@@ -735,7 +779,7 @@ impl<E: Env> Db<E> {
         // so the armed pool bounds them too.
         if let Some(src) = &db.sst_source {
             for t in &db.ssts {
-                t.attach_payload_kit(src, &db.sst_payload_pool);
+                t.attach_payload_kit(src, &db.sst_payload_pool, &db.plain_block_cache);
             }
         }
         db.rebuild_sst_order();

@@ -3,8 +3,6 @@
 //! Garante que filtros de Bloom e particionadores de blocos operem sobre a projeção canônica
 //! de classes de equivalência semânticas de chaves, eliminando falsos negativos e podas incorretas.
 
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
 
 /// Erros de violação de invariantes do espaço métrico quociente de chaves.
 #[derive(Debug, Clone, PartialEq, Eq)]

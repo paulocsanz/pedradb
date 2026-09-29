@@ -4,7 +4,6 @@
 //! sem locks de blocos descompactados, provando a relação happens-before via Release-Acquire.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
 
 /// Violações de coerência de memória fraca e sincronização trans-thread.
 #[derive(Debug, Clone, PartialEq, Eq)]

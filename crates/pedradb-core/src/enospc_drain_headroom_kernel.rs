@@ -4,7 +4,6 @@
 //! Guarantees that maintenance tasks (compaction, VLog GC) never deadlock on
 //! temporary metadata allocation while client writes are backpressured.
 
-use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Allocation priority distinguishing client traffic from space reclamation.

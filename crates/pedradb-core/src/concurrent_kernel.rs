@@ -1782,12 +1782,11 @@ impl WriteGroup {
 
             let mut results = results.into_iter();
             for pending in batch {
-                let result = pending.occ_err.map(Err).unwrap_or_else(|| {
-                    results.next().unwrap_or_else(|| {
-                        Err(CoreError::Internal(
-                            "write group leader produced fewer results than members".into(),
-                        ))
-                    })
+                let group_res = results.next();
+                let result = pending.occ_err.map(Err).or(group_res).unwrap_or_else(|| {
+                    Err(CoreError::Internal(
+                        "write group leader produced fewer results than members".into(),
+                    ))
                 });
                 match pending.reply {
                     None => leader_result = Some(result),
@@ -1795,6 +1794,54 @@ impl WriteGroup {
                         let _ = tx.send(result);
                     }
                 }
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn lead_batch_for_test<E: Env>(
+        &self,
+        db: &parking_lot::RwLock<Db<E>>,
+        mut batch: Vec<PendingWrite>,
+    ) {
+        let mut guard = db.write();
+        let mut accepted_keys: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+        let mut accepted_ranges: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+        Self::validate_occ_accumulated(&mut guard, &mut batch, &mut accepted_keys, &mut accepted_ranges);
+        let inputs: Vec<(Vec<BatchOp>, bool)> = batch
+            .iter_mut()
+            .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
+            .collect();
+        let results = match guard.group_start(inputs) {
+            Err(results) => {
+                drop(guard);
+                results
+            }
+            Ok(inflight) => {
+                Self::finish_group_off_lock(
+                    self,
+                    db,
+                    guard,
+                    inflight,
+                    Some(&mut batch),
+                    || Vec::new(),
+                    None,
+                    &mut accepted_keys,
+                    &mut accepted_ranges,
+                )
+            }
+        };
+
+        let mut results = results.into_iter();
+        for pending in batch {
+            let group_res = results.next();
+            let result = pending.occ_err.map(Err).or(group_res).unwrap_or_else(|| {
+                Err(CoreError::Internal(
+                    "write group leader produced fewer results than members".into(),
+                ))
+            });
+            if let Some(tx) = pending.reply {
+                let _ = tx.send(result);
             }
         }
     }
@@ -3022,8 +3069,10 @@ impl<E: Env> ConcurrentDb<E> {
     /// Size the SST block cache in bytes (Rocks `NewLRUCache`, RFC-0153).
     pub fn set_block_cache_budget_bytes(&self, bytes: u64) {
         self.inner
-            .write()
-            .install_block_cache(crate::cache::BlockCache::with_budget_bytes(bytes));
+            .read()
+            .plain_block_cache
+            .budget_bytes
+            .store(bytes.max(1), std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Skip inline auto-compact; host drains L0 (RFC-0037).
@@ -4829,6 +4878,7 @@ impl<E: Env> ConcurrentDb<E> {
             match crate::flush_kernel::manifest_publish_plan(g.unsynced_sst_count() == 0) {
                 crate::flush_kernel::ManifestPublishPlan::PublishManifest => {}
                 crate::flush_kernel::ManifestPublishPlan::HoldUnsyncedFailClosed => {
+                    g.restore_unsynced_ssts(paths);
                     return Ok(());
                 }
             }
@@ -5296,6 +5346,30 @@ impl<E: Env> ConcurrentDb<E> {
         self.assist_flush_debt();
         self.writes
             .submit_occ(&self.inner, ops, do_sync, snapshot, keys)
+    }
+
+    /// Test helper to submit a crafted batch to `WriteGroup::lead` directly.
+    #[doc(hidden)]
+    pub fn test_lead_batch(
+        &self,
+        batch: Vec<(
+            Vec<BatchOp>,
+            Option<(SequenceNumber, Vec<Bytes>)>,
+            std::sync::mpsc::SyncSender<Result<SequenceNumber>>,
+        )>,
+    ) {
+        let mut pw_batch = Vec::with_capacity(batch.len());
+        for (ops, occ, tx) in batch {
+            pw_batch.push(PendingWrite {
+                ops,
+                do_sync: false,
+                submit_active: 1,
+                reply: Some(tx),
+                occ,
+                occ_err: None,
+            });
+        }
+        self.writes.lead_batch_for_test(&self.inner, pw_batch);
     }
 }
 
@@ -12161,6 +12235,118 @@ mod tests {
             matches!(batch2[0].occ_err, Some(CoreError::TransactionConflict)),
             "write covered by committed range delete after snapshot must conflict"
         );
+    }
+
+    #[test]
+    fn persist_unsynced_off_lock_restores_paths_when_manifest_publish_held() {
+        let dir = temp_dir();
+        let hook: Arc<std::sync::Mutex<Option<Box<dyn Fn() + Send + Sync>>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let hook_clone = Arc::clone(&hook);
+        let mut env = FenceEnv::new();
+        env.wal_io_probe = Arc::new(move || {
+            if let Some(cb) = hook_clone.lock().unwrap().as_ref() {
+                cb();
+            }
+        });
+
+        let db = Arc::new(ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env).unwrap());
+        db.set_defer_auto_compact(true);
+
+        db.put(b"k1", vec![b'v'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.drain_imm_once());
+        assert_eq!(db.with_read(|d| d.unsynced_sst_count()), 1);
+
+        let db_weak = Arc::downgrade(&db);
+        let fake_path = dir.join("fake_race.sst");
+        let injected = Arc::new(AtomicBool::new(false));
+        let injected_clone = Arc::clone(&injected);
+        let fake_clone = fake_path.clone();
+
+        *hook.lock().unwrap() = Some(Box::new(move || {
+            if !injected_clone.swap(true, Ordering::SeqCst) {
+                if let Some(db) = db_weak.upgrade() {
+                    db.with_write(|d| d.restore_unsynced_ssts(vec![fake_clone.clone()]));
+                }
+            }
+        }));
+
+        db.persist_unsynced_l0s_off_lock().unwrap();
+
+        assert_eq!(
+            db.with_read(|d| d.unsynced_sst_count()),
+            2,
+            "HoldUnsyncedFailClosed must restore taken SST paths so they are not leaked"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn checkpoint_drains_inflight_commit_so_checkpoint_never_races_inflight_writes() {
+        let dir = temp_dir();
+        let ckpt = temp_dir();
+        let writer_paused = Arc::new(AtomicBool::new(false));
+        let writer_can_proceed = Arc::new(AtomicBool::new(false));
+        let probe_paused = Arc::clone(&writer_paused);
+        let probe_can_proceed = Arc::clone(&writer_can_proceed);
+
+        let mut env = FenceEnv::new();
+        env.wal_io_probe = Arc::new(move || {
+            if !probe_paused.swap(true, Ordering::SeqCst) {
+                while !probe_can_proceed.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        });
+
+        let db = Arc::new(ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env).unwrap());
+        let db_writer = Arc::clone(&db);
+
+        let writer_handle = thread::spawn(move || {
+            db_writer.put(b"raced_key", b"raced_value").unwrap();
+        });
+
+        while !writer_paused.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        // The writer is currently paused during off-lock WAL I/O: commit_inflight is > 0!
+        assert!(db.commit_inflight() > 0);
+
+        let ckpt_clone = ckpt.clone();
+        let db_ckpt = Arc::clone(&db);
+        let ckpt_completed = Arc::new(AtomicBool::new(false));
+        let ckpt_completed_flag = Arc::clone(&ckpt_completed);
+
+        let ckpt_handle = thread::spawn(move || {
+            db_ckpt.create_checkpoint(&ckpt_clone).unwrap();
+            ckpt_completed_flag.store(true, Ordering::SeqCst);
+        });
+
+        // Give checkpoint thread time to try to run
+        std::thread::sleep(Duration::from_millis(50));
+
+        let completed_early = ckpt_completed.load(Ordering::SeqCst);
+
+        // Now release writer
+        writer_can_proceed.store(true, Ordering::SeqCst);
+        writer_handle.join().unwrap();
+        ckpt_handle.join().unwrap();
+
+        assert!(
+            !completed_early,
+            "create_checkpoint must NOT complete while a commit is still in flight (commit_inflight > 0)"
+        );
+
+        let restored = ConcurrentDb::open(&ckpt).unwrap();
+        assert_eq!(
+            restored.get(b"raced_key").unwrap().as_ref(),
+            b"raced_value"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&ckpt);
     }
 }
 

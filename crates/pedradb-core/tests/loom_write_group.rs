@@ -9,7 +9,7 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use loom::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use loom::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use loom::sync::{Mutex, Condvar};
 use loom::sync::mpsc;
 use loom::thread;

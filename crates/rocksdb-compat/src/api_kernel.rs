@@ -434,7 +434,7 @@ impl WriteBatchWithIndex {
         }
         sorted
             .get(end.wrapping_sub(1))
-            .filter(|&&i| end > pos)
+            .filter(|_| end > pos)
             .map(|&i| &self.overlay[i as usize])
     }
 

@@ -341,6 +341,7 @@ fn partition_index(h1: u64, nparts: u32) -> u32 {
         may_contain_mut_extra_probe(self, key)
     }
 
+    #[allow(dead_code)]
     fn may_contain_part(&self, key: &[u8]) -> bool {
         let (h1, h2) = hash_pair(key);
         self.may_contain_part_with_hashes(key, h1, h2)
@@ -523,13 +524,19 @@ fn partition_index(h1: u64, nparts: u32) -> u32 {
         if nparts <= 1 || nparts > 64 {
             return Err(format!("partitioned bloom nparts {nparts}"));
         }
-        let mut cur = crate::codec::SafeCursor::new(body);
         let mut encoded_parts = Vec::with_capacity(nparts as usize);
+        let mut pos = 0usize;
         for _ in 0..nparts {
-            let part = cur
-                .read_length_prefixed_bytes(body.len())
-                .map_err(|e| format!("partitioned bloom error: {e}"))?;
-            encoded_parts.push(part.to_vec());
+            if pos + 4 > body.len() {
+                return Err("partitioned bloom truncated".into());
+            }
+            let n = u32::from_le_bytes(body[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+            if pos + n > body.len() {
+                return Err("partitioned bloom part truncated".into());
+            }
+            encoded_parts.push(body[pos..pos + n].to_vec());
+            pos += n;
         }
         Ok(Self {
             bits: Arc::new(Vec::new()),

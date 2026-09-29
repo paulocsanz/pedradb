@@ -102,7 +102,6 @@ mod tests {
     fn crown_agrees_on_every_reachable_ledger() {
         // Interleaved groups with a trailing unsynced append: the crown
         // holds after EVERY spine prefix (any reachable ledger).
-        let mut l = WriteAckLedger::new();
         let steps = [
             SpineStep::Append(64),
             SpineStep::Append(32),

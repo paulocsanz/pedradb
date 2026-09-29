@@ -3,7 +3,6 @@
 //! Formaliza a blindagem de iteradores de snapshot de longa duração contra purga precoce de
 //! tombstones em compactações de níveis inferiores, provando a invariância de visibilidade do scan.
 
-use std::collections::HashSet;
 
 /// Violações de estabilidade de snapshot sob compactações concorrentes.
 #[derive(Debug, Clone, PartialEq, Eq)]
