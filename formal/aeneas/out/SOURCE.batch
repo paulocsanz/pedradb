@@ -1,4 +1,4 @@
 path=crates/pedradb-core/src/batch_kernel.rs
-sha256=42acce0db53ddb78370a8357c26e00b124b76aa70ecc32974599731125cd9601
-aeneas=daa85d7
+sha256=595128f59d15515694da8311868486dc03e1d8842c17194e962b3e1c99c21b1c
+aeneas=f5a4c58-dirty
 charon=0.1.232

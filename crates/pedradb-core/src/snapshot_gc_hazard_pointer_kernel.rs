@@ -6,7 +6,7 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Descritor de arquivo SST com cobertura temporal de números de sequência.
 #[derive(Debug, Clone, PartialEq, Eq)]

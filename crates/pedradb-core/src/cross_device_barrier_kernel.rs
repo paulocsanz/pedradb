@@ -38,6 +38,7 @@ pub enum CrossDeviceViolation {
 
 /// State machine oracle verifying cross-device migration safety.
 pub struct CrossDeviceTransferOracle {
+    #[allow(dead_code)]
     file_id: u64,
     current_phase: CrossDevicePhase,
 }

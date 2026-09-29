@@ -12,6 +12,9 @@ members = [
     "examples",
 ]
 
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(verus_keep_ghost)', 'cfg(loom)', 'cfg(pedra_aeneas)'] }
+
 [workspace.package]
 version = "0.1.0"
 edition = "2021"

@@ -16,9 +16,8 @@ buggify = []
 # ConcurrentDb commit path; off ⇒ hooks compile away entirely.
 pct = []
 
-# Kani proof harnesses live in-tree under #[cfg(kani)] (bloom T1–T4).
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+[lints]
+workspace = true
 
 [dependencies]
 crc32c.workspace = true

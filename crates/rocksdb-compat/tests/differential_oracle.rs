@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 use rocksdb_compat::{
-    ColumnFamily, Direction, IteratorMode, Options, ReadOptions, DB,
+    ColumnFamily, IteratorMode, Options, DB,
 };
 
 /// Deterministic PRNG for reproducible test sequences.

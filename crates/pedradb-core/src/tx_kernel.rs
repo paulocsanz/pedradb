@@ -12,7 +12,7 @@ use bytes::Bytes;
 use crate::batch::WriteOp;
 use crate::db::{Db, WriteOptions};
 use crate::error::{CoreError, Result};
-use crate::key::SequenceNumber;
+use crate::key::{SequenceNumber, ValueType};
 /// Staging entry: put value or delete.
 #[derive(Debug, Clone)]
 enum Stage {
@@ -119,16 +119,11 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
         }
 
         let staging = mem::take(&mut self.staging);
-        // RFC-0159: staged keys must flow through the bulk latch like any
-        // other write, or the family high-water would miss them.
-        for (key, stage) in &staging {
-            self.db
-                .observe_bulk_staged(key, matches!(stage, Stage::Put(_)));
-        }
         // RFC-0303: Sequence burn contract. Sequences are strictly monotonic.
         // If staging fails, allocated sequences are burned; sequence numbers
         // never roll back.
         let mut records = Vec::with_capacity(staging.len());
+        let mut total_ingested: usize = 0;
         for (key, stage) in staging {
             let seq = match self.db.alloc_seq() {
                 Ok(s) => s,
@@ -145,7 +140,7 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
                     // starting with the `0x01` escape marker would be stored
                     // unescaped and misread (one marker byte stripped) on
                     // every later read — silent corruption (dcs meta keys).
-                    self.db.note_ingested(value.len());
+                    let v_len = value.len();
                     let stored = match self.db.maybe_spill_large_value(value) {
                         Ok(v) => v,
                         Err(e) => {
@@ -153,11 +148,19 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
                             return Err(e);
                         }
                     };
+                    total_ingested = total_ingested.saturating_add(v_len);
                     records.push(WriteOp::put(seq, key, stored));
                 }
                 Stage::Delete => records.push(WriteOp::delete(seq, key)),
             }
         }
+        // RFC-0159 / DST: staged keys flow through the bulk latch only after
+        // infallible prep completes — an aborted commit never leaks phantom boundaries.
+        for op in &records {
+            self.db
+                .observe_bulk_staged(op.key.as_ref(), op.kind == ValueType::Value);
+        }
+        self.db.note_ingested(total_ingested);
         let last_seq = records.last().map_or(0, |o| o.sequence);
         match self.db.commit_ops_with(records, durability) {
             Ok(()) => {
@@ -203,7 +206,7 @@ impl<E: crate::env::Env> Drop for Transaction<'_, E> {
 mod tests {
     use crate::db::Db;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir() -> PathBuf {
@@ -328,6 +331,141 @@ mod tests {
         let tx = db.begin();
         tx.commit().unwrap();
         assert_eq!(db.last_sequence(), 0);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tx_large_value_spill_failure_does_not_corrupt_ingested_bytes() {
+        use std::io::{Read, Seek, SeekFrom, Write};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        struct FailVlogFile {
+            inner: std::fs::File,
+            is_vlog: bool,
+            armed: Arc<AtomicBool>,
+        }
+        impl Read for FailVlogFile {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.inner.read(buf)
+            }
+        }
+        impl Write for FailVlogFile {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                if self.is_vlog && self.armed.load(Ordering::SeqCst) {
+                    return Err(std::io::Error::other("simulated vlog disk full"));
+                }
+                self.inner.write(buf)
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                if self.is_vlog && self.armed.load(Ordering::SeqCst) {
+                    return Err(std::io::Error::other("simulated vlog disk full"));
+                }
+                self.inner.flush()
+            }
+        }
+        impl Seek for FailVlogFile {
+            fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+                self.inner.seek(pos)
+            }
+        }
+        impl crate::env::EnvFile for FailVlogFile {
+            fn sync_data(&mut self) -> std::io::Result<()> {
+                self.inner.sync_data()
+            }
+            fn sync_all(&mut self) -> std::io::Result<()> {
+                self.inner.sync_all()
+            }
+            fn set_len(&mut self, len: u64) -> std::io::Result<()> {
+                self.inner.set_len(len)
+            }
+            fn len(&mut self) -> std::io::Result<u64> {
+                self.inner.len()
+            }
+        }
+
+        #[derive(Clone)]
+        struct FailVlogCreateEnv {
+            armed: Arc<AtomicBool>,
+        }
+        impl crate::env::Env for FailVlogCreateEnv {
+            type File = FailVlogFile;
+            fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+                crate::env::StdEnv.create_dir_all(path)
+            }
+            fn create(&self, path: &Path) -> std::io::Result<Self::File> {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let is_vlog = name.contains("vlog") || name.contains("blob");
+                Ok(FailVlogFile {
+                    inner: crate::env::StdEnv.create(path)?,
+                    is_vlog,
+                    armed: Arc::clone(&self.armed),
+                })
+            }
+            fn open_append(&self, path: &Path) -> std::io::Result<Self::File> {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let is_vlog = name.contains("vlog") || name.contains("blob");
+                Ok(FailVlogFile {
+                    inner: crate::env::StdEnv.open_append(path)?,
+                    is_vlog,
+                    armed: Arc::clone(&self.armed),
+                })
+            }
+            fn open_read(&self, path: &Path) -> std::io::Result<Self::File> {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let is_vlog = name.contains("vlog") || name.contains("blob");
+                Ok(FailVlogFile {
+                    inner: crate::env::StdEnv.open_read(path)?,
+                    is_vlog,
+                    armed: Arc::clone(&self.armed),
+                })
+            }
+            fn sync_dir(&self, path: &Path) -> std::io::Result<()> {
+                crate::env::StdEnv.sync_dir(path)
+            }
+            fn read_dir_names(&self, path: &Path) -> std::io::Result<Vec<String>> {
+                crate::env::StdEnv.read_dir_names(path)
+            }
+            fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+                crate::env::StdEnv.remove_file(path)
+            }
+            fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+                crate::env::StdEnv.rename(from, to)
+            }
+            fn exists(&self, path: &Path) -> bool {
+                crate::env::StdEnv.exists(path)
+            }
+            fn metadata_len(&self, path: &Path) -> std::io::Result<u64> {
+                crate::env::StdEnv.metadata_len(path)
+            }
+        }
+
+        let dir = temp_dir();
+        let armed = Arc::new(AtomicBool::new(false));
+        let env = FailVlogCreateEnv {
+            armed: Arc::clone(&armed),
+        };
+        let mut opts = crate::db::OpenOptions::default();
+        opts.large_value_threshold = Some(64);
+        let mut db = Db::open_with_env(&dir, opts, env).unwrap();
+        assert_eq!(db.stats().bytes_ingested, 0);
+
+        // Arm failure on vlog file writes
+        armed.store(true, Ordering::SeqCst);
+
+        let mut tx = db.begin();
+        // 65536 bytes exceeds ASYNC_VLOG_BUFFER, forcing immediate write to file which fails
+        let large_val = vec![b'v'; 65536];
+        tx.put(b"staged_large", large_val).unwrap();
+        let res = tx.commit();
+        assert!(res.is_err(), "commit must fail when vlog spill fails");
+        assert_eq!(
+            db.stats().bytes_ingested,
+            0,
+            "failed tx commit must not mutate bytes_ingested"
+        );
+        armed.store(false, Ordering::SeqCst);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

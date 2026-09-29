@@ -763,6 +763,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
     fn fdatasync_file_ok() {
         let dir = temp_dir();
         let path = dir.join("w.bin");

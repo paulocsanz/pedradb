@@ -25,6 +25,10 @@ pub type SequenceNumber = u64;
 /// Largest sequence that fits in the on-disk 56-bit field.
 pub const MAX_SEQUENCE_NUMBER: SequenceNumber = (1u64 << 56) - 1;
 
+/// Largest sequence number that can be allocated to user writes.
+/// `MAX_SEQUENCE_NUMBER` is strictly reserved as an internal sentinel (latest/uncommitted probe).
+pub const MAX_ASSIGNABLE_SEQUENCE_NUMBER: SequenceNumber = MAX_SEQUENCE_NUMBER - 1;
+
 /// Kind of an internal key entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]

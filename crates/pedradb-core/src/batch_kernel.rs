@@ -336,6 +336,7 @@ impl<'a> Cursor<'a> {
         Self { data, pos: 0 }
     }
 
+    #[allow(dead_code)]
     fn is_empty(&self) -> bool {
         crate::write_admission_kernel::batch_is_empty(
             self.data.len().saturating_sub(self.pos) as u64

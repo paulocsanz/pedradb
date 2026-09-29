@@ -102,6 +102,7 @@ impl BulkRun {
     }
 
     #[must_use]
+    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         crate::write_admission_kernel::batch_is_empty(self.keys.len() as u64)
     }
