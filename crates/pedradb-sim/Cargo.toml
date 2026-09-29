@@ -7,3 +7,6 @@ description = "Deterministic simulation testing framework for PedraDB (Foundatio
 
 [dependencies]
 pedradb-core.workspace = true
+
+[lints]
+workspace = true

@@ -36,6 +36,8 @@ pub enum ReopenDamage {
     None,
     /// `Truncated(0)` on a non-tiny WAL (bitrot of the first record, F4).
     TruncatedHead,
+    /// Non-zero truncated tail write (DST Vector 19).
+    TruncatedTail,
     /// Mid-WAL CRC mismatch (G8 fail-stop, journaled).
     Crc,
     /// Zero type+len at fresh alignment with junk after (F170).
@@ -142,6 +144,7 @@ mod tests {
     fn point_in_time_reports_unless_escalated() {
         for d in [
             ReopenDamage::TruncatedHead,
+            ReopenDamage::TruncatedTail,
             ReopenDamage::Crc,
             ReopenDamage::ZeroHeader,
             ReopenDamage::Resync,
@@ -162,6 +165,7 @@ mod tests {
         let damages = [
             ReopenDamage::None,
             ReopenDamage::TruncatedHead,
+            ReopenDamage::TruncatedTail,
             ReopenDamage::Crc,
             ReopenDamage::ZeroHeader,
             ReopenDamage::Resync,

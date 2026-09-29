@@ -34,3 +34,4 @@ required-features = ["fjall", "rocksdb", "pedradb"]
 fjall = ["dep:fjall"]
 rocksdb = ["dep:rocksdb"]
 pedradb = ["dep:rocksdb-compat", "dep:pedradb-core"]
+

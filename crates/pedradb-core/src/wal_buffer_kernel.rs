@@ -85,7 +85,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn wal_buffer_lone_always_flushes_group_respects_cap() {
         let cap = WAL_BUF_MAX_DEFAULT_BYTES;
         assert!(

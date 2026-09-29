@@ -1,4 +1,4 @@
 path=crates/rocksdb-compat/src/locktab_kernel.rs
-sha256=149c533e32a6449a8a3af26fc5fa811670f7fefbc51b2a450b6733e85e9655a8
+sha256=83145697fedc08d9babda3c5d8ab9ea35c4bc38ff077974745c1195f68bfdf9a
 aeneas=f5a4c58-dirty
 charon=0.1.232

@@ -619,7 +619,7 @@ impl<E: Env> Db<E> {
             };
             match op {
                 BatchOp::Put { key, value } => {
-                    self.bytes_ingested = self.bytes_ingested.saturating_add(value.len() as u64);
+                    let v_len = value.len() as u64;
                     let stored = match self.maybe_spill_large_value(value) {
                         Ok(v) => v,
                         Err(e) => {
@@ -627,6 +627,7 @@ impl<E: Env> Db<E> {
                             return Err(e);
                         }
                     };
+                    self.bytes_ingested = self.bytes_ingested.saturating_add(v_len);
                     records.push(WriteOp::put(seq, key, stored));
                 }
                 BatchOp::Delete { key } => {

@@ -3,7 +3,6 @@
 //! Formaliza o semianel não-comutativo temporalmente carregado com operador aniquilador de intervalo,
 //! provando a confluência estrita entre avaliação em tempo de leitura e compactação estratificada.
 
-use std::collections::BTreeMap;
 
 /// Tipos de mutação de registro individual com sequence number causal.
 #[derive(Debug, Clone, PartialEq, Eq)]

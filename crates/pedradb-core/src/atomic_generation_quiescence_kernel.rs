@@ -43,6 +43,7 @@ pub enum GenerationState {
 
 /// Token de escrita adquirido por uma thread cliente.
 pub struct WriteTicket {
+    #[allow(dead_code)]
     generation: u64,
     active_counter: Arc<AtomicUsize>,
 }

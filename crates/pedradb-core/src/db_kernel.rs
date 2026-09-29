@@ -66,14 +66,16 @@ use crate::changelog_kernel::{changelog_needs_sst_rebuild, changelog_should_stor
 use crate::env::{AdviseKind, Env, EnvFile, StdEnv};
 use crate::error::{CoreError, Result};
 use crate::host::Host;
-use crate::key::{InternalKey, SequenceNumber, ValueType, MAX_SEQUENCE_NUMBER};
+use crate::key::{
+    InternalKey, SequenceNumber, ValueType, MAX_ASSIGNABLE_SEQUENCE_NUMBER, MAX_SEQUENCE_NUMBER,
+};
 use crate::lock::DirLock;
 use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, StreamingVisibleIter, VisibleKv};
 use crate::sst::{
     put_tls_point_seek_scratch, take_tls_point_seek_scratch, write_l0_sst, write_l0_sst_for_family,
-    write_sst_bulk_arrays, write_sst_entries_on, PointSeekScratch, SstTable,
+    write_sst_bulk_arrays, write_sst_entries_on, SstTable,
 };
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
@@ -329,6 +331,21 @@ fn sst_payload_budget_from_env() -> u64 {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_SST_PAYLOAD_BUDGET_BYTES)
+}
+
+/// Default plain-block cache budget (RFC-0305): 64 MiB of verified,
+/// decompressed block bodies shared across tables, sized to hold the
+/// get_hit working set at 10M under the 1 GiB knob-off control.
+pub const DEFAULT_PLAIN_BLOCK_BUDGET_BYTES: u64 = 64 * 1024 * 1024;
+
+/// `PEDRA_PLAIN_BLOCK_BUDGET` — plain-image block cache budget in bytes
+/// (bench A/B; the Rocks-shaped `set_block_cache` knob overrides at
+/// runtime). Unset or unparsable → [`DEFAULT_PLAIN_BLOCK_BUDGET_BYTES`].
+fn plain_block_budget_from_env() -> u64 {
+    std::env::var("PEDRA_PLAIN_BLOCK_BUDGET")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_PLAIN_BLOCK_BUDGET_BYTES)
 }
 
 /// MVCC history horizon (RFC-0046 P0.1).
@@ -1610,6 +1627,7 @@ impl LiveMem {
         self.read().ord_probe()
     }
 
+    #[allow(dead_code)]
     fn insert(&self, key: InternalKey, value: Bytes) {
         self.write().insert(key, value);
     }
@@ -1717,6 +1735,9 @@ pub struct Db<E: Env = StdEnv> {
     /// Bounded SST payload residency (RFC-0042 v18). Budget `None` = legacy
     /// (every payload resident). Armed only by a bounded open.
     sst_payload_pool: Arc<crate::cache::SstPayloadPool>,
+    /// Shared plain-image block cache (RFC-0305): verified, decompressed
+    /// block bodies under one byte budget every point seek consults.
+    pub(crate) plain_block_cache: Arc<crate::cache::PlainBlockCache>,
     /// File source for evicted-payload reloads; `None` on a legacy open
     /// (the pool then never evicts — decode never fails for lack of a source).
     sst_source: Option<Arc<dyn crate::env::SstFileSource>>,
@@ -3002,7 +3023,7 @@ impl<E: Env> Db<E> {
     /// table. Call at every point a table enters `self.ssts`.
     fn adopt_sst(&self, table: &SstTable) {
         if let Some(src) = &self.sst_source {
-            table.attach_payload_kit(src, &self.sst_payload_pool);
+            table.attach_payload_kit(src, &self.sst_payload_pool, &self.plain_block_cache);
         }
     }
 
@@ -4052,7 +4073,32 @@ impl<E: Env> Db<E> {
         vlog::list_blob_nums(&self.env, &self.dir)
     }
 
-    fn rotate_blob(&mut self) -> Result<()> {
+    /// Manifest file generation number.
+    #[must_use]
+    pub fn manifest_file_num(&self) -> u64 {
+        self.manifest_file_num
+    }
+
+    /// Number of live WAL archive segments tracking unlinked progress.
+    #[must_use]
+    pub fn wal_archive_live_count(&self) -> u64 {
+        self.wal_archive_live()
+    }
+
+    /// User key of the largest key in the most recently flushed SST.
+    #[must_use]
+    pub fn last_flushed_sst_largest_user_key(&self) -> Option<Vec<u8>> {
+        self.ssts.last().and_then(|t| t.largest_user_key().map(|k| k.to_vec()))
+    }
+
+    /// Flag indicating whether the vlog points to staged .new.
+    #[must_use]
+    pub fn is_vlog_use_new_flag_set(&self) -> bool {
+        self.vlog_use_new
+    }
+
+    /// Rotate blob append log generation.
+    pub fn rotate_blob(&mut self) -> Result<()> {
         self.vlog_sync_pending()?;
         let next = if crate::write_admission_kernel::batch_is_empty(self.blob_active as u64) {
             1
@@ -4376,6 +4422,7 @@ impl<E: Env> Db<E> {
     }
 
     /// L0 newest → older → L1+ (same single-writer invariant as the mem hit).
+    #[allow(dead_code)]
     fn sst_indices_newest_first(&self) -> &[usize] {
         &self.sst_order_newest
     }
@@ -5252,6 +5299,7 @@ impl<E: Env> Db<E> {
         Box::new(stream.into_iter())
     }
 
+    #[allow(dead_code)]
     fn memtable_stream<'a>(
         &'a self,
         table: &'a MemTable,
@@ -6295,6 +6343,7 @@ impl<E: Env> Db<E> {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn take_bulk_encoding(&mut self) -> Option<(String, Arc<crate::bulk_run::BulkRun>)> {
         if let Some((_, fam, run)) = self.bulk_encodings.pop() {
             Some((fam, run))
@@ -6439,7 +6488,7 @@ impl<E: Env> Db<E> {
         let n64 = n as u64;
         let seq0 = self.next_seq.fetch_add(n64, Ordering::Relaxed);
         let last = seq0.saturating_add(n64.saturating_sub(1));
-        if crate::write_admission_kernel::seq_exhausted(last, MAX_SEQUENCE_NUMBER) {
+        if crate::write_admission_kernel::seq_exhausted(last, MAX_ASSIGNABLE_SEQUENCE_NUMBER) {
             self.next_seq.fetch_sub(n64, Ordering::Relaxed);
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
@@ -6919,7 +6968,7 @@ impl<E: Env> Db<E> {
         }
         let seq0 = self.next_seq.fetch_add(n, Ordering::Relaxed);
         let top = seq0.saturating_add(n.saturating_sub(1));
-        if crate::write_admission_kernel::seq_exhausted(top, MAX_SEQUENCE_NUMBER) {
+        if crate::write_admission_kernel::seq_exhausted(top, MAX_ASSIGNABLE_SEQUENCE_NUMBER) {
             self.next_seq.fetch_sub(n, Ordering::Relaxed);
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
@@ -6957,15 +7006,14 @@ impl<E: Env> Db<E> {
             let _ = self.env.remove_file(&tmp_path);
             return Err(CoreError::Io(e));
         }
-        let table = written.with_path(final_path).with_cf(family.to_string());
-        if let Err(e) = self.install_ssts_at_levels(vec![(table, file_num)], &[0]) {
-            return Err(self.fence_io_err(e));
-        }
-        // Durable point: MANIFEST before Ok, then visibility. A failure
-        // after install leaves the in-memory inventory ahead of the
-        // MANIFEST (dirty window — the next flush/publish reconciles);
-        // Err is returned, so the caller keeps the external file.
+        let table = written.with_path(final_path.clone()).with_cf(family.to_string());
+        let undo = self.apply_sst_installs(vec![(table, file_num)], &[0]);
+        // Durable point: MANIFEST before Ok, then visibility. If persist_manifest fails,
+        // roll back the in-memory install and unlink the orphan SST file so disk inventory stays clean.
         if let Err(e) = self.persist_manifest() {
+            self.undo_l0_install(undo);
+            let _ = self.env.remove_file(&final_path);
+            let _ = self.env.sync_dir(&self.dir);
             return Err(self.fence_io_err(e));
         }
         self.publish_sequence(top);
@@ -7008,6 +7056,13 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn active_mem_usage(&self) -> usize {
         self.mem.approx_memory_usage()
+    }
+
+    /// Clone active memtable (test helper).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn clone_active_mem(&self) -> MemTable {
+        self.mem.read().clone()
     }
 
     /// Configured auto-flush threshold, if any.
@@ -8278,6 +8333,7 @@ impl<E: Env> Db<E> {
     }
 
     /// [`Self::prepare_level_drain`] from L1.
+    #[allow(dead_code)]
     pub(crate) fn prepare_l1_drain(
         &mut self,
         options: CompactOptions,
@@ -8544,6 +8600,7 @@ impl<E: Env> Db<E> {
             .map(|source| crate::cache::PayloadKit {
                 source: Arc::clone(source),
                 pool: Arc::clone(&self.sst_payload_pool),
+                plain: Arc::clone(&self.plain_block_cache),
             });
         Ok(Some(PreparedL0Compact {
             inputs,
@@ -8570,6 +8627,7 @@ impl<E: Env> Db<E> {
     /// Override the across-job batch width (tests; the host open path sets
     /// it from `PEDRA_PARALLEL_JOBS`). Needs [`Self::set_parallel_merge`]
     /// to take effect.
+    #[allow(dead_code)]
     pub(crate) fn set_parallel_jobs(&mut self, k: usize) {
         self.parallel_jobs = k.clamp(1, 8);
     }
@@ -8771,6 +8829,7 @@ impl<E: Env> Db<E> {
             .map(|source| crate::cache::PayloadKit {
                 source: Arc::clone(source),
                 pool: Arc::clone(&self.sst_payload_pool),
+                plain: Arc::clone(&self.plain_block_cache),
             });
         // Whole-levels rewrites merge every file of two levels, so the
         // writer's per-chunk transient (chunk body Vec + bloom + the
@@ -9129,6 +9188,7 @@ impl<E: Env> Db<E> {
             }
         };
         let old_paths = prepared.old_paths;
+        let new_paths = prepared.new_paths;
         let next_file_num = prepared.next_file_num;
         let new_tables = prepared.tables;
         let new_levels = prepared.levels;
@@ -9141,6 +9201,10 @@ impl<E: Env> Db<E> {
         self.note_sst_inventory_changed();
 
         if let Err(e) = self.persist_manifest() {
+            for p in &new_paths {
+                let _ = self.remove_db_file(p);
+            }
+            let _ = self.env.sync_dir(&self.dir);
             self.ssts = prev_ssts;
             self.sst_levels = prev_levels;
             self.next_file_num = prev_next;
@@ -9162,6 +9226,10 @@ impl<E: Env> Db<E> {
                 cloned.map_values(remap_fn);
                 *t = Arc::new(cloned);
             }
+        }
+        self.retired_fold.map_values(remap_fn);
+        for t in &mut self.retired_pending {
+            t.map_values(remap_fn);
         }
         self.bytes_written_sst = self.bytes_written_sst.saturating_add(staged_bytes);
         for t in &self.ssts {
@@ -9237,6 +9305,7 @@ impl<E: Env> Db<E> {
         let mut new_tables = Vec::with_capacity(self.ssts.len());
         let mut new_levels = Vec::with_capacity(self.sst_levels.len());
         let mut old_paths = Vec::new();
+        let mut new_paths = Vec::new();
         let mut staged_paths = Vec::new();
         let mut bytes_written = 0u64;
         let remap_one = |stored: &Bytes| vlog::remap_stored_blob(stored, file_num, remap);
@@ -9284,9 +9353,10 @@ impl<E: Env> Db<E> {
             }
             let written = self.env.metadata_len(&dest).unwrap_or(0);
             bytes_written = bytes_written.saturating_add(written);
-            match SstTable::open_on(&self.env, dest) {
+            match SstTable::open_on(&self.env, dest.clone()) {
                 Ok(t) => {
                     old_paths.push(table.path().to_path_buf());
+                    new_paths.push(dest);
                     new_tables.push(t.with_cf(table.cf().to_string()));
                     new_levels.push(level);
                 }
@@ -9302,6 +9372,7 @@ impl<E: Env> Db<E> {
             tables: new_tables,
             levels: new_levels,
             old_paths,
+            new_paths,
             next_file_num,
             bytes_written,
         })
@@ -9370,6 +9441,7 @@ impl<E: Env> Db<E> {
     fn install_vlog_gc(&mut self, prepared: VlogGcPrepared) -> Result<VlogRewriteStats> {
         let VlogGcPrepared { stats, remap, ssts } = prepared;
         let old_paths = ssts.old_paths;
+        let new_paths = ssts.new_paths;
         let next_file_num = ssts.next_file_num;
         let new_tables = ssts.tables;
         let new_levels = ssts.levels;
@@ -9383,6 +9455,10 @@ impl<E: Env> Db<E> {
         self.note_sst_inventory_changed();
 
         if let Err(e) = self.persist_manifest() {
+            for p in &new_paths {
+                let _ = self.remove_db_file(p);
+            }
+            let _ = self.env.sync_dir(&self.dir);
             self.ssts = prev_ssts;
             self.sst_levels = prev_levels;
             self.next_file_num = prev_next;
@@ -9414,6 +9490,10 @@ impl<E: Env> Db<E> {
                 cloned.map_values(remap_fn);
                 *t = Arc::new(cloned);
             }
+        }
+        self.retired_fold.map_values(remap_fn);
+        for t in &mut self.retired_pending {
+            t.map_values(remap_fn);
         }
         self.bytes_written_sst = self.bytes_written_sst.saturating_add(staged_bytes);
         for t in &self.ssts {
@@ -9568,6 +9648,7 @@ impl<E: Env> Db<E> {
             levels: new_levels,
             next_file_num,
             old_paths,
+            new_paths: staged_paths,
             bytes_written,
         })
     }
@@ -9883,7 +9964,7 @@ impl<E: Env> Db<E> {
     /// Shared by [`Self::alloc_seq`] and the ConcurrentDb 1-op pipeline.
     pub(crate) fn alloc_seq_atomic(next: &AtomicU64) -> Result<SequenceNumber> {
         let seq = next.fetch_add(1, Ordering::Relaxed);
-        if crate::write_admission_kernel::seq_exhausted(seq, MAX_SEQUENCE_NUMBER) {
+        if crate::write_admission_kernel::seq_exhausted(seq, MAX_ASSIGNABLE_SEQUENCE_NUMBER) {
             next.fetch_sub(1, Ordering::Relaxed);
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
@@ -9894,6 +9975,7 @@ impl<E: Env> Db<E> {
 
     /// Peek next sequence without allocating (TX sequence checkpoint).
     #[must_use]
+    #[allow(dead_code)]
     pub(crate) fn next_seq_peek(&self) -> SequenceNumber {
         self.next_seq.load(Ordering::Relaxed)
     }
@@ -9944,7 +10026,7 @@ impl<E: Env> Db<E> {
             };
             match op {
                 BatchOp::Put { key, value } => {
-                    self.bytes_ingested = self.bytes_ingested.saturating_add(value.len() as u64);
+                    let v_len = value.len() as u64;
                     let stored = if spill {
                         match self.maybe_spill_large_value(value) {
                             Ok(v) => v,
@@ -9956,6 +10038,7 @@ impl<E: Env> Db<E> {
                     } else {
                         escape_inline_value(value)
                     };
+                    self.bytes_ingested = self.bytes_ingested.saturating_add(v_len);
                     records.push(WriteOp::put(seq, key, stored));
                 }
                 BatchOp::Delete { key } => {
@@ -9975,6 +10058,7 @@ impl<E: Env> Db<E> {
     }
 
     /// Single-op form of [`Self::prepare_write_ops_spill`] (RFC-0154 P1.6).
+    #[allow(dead_code)]
     fn prepare_one_spill(&mut self, op: BatchOp, spill: bool) -> Result<(WriteOp, SequenceNumber)> {
         self.ensure_not_fenced()?;
         let seq_checkpoint = self.next_seq.load(Ordering::Relaxed);
@@ -9987,7 +10071,7 @@ impl<E: Env> Db<E> {
         };
         let rec = match op {
             BatchOp::Put { key, value } => {
-                self.bytes_ingested = self.bytes_ingested.saturating_add(value.len() as u64);
+                let v_len = value.len() as u64;
                 let stored = if spill {
                     match self.maybe_spill_large_value(value) {
                         Ok(v) => v,
@@ -9999,6 +10083,7 @@ impl<E: Env> Db<E> {
                 } else {
                     escape_inline_value(value)
                 };
+                self.bytes_ingested = self.bytes_ingested.saturating_add(v_len);
                 WriteOp::put(seq, key, stored)
             }
             BatchOp::Delete { key } => WriteOp::delete(seq, key),
@@ -12605,6 +12690,7 @@ struct PreparedVlogSsts {
     levels: Vec<u32>,
     next_file_num: u64,
     old_paths: Vec<PathBuf>,
+    new_paths: Vec<PathBuf>,
     bytes_written: u64,
 }
 
@@ -12795,7 +12881,7 @@ fn load_ssts_scan<E: Env>(
     for (_, path) in files {
         let t = SstTable::open_on(env, path)?;
         if let Some(kit) = &kit {
-            t.attach_payload_kit(&kit.source, &kit.pool);
+            t.attach_payload_kit(&kit.source, &kit.pool, &kit.plain);
         }
         max_seq = max_seq.max(t.max_sequence());
         tables.push(t);
@@ -13133,7 +13219,7 @@ fn write_merged_tables_span<'a>(
         // (the 25M settle OOM at ~6 chunks). Idempotent with the
         // install-time `adopt_sst`.
         if let Some(kit) = kit {
-            chunk.attach_payload_kit(&kit.source, &kit.pool);
+            chunk.attach_payload_kit(&kit.source, &kit.pool, &kit.plain);
         }
         out.push(chunk);
         rewrite_trim_allocator();
@@ -16684,7 +16770,7 @@ mod tests {
         db.put(b"k", b"v").unwrap();
         assert_eq!(db.get(b"k").as_deref(), Some(&b"v"[..]));
         db.close().unwrap();
-        let mut db = crate::Db::open(&dir).unwrap();
+        let db = crate::Db::open(&dir).unwrap();
         assert_eq!(
             db.get(b"k").as_deref(),
             Some(&b"v"[..]),
@@ -18959,6 +19045,154 @@ mod tests {
         restored.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&ckpt);
+    }
+
+    #[test]
+    fn put_large_value_spill_failure_does_not_corrupt_ingested_bytes() {
+        use std::io::{Read, Seek, SeekFrom, Write};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        struct FailVlogFile {
+            inner: std::fs::File,
+            is_vlog: bool,
+            armed: Arc<AtomicBool>,
+        }
+        impl Read for FailVlogFile {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.inner.read(buf)
+            }
+        }
+        impl Write for FailVlogFile {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                if self.is_vlog && self.armed.load(Ordering::SeqCst) {
+                    return Err(std::io::Error::other("simulated vlog disk full"));
+                }
+                self.inner.write(buf)
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                if self.is_vlog && self.armed.load(Ordering::SeqCst) {
+                    return Err(std::io::Error::other("simulated vlog disk full"));
+                }
+                self.inner.flush()
+            }
+        }
+        impl Seek for FailVlogFile {
+            fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+                self.inner.seek(pos)
+            }
+        }
+        impl crate::env::EnvFile for FailVlogFile {
+            fn sync_data(&mut self) -> std::io::Result<()> {
+                self.inner.sync_data()
+            }
+            fn sync_all(&mut self) -> std::io::Result<()> {
+                self.inner.sync_all()
+            }
+            fn set_len(&mut self, len: u64) -> std::io::Result<()> {
+                self.inner.set_len(len)
+            }
+            fn len(&mut self) -> std::io::Result<u64> {
+                self.inner.len()
+            }
+        }
+
+        #[derive(Clone)]
+        struct FailVlogCreateEnv {
+            armed: Arc<AtomicBool>,
+        }
+        impl crate::env::Env for FailVlogCreateEnv {
+            type File = FailVlogFile;
+            fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+                crate::env::StdEnv.create_dir_all(path)
+            }
+            fn create(&self, path: &Path) -> std::io::Result<Self::File> {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let is_vlog = name.contains("vlog") || name.contains("blob");
+                Ok(FailVlogFile {
+                    inner: crate::env::StdEnv.create(path)?,
+                    is_vlog,
+                    armed: Arc::clone(&self.armed),
+                })
+            }
+            fn open_append(&self, path: &Path) -> std::io::Result<Self::File> {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let is_vlog = name.contains("vlog") || name.contains("blob");
+                Ok(FailVlogFile {
+                    inner: crate::env::StdEnv.open_append(path)?,
+                    is_vlog,
+                    armed: Arc::clone(&self.armed),
+                })
+            }
+            fn open_read(&self, path: &Path) -> std::io::Result<Self::File> {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let is_vlog = name.contains("vlog") || name.contains("blob");
+                Ok(FailVlogFile {
+                    inner: crate::env::StdEnv.open_read(path)?,
+                    is_vlog,
+                    armed: Arc::clone(&self.armed),
+                })
+            }
+            fn sync_dir(&self, path: &Path) -> std::io::Result<()> {
+                crate::env::StdEnv.sync_dir(path)
+            }
+            fn read_dir_names(&self, path: &Path) -> std::io::Result<Vec<String>> {
+                crate::env::StdEnv.read_dir_names(path)
+            }
+            fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+                crate::env::StdEnv.remove_file(path)
+            }
+            fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+                crate::env::StdEnv.rename(from, to)
+            }
+            fn exists(&self, path: &Path) -> bool {
+                crate::env::StdEnv.exists(path)
+            }
+            fn metadata_len(&self, path: &Path) -> std::io::Result<u64> {
+                crate::env::StdEnv.metadata_len(path)
+            }
+        }
+
+        let dir = temp_dir();
+        let armed = Arc::new(AtomicBool::new(false));
+        let env = FailVlogCreateEnv {
+            armed: Arc::clone(&armed),
+        };
+        let mut opts = crate::db::OpenOptions::default();
+        opts.large_value_threshold = Some(64);
+        let mut db = Db::open_with_env(&dir, opts, env).unwrap();
+        assert_eq!(db.stats().bytes_ingested, 0);
+
+        armed.store(true, Ordering::SeqCst);
+
+        let large_val = vec![b'v'; 65536];
+        let res = db.put(b"failed_large", &large_val);
+        assert!(res.is_err(), "put must fail when vlog spill fails");
+        assert_eq!(
+            db.stats().bytes_ingested,
+            0,
+            "failed put must not mutate bytes_ingested"
+        );
+
+        armed.store(false, Ordering::SeqCst);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn alloc_seq_fails_closed_before_max_sequence_sentinel() {
+        use std::sync::atomic::AtomicU64;
+        let next = AtomicU64::new(crate::key::MAX_SEQUENCE_NUMBER);
+        let res = Db::<StdEnv>::alloc_seq_atomic(&next);
+        assert!(
+            res.is_err(),
+            "allocating MAX_SEQUENCE_NUMBER must fail closed to protect the sentinel"
+        );
+        assert_eq!(
+            next.load(Ordering::Relaxed),
+            crate::key::MAX_SEQUENCE_NUMBER,
+            "failed allocation must not leak or advance past the sentinel"
+        );
     }
 
     /// RFC-0084 P0: production `create_checkpoint` writes CHECKPOINT;
@@ -22893,7 +23127,7 @@ mod tests {
                 };
             }
         }
-        let mut seek_scratch = PointSeekScratch::default();
+        let mut seek_scratch = crate::sst::PointSeekScratch::default();
         let (key_h1, key_h2) = crate::bloom_kernel::hash_pair(key);
         for &sst_i in db.sst_indices_newest_first() {
             let table = &db.ssts[sst_i];
@@ -23394,6 +23628,7 @@ mod buggify_engine_tests {
 /// (quadratic over long scans; sampled as Vec realloc + memmove in the scan
 /// hot path). Chunks keep the vlog prefetch batching (RFC-0029): each
 /// resolved chunk still goes through [`Db::prefetch_resolve_stream`].
+#[allow(dead_code)]
 struct MemChunkStream<'a, E: Env = StdEnv> {
     table: &'a MemTable,
     start: Bound<Bytes>,
@@ -23408,8 +23643,10 @@ struct MemChunkStream<'a, E: Env = StdEnv> {
 /// Distinct user keys collected per chunk: bounds upfront work for
 /// window-limited consumers (compat `ITER_WINDOW` = 64) while amortizing
 /// chunk setup for full-range walkers.
+#[allow(dead_code)]
 const MEM_STREAM_CHUNK: usize = 256;
 
+#[allow(dead_code)]
 impl<'a, E: Env> MemChunkStream<'a, E> {
     fn refill(&mut self) -> bool {
         // The internal iterator borrows its bounds for its whole lifetime;

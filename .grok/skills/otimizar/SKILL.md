@@ -12,11 +12,11 @@ description: >
 
 ## Grind pressure (one block, overwritten each fire)
 
-- Last fire: worked (RFC-0230 P0.1 programa). consecutive_noops=0
-- Why: perdas restantes = wal_write (Darwin `_mc4` 0.160× wal=23µs; Linux 0.557×; 890ns no wal.lock) + miss-path 0.29× + flush_check @10M. Grupo/selo não mudam a classe Θ(1) do Rocks.
-- This fire MUST land: RFC-0230 P0.2 A/B PEDRA_WAL_BUFFER=0 vs default em deps_cache_overwrite_mc4 (SUITE=ycsb CLIENTS=4 SYNC=0) com PHASE wal= e ratio= vs Rocks; senão P0.3 kernel 0193 write_all_at
-- Forbidden this fire: Darwin as Linux; G1 1c win; collapsed Rocks; WriteThread no escuro; wait-to-grow; Fjall como ratio; staging cego 1c
-- Deeper: 0230 ondas 1–2 (Monkey FPR, flush_check, SILK iff p99); findings/2026-09-16-next-cut-wal-write-vs-n/
+- Last fire: worked (RFC-0305 PlainBlockCache, fire 111). consecutive_noops=0
+- Why: get_hit@100M era retenção quente — knob 1 GiB inerte no caminho ponto (só ~64 MiB TLS pós-0293). Cache plain compartilhado (16 shards, id-por-instância, só imagens CRC-verificadas); knob `set_block_cache` aterra no ponto. A/B mesmo binário 2.44× (p=0.00). DIAG ratio 0.574 @10M sob load host 120+.
+- This fire MUST land: rerun cartaz 100M get_hit quando a caixa voltar (decisivo — Darwin 10M ≪ RAM não reproduz o regime); depois cold miss 528ns vs 356ns e hydrate 1.06 vs 1.38 M/s
+- Forbidden this fire: Darwin como cartaz; G1 1c win; collapsed Rocks; Fjall como ratio; allowlist crescer
+- Deeper: findings/2026-09-29-rfc0305-plain-block-cache-get-hit-retention.md
 
 Peer: Rocks default `ROCKS_PARITY_SYNC=0`. G1 1c write-per-op ≠ win.
 Fjall = absoluto, never a ratio win. **Linux 3-run = cartaz. Darwin vs

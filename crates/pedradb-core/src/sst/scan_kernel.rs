@@ -82,6 +82,7 @@ pub fn point_bounds_overlap(
 /// AS-IS F167: Unbounded end treated as an empty end — a to-infinity scan
 /// skips every file instead of reading them.
 #[must_use]
+#[allow(dead_code)]
 pub fn point_bounds_overlap_as_is(
     smallest: Option<&[u8]>,
     largest: Option<&[u8]>,
@@ -113,6 +114,7 @@ pub fn key_in_window(key: &[u8], start: Bound<&[u8]>, end: Bound<&[u8]>) -> bool
 
 /// AS-IS: end bound ignored — keys at or past the window end are admitted.
 #[must_use]
+#[allow(dead_code)]
 pub fn key_in_window_as_is(key: &[u8], start: Bound<&[u8]>, _end: Bound<&[u8]>) -> bool {
     match start {
         Bound::Unbounded => true,

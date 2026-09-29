@@ -14,7 +14,6 @@
 //! and `docs/rfc/0001-pedradb-high-level-spec.md`.
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 
 #[path = "batch_kernel.rs"]

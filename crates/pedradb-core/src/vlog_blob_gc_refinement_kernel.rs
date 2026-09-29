@@ -158,7 +158,7 @@ impl VlogBlobGcCoordinator {
             .remove(&source_vlog)
             .unwrap_or_default();
 
-        for (key, handle) in self.lsm_index.iter_mut() {
+        for handle in self.lsm_index.values_mut() {
             if handle.file_number == source_vlog {
                 if let Some(&new_handle) = relocations.get(handle) {
                     *handle = new_handle;

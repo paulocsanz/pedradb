@@ -116,7 +116,7 @@ pub fn async_merge_policy(writers: usize, ncpu: usize, forced: Option<bool>) -> 
 /// AS-IS twin of [`async_merge_policy`] — the 0044-era default: the
 /// merge is env-only, the auto axis does not exist.
 #[must_use]
-pub fn async_merge_policy_as_is(writers: usize, ncpu: usize, forced: Option<bool>) -> bool {
+pub fn async_merge_policy_as_is(_writers: usize, _ncpu: usize, forced: Option<bool>) -> bool {
     forced == Some(true)
 }
 

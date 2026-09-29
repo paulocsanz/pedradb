@@ -23,3 +23,6 @@ from-rocks = ["dep:rocksdb"]
 name = "from_rocks"
 path = "tests/from_rocks.rs"
 required-features = ["from-rocks"]
+
+[lints]
+workspace = true
