@@ -2222,7 +2222,7 @@ impl DB<IoUringEnv> {
                         .map(|n| n.get())
                         .unwrap_or(4)
                 })
-                .clamp(1, 8);
+                .clamp(1, 16);
             let (ftx, fth, fpool) = spawn_flush_worker(db.inner.clone(), worker_count);
             db.flush_tx = ftx;
             db.flush_thread = fth;
@@ -2300,7 +2300,7 @@ impl DB<StdEnv> {
                         .map(|n| n.get())
                         .unwrap_or(4)
                 })
-                .clamp(1, 8);
+                .clamp(1, 16);
             let (ftx, fth, fpool) = spawn_flush_worker(db.inner.clone(), worker_count);
             db.flush_tx = ftx;
             db.flush_thread = fth;

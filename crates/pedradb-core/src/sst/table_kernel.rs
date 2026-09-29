@@ -3176,6 +3176,15 @@ fn write_sst_bulk_arrays_body(
     let mut block_first_user: Option<Bytes> = None;
     let mut block_start = 0usize;
     let mut max_sequence = 0u64;
+    let cap = n_entries.min(2_097_152);
+    let mut bloom = if crate::write_admission_kernel::batch_is_empty(n_entries as u64) {
+        BloomFilter::always_true()
+    } else {
+        let bpk = crate::bloom::bits_per_key_for_run(cap as u64);
+        let nparts = crate::filter_partition_kernel::filter_nparts(cap as u64);
+        BloomFilter::with_partitions(cap, bpk, nparts)
+    };
+    let bloom_active = bloom.is_active();
     // Encode 4 KiB blocks straight into the 4 MiB write batch. A side
     // `block_buf` plus copy was 5.75 GiB extra memcpy (v56 25M hydrate
     // 33.3 s / 0.86× vs Rocks; v54 256 KiB did the same copy at 1/64 the
@@ -3184,6 +3193,9 @@ fn write_sst_bulk_arrays_body(
         let k = keys[i].as_ref();
         let v = vals[i].as_ref();
         let seq = seqs[i];
+        if bloom_active {
+            bloom.insert(k);
+        }
         if seq > max_sequence {
             max_sequence = seq;
         }
@@ -3237,7 +3249,6 @@ fn write_sst_bulk_arrays_body(
         tail.extend_from_slice(&kl.to_le_bytes());
         tail.extend_from_slice(&h.first_user_key);
     }
-    let bloom = BloomFilter::always_true();
     tail.extend_from_slice(&bloom.encode());
     let n = n_entries as u64;
     let num_blocks = index.len() as u32;
@@ -4056,7 +4067,7 @@ mod tests {
         let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
         assert!(!table.compressed_blocks);
         assert!(table.block_crc);
-        assert!(!table.has_bloom());
+        assert!(table.has_bloom());
         assert_eq!(table.len(), n);
         assert!(
             !table.payload_resident(),

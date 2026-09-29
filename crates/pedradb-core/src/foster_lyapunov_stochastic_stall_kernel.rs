@@ -126,7 +126,7 @@ impl FosterLyapunovController {
 
     /// Simula um passo estocástico de transição e valida a deriva de Foster-Lyapunov:
     /// E[V(X_{t+1}) - V(X_t) | X_t = x] <= -epsilon quando x fora de C.
-    pub fn verify_step_lyapunov(
+    pub fn verify_step_drift(
         &self,
         current_state: LsmDynamicState,
         arrival_samples: &[u64], // Amostras da distribuição de cauda pesada de chegada

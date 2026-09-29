@@ -59,6 +59,7 @@ static GET_USED_PUBLISHED_SV: AtomicU64 = AtomicU64::new(0);
 struct PublishedSv {
     mem: Arc<RwLock<MemTable>>,
     imm: Option<Arc<MemTable>>,
+    parked: Arc<Vec<Arc<MemTable>>>,
     ssts: Arc<Vec<crate::sst::SstTable>>,
 }
 
@@ -608,6 +609,7 @@ impl WriteGroup {
         *slot.write() = Arc::new(PublishedSv {
             mem: db.snapshot_mem(),
             imm: db.snapshot_imm(),
+            parked: db.snapshot_parked(),
             ssts: db.snapshot_ssts(),
         });
         if let Some(settled) = self.settled_sst_only.as_ref() {
@@ -1134,12 +1136,17 @@ impl WriteGroup {
             self.await_ram_pressure(db);
         }
         while db.read().parked_bulk_len() >= 16 {
-            granted_sleep("bulk_parked_debt", FLUSH_DEBT_POLL);
+            granted_sleep("bulk_parked_debt", Duration::from_micros(50));
         }
         let active = self.begin_submit();
         let n = (keys.len() + tail.len()) as u64;
         if active == 1 && !self.recently_concurrent() {
-            let result = db.write().apply_latched_bulk_puts(family, keys, vals, tail);
+            let mut g = db.write();
+            let result = g.apply_latched_bulk_puts(family, keys, vals, tail);
+            if result.is_ok() {
+                self.publish_apply(&g);
+            }
+            drop(g);
             self.finish_lone_ops(n);
             return result;
         }
@@ -1442,13 +1449,8 @@ impl WriteGroup {
             // Rocks WriteThread: after election, snapshot whoever already
             // joined. Fair-unlock + yield let waiters push; this loop
             // drains until `join_complete` (batch >= active or 4) or 2µs.
-            let look_us = if self.async_group_forced == Some(true) {
-                150
-            } else {
-                crate::group_window_kernel::JOIN_LOOK_US
-            };
             let join_deadline =
-                Instant::now() + Duration::from_micros(look_us);
+                Instant::now() + Duration::from_micros(crate::group_window_kernel::JOIN_LOOK_US);
             let mut batch: Vec<PendingWrite> = Vec::new();
             loop {
                 {
@@ -1469,12 +1471,7 @@ impl WriteGroup {
                     }
                 }
                 let active = self.active.load(Ordering::Relaxed);
-                let is_concurrent = self.recently_concurrent() || self.async_group_forced == Some(true);
-                if is_concurrent {
-                    if crate::group_window_kernel::herd_full(batch.len()) {
-                        break;
-                    }
-                } else if crate::group_window_kernel::join_complete(batch.len(), active) {
+                if crate::group_window_kernel::join_complete(batch.len(), active) {
                     break;
                 }
                 // RFC-0211 follow-up: async-only group, writers ≤ ncpu —
@@ -1618,18 +1615,16 @@ impl WriteGroup {
                         // RFC-0217 P0.4: with the flight cap on, the window
                         // never exceeds the previous group's measured flight
                         // (Darwin-async ≈0 flight collapses it to off).
-                        let peers_recent =
-                            self.recently_concurrent() || self.async_group_forced == Some(true);
                         let us = crate::group_window_kernel::async_catchup_bound_us(
                             self.effective_group_window_us(),
                             active,
                             batch.len(),
-                            peers_recent,
+                            self.recently_concurrent(),
                         )
                         .max(crate::group_window_kernel::herd_collect_us(
                             active,
                             batch.len(),
-                            peers_recent,
+                            false,
                         ))
                         .max(
                             crate::group_window_kernel::post_group_grace_us(
@@ -1653,10 +1648,9 @@ impl WriteGroup {
                     // A 10µs condvar wait measured cw=23µs/grp and lost
                     // QPS; the missing writers are already in submit().
                     let initial = batch.len();
-                    let peers =
-                        self.recently_concurrent() || self.async_group_forced == Some(true);
+                    let peers = self.recently_concurrent();
                     let herd_only = crate::group_window_kernel::herd_collect_us(
-                        active, initial, peers,
+                        active, initial, false,
                     )
                     .max(crate::group_window_kernel::post_group_grace_us(
                         self.last_group_len.load(Ordering::Relaxed),
@@ -1673,20 +1667,13 @@ impl WriteGroup {
                         // publish the leader is alone in `active` and
                         // would seal at 1 (avg_group 2.17). Spin until
                         // HERD_TARGET or the 10µs bound.
-                        drop(g);
                         while Instant::now() < deadline {
-                            {
-                                let mut q = self.queue.lock();
-                                if !q.pending.is_empty() {
-                                    batch.extend(q.pending.drain(..));
-                                }
-                            }
+                            batch.extend(g.pending.drain(..));
                             if crate::group_window_kernel::herd_full(batch.len()) {
                                 break;
                             }
-                            std::thread::yield_now();
+                            std::hint::spin_loop();
                         }
-                        g = self.queue.lock();
                     } else {
                         // RFC-0217 P0.1b: collect through the client-side gap.
                         let initial = batch.len();
@@ -1745,7 +1732,7 @@ impl WriteGroup {
             let mut guard = db.write();
             let mut accepted_keys: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
             let mut accepted_ranges: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-            Self::validate_occ_batch_acc(&mut guard, &mut batch, &mut accepted_keys, &mut accepted_ranges);
+            Self::validate_occ_accumulated(&mut guard, &mut batch, &mut accepted_keys, &mut accepted_ranges);
             let inputs: Vec<(Vec<BatchOp>, bool)> = batch
                 .iter_mut()
                 .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
@@ -1765,7 +1752,7 @@ impl WriteGroup {
                             }
                             q.pending.drain(..).collect()
                         };
-                        Self::validate_occ_batch_acc(&mut guard, &mut extra, &mut accepted_keys, &mut accepted_ranges);
+                        Self::validate_occ_accumulated(&mut guard, &mut extra, &mut accepted_keys, &mut accepted_ranges);
                         let more: Vec<(Vec<BatchOp>, bool)> = extra
                             .iter_mut()
                             .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
@@ -1815,10 +1802,10 @@ impl WriteGroup {
     fn validate_occ_batch<E: Env>(guard: &mut Db<E>, batch: &mut [PendingWrite]) {
         let mut accepted_keys: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
         let mut accepted_ranges: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-        Self::validate_occ_batch_acc(guard, batch, &mut accepted_keys, &mut accepted_ranges);
+        Self::validate_occ_accumulated(guard, batch, &mut accepted_keys, &mut accepted_ranges);
     }
 
-    fn validate_occ_batch_acc<E: Env>(
+    fn validate_occ_accumulated<E: Env>(
         guard: &mut Db<E>,
         batch: &mut [PendingWrite],
         accepted_keys: &mut std::collections::HashSet<Vec<u8>>,
@@ -1859,6 +1846,24 @@ impl WriteGroup {
                         guard.range_has_write_after(start, end, *snap)
                     }
                 });
+
+            let last_seq = guard.last_sequence();
+            let conflict_pred = crate::group_commit_kernel::occ_conflict(*snap, last_seq, conflict);
+            if let Some(crate::group_commit_kernel::OccMemberFate::Conflict) =
+                crate::group_commit_kernel::occ_batch_plan(
+                    &[false],
+                    &[crate::group_commit_kernel::OccRead {
+                        snap: *snap,
+                        touched_key_written_after: conflict,
+                    }],
+                    last_seq,
+                )
+                .into_iter()
+                .next()
+            {
+                assert!(conflict_pred, "occ_batch_plan Conflict ⇒ occ_conflict");
+                conflict = true;
+            }
 
             // 3. Intra-batch conflict check against prior accepted transactions in this same batch
             if !conflict {
@@ -2074,7 +2079,7 @@ impl WriteGroup {
                 if crate::write_admission_kernel::batch_is_empty(extra.len() as u64) {
                     break;
                 }
-                Self::validate_occ_batch_acc(&mut guard, &mut extra, accepted_keys, accepted_ranges);
+                Self::validate_occ_accumulated(&mut guard, &mut extra, accepted_keys, accepted_ranges);
                 let more: Vec<(Vec<BatchOp>, bool)> = extra
                     .iter_mut()
                     .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
@@ -2449,6 +2454,7 @@ impl<E: Env> ConcurrentDb<E> {
         let published_ssts = Arc::new(RwLock::new(Arc::new(PublishedSv {
             mem: Arc::new(RwLock::new(MemTable::new())),
             imm: None,
+            parked: Arc::new(Vec::new()),
             ssts: Arc::new(Vec::new()),
         })));
         let mut writes = WriteGroup::new();
@@ -2503,16 +2509,21 @@ impl<E: Env> ConcurrentDb<E> {
     }
 
     fn publish_from(&self, db: &Db<E>) {
-        if let Some(vh) = db.vlog_handle() {
-            if self.vlog.read().is_none() {
-                *self.vlog.write() = Some(vh);
-            }
+        let current_vlog = db.vlog_handle();
+        let changed = match (&*self.vlog.read(), &current_vlog) {
+            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+            (None, None) => false,
+            _ => true,
+        };
+        if changed {
+            *self.vlog.write() = current_vlog;
         }
         self.vlog_use_new.store(db.vlog_use_new(), Ordering::Relaxed);
         let mem = db.snapshot_mem();
         let imm = db.snapshot_imm();
+        let parked = db.snapshot_parked();
         let ssts = db.snapshot_ssts();
-        let is_settled = mem.read().is_empty() && imm.is_none() && !ssts.is_empty();
+        let is_settled = mem.read().is_empty() && imm.is_none() && parked.is_empty() && !ssts.is_empty();
         if is_settled {
             let mut cf_envelopes: std::collections::HashMap<String, (Bytes, Bytes)> =
                 std::collections::HashMap::new();
@@ -2557,6 +2568,7 @@ impl<E: Env> ConcurrentDb<E> {
         *self.published_ssts.write() = Arc::new(PublishedSv {
             mem,
             imm,
+            parked,
             ssts,
         });
     }
@@ -2588,13 +2600,6 @@ impl<E: Env> ConcurrentDb<E> {
         if let Some(v) = self.point_cache.get(key) {
             self.note_class_point(v.is_some());
             return v;
-        }
-        if self.fast_outside_sst_miss(key) {
-            let sv = self.published_ssts.read();
-            if sv.mem.read().is_empty() && sv.imm.is_none() {
-                self.note_class_point(false);
-                return None;
-            }
         }
         if let Some(g) = self.inner.try_read() {
             note_lsm_lock();
@@ -2637,6 +2642,22 @@ impl<E: Env> ConcurrentDb<E> {
                 imm.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut range_tombs);
             }
             if let Some((seq, look)) = imm.get_entry(key, MAX_SEQUENCE_NUMBER) {
+                match look {
+                    Lookup::Found(v) => {
+                        if !crate::merge::range_deleted(key, seq, &range_tombs) {
+                            return self.resolve_stored_value(v);
+                        }
+                    }
+                    Lookup::Deleted => return None,
+                    Lookup::NotFound => {}
+                }
+            }
+        }
+        for table in sv.parked.iter().rev() {
+            if table.has_range_tombstones() {
+                table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut range_tombs);
+            }
+            if let Some((seq, look)) = table.get_entry(key, MAX_SEQUENCE_NUMBER) {
                 match look {
                     Lookup::Found(v) => {
                         if !crate::merge::range_deleted(key, seq, &range_tombs) {
@@ -2712,6 +2733,11 @@ impl<E: Env> ConcurrentDb<E> {
                 imm.collect_range_tombstones(snapshot, &mut range_tombs);
             }
         }
+        for table in sv.parked.iter() {
+            if table.has_range_tombstones() {
+                table.collect_range_tombstones(snapshot, &mut range_tombs);
+            }
+        }
         for table in sv.ssts.iter() {
             if table.has_range_tombstones() {
                 table.collect_range_tombstones(snapshot, &mut range_tombs);
@@ -2738,6 +2764,25 @@ impl<E: Env> ConcurrentDb<E> {
             }
         }
         if let Some(ref table) = sv.imm {
+            let mut last: Option<Bytes> = None;
+            for (k, v) in table.iter_internal_iter_at(start, end, snapshot) {
+                if k.sequence > snapshot {
+                    continue;
+                }
+                if last.as_ref().is_some_and(|u| u == &k.user_key) {
+                    continue;
+                }
+                last = Some(k.user_key.clone());
+                seen.insert(k.user_key.clone());
+                if k.kind == crate::key::ValueType::Value {
+                    if !crate::merge::range_deleted(&k.user_key, k.sequence, &range_tombs) {
+                        let val = self.resolve_stored_value(v.clone()).unwrap_or_else(|| v.clone());
+                        out.push((k.user_key.clone(), val));
+                    }
+                }
+            }
+        }
+        for table in sv.parked.iter().rev() {
             let mut last: Option<Bytes> = None;
             for (k, v) in table.iter_internal_iter_at(start, end, snapshot) {
                 if k.sequence > snapshot {
@@ -2792,6 +2837,13 @@ impl<E: Env> ConcurrentDb<E> {
         let g = self.inner.write();
         self.publish_from(&g);
         f()
+    }
+
+    /// RFC-0237 / RFC-0303: Park active memtable and update published SuperVersion.
+    pub fn park_active_mem(&self) {
+        let mut g = self.inner.write();
+        g.park_active_mem();
+        self.publish_from(&g);
     }
 
     /// RFC-0235: count a point hit/miss on the lock-free get path
@@ -4203,7 +4255,7 @@ impl<E: Env> ConcurrentDb<E> {
     ) -> Result<SequenceNumber> {
         while self.inner.read().parked_bulk_len() >= 16 {
             if !self.materialize_bulk_off_lock() {
-                granted_sleep("bulk_parked_debt", FLUSH_DEBT_POLL);
+                granted_sleep("bulk_parked_debt", Duration::from_micros(50));
             }
         }
         self.writes
@@ -4286,6 +4338,7 @@ impl<E: Env> ConcurrentDb<E> {
                     g.push_parked_unflushed(imm);
                 }
                 if g.parked_unflushed_bytes() < 2 * 1024 * 1024 {
+                    self.publish_from(&g);
                     return Ok(());
                 }
             }
@@ -4483,6 +4536,7 @@ impl<E: Env> ConcurrentDb<E> {
             let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
             g.apply_sst_installs(pairs, &levels);
             g.retire_flush_pin();
+            self.publish_from(&g);
         }
         true
     }
@@ -4507,6 +4561,7 @@ impl<E: Env> ConcurrentDb<E> {
             return false;
         };
         g.push_parked_unflushed(imm);
+        self.publish_from(&g);
         true
     }
 
@@ -4667,6 +4722,7 @@ impl<E: Env> ConcurrentDb<E> {
                     d2_retire_ms,
                 );
             }
+            self.publish_from(&g);
         }
         true
     }
@@ -4899,6 +4955,7 @@ impl<E: Env> ConcurrentDb<E> {
             let _ = g.env().remove_file(&path);
         }
         g.note_l0_compact();
+        self.publish_from(&g);
         true
     }
 
@@ -4913,8 +4970,9 @@ impl<E: Env> ConcurrentDb<E> {
     /// SST / MANIFEST I/O.
     pub fn compact(&self) -> Result<()> {
         self.flush()?;
-        let res = self.inner.write().compact_leveled();
-        self.publish_ssts();
+        let mut g = self.inner.write();
+        let res = g.compact_leveled();
+        self.publish_from(&g);
         res
     }
 
@@ -4930,8 +4988,9 @@ impl<E: Env> ConcurrentDb<E> {
         decision: &mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision,
     ) -> Result<()> {
         self.flush()?;
-        let res = self.inner.write().compact_filter_families(decision);
-        self.publish_ssts();
+        let mut g = self.inner.write();
+        let res = g.compact_filter_families(decision);
+        self.publish_from(&g);
         res
     }
 
@@ -4942,8 +5001,9 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// Open/decode of `path`; SST or MANIFEST I/O.
     pub fn ingest_sst_file(&self, path: &std::path::Path, family: &str) -> Result<()> {
-        let res = self.inner.write().ingest_sst_file(path, family);
-        self.publish_ssts();
+        let mut g = self.inner.write();
+        let res = g.ingest_sst_file(path, family);
+        self.publish_from(&g);
         res
     }
 
@@ -4954,8 +5014,9 @@ impl<E: Env> ConcurrentDb<E> {
     /// I/O.
     pub fn compact_cf(&self, cf: &str) -> Result<()> {
         self.flush_cf(cf)?;
-        let res = self.inner.write().compact_ssts_only_cf(cf);
-        self.publish_ssts();
+        let mut g = self.inner.write();
+        let res = g.compact_ssts_only_cf(cf);
+        self.publish_from(&g);
         res
     }
 
@@ -4975,7 +5036,9 @@ impl<E: Env> ConcurrentDb<E> {
     /// SST I/O.
     pub fn flush_cf(&self, family: &str) -> Result<()> {
         let _flush = self.flush_lock.lock();
-        self.inner.write().flush_cf(family)
+        let res = self.inner.write().flush_cf(family);
+        self.publish_ssts();
+        res
     }
 
     /// Live SST inventory (name, level, CF tag, size).
@@ -4990,7 +5053,9 @@ impl<E: Env> ConcurrentDb<E> {
     /// I/O.
     pub fn compact_with(&self, options: CompactOptions) -> Result<()> {
         self.flush()?;
-        self.inner.write().compact_with_ssts_only(options)
+        let res = self.inner.write().compact_with_ssts_only(options);
+        self.publish_ssts();
+        res
     }
 
     /// Read-oriented full collapse (RFC-0019 P2.2).
@@ -5002,7 +5067,9 @@ impl<E: Env> ConcurrentDb<E> {
     /// I/O.
     pub fn compact_for_reads(&self) -> Result<()> {
         let _flush = self.flush_lock.lock();
-        self.inner.write().compact_for_reads()
+        let res = self.inner.write().compact_for_reads();
+        self.publish_ssts();
+        res
     }
 
     /// Blob GC candidates (read lock).
@@ -5025,7 +5092,10 @@ impl<E: Env> ConcurrentDb<E> {
     /// Same as [`Db::compact_blob`].
     pub fn compact_blob(&self, file_num: u32) -> Result<VlogRewriteStats> {
         let _flush = self.flush_lock.lock();
-        self.inner.write().compact_blob(file_num)
+        while self.materialize_parked_holding_flush() {}
+        let res = self.inner.write().compact_blob(file_num);
+        self.publish_ssts();
+        res
     }
 
     /// Auto-pick worst sealed blob with dead_ratio ≥ `min_dead_ratio`.
@@ -5037,7 +5107,10 @@ impl<E: Env> ConcurrentDb<E> {
         min_dead_ratio: f64,
     ) -> Result<Option<(u32, VlogRewriteStats)>> {
         let _flush = self.flush_lock.lock();
-        self.inner.write().compact_blob_auto(min_dead_ratio)
+        while self.materialize_parked_holding_flush() {}
+        let res = self.inner.write().compact_blob_auto(min_dead_ratio);
+        self.publish_ssts();
+        res
     }
 
     /// Full value-log rewrite (single-flight with flush).
@@ -5046,7 +5119,10 @@ impl<E: Env> ConcurrentDb<E> {
     /// Same as [`Db::compact_vlog`].
     pub fn compact_vlog(&self) -> Result<VlogRewriteStats> {
         let _flush = self.flush_lock.lock();
-        self.inner.write().compact_vlog()
+        while self.materialize_parked_holding_flush() {}
+        let res = self.inner.write().compact_vlog();
+        self.publish_ssts();
+        res
     }
 
     /// Checkpoint (single-flight with flush — flushes first).
@@ -5089,6 +5165,27 @@ impl<E: Env> ConcurrentDb<E> {
     /// and file numbers do not violate the allocator watermark.
     pub fn assert_disk_inventory_invariant(&self) -> std::result::Result<(), crate::orphan_sst_cleanup_kernel::DiskResourceInvariantError> {
         self.inner.read().assert_disk_inventory_invariant()
+    }
+
+    /// Asserts LSM level disjointness invariant:
+    /// All SST runs at Level >= 1 must be strictly pairwise disjoint in user key space.
+    pub fn assert_level_disjointness_invariant(&self) -> std::result::Result<(), String> {
+        self.inner.read().assert_level_disjointness_invariant()
+    }
+
+    /// Asserts sequence monotonicity invariant:
+    /// `next_seq` must be strictly greater than all sequence numbers recorded in SSTs.
+    pub fn assert_sequence_monotonicity_invariant(&self) -> std::result::Result<(), String> {
+        self.inner.read().assert_sequence_monotonicity_invariant()
+    }
+
+    /// Asserts all core storage and structural invariants.
+    pub fn assert_all_invariants(&self) -> std::result::Result<(), String> {
+        self.assert_disk_inventory_invariant()
+            .map_err(|e| format!("disk inventory invariant violation: {e:?}"))?;
+        self.assert_level_disjointness_invariant()?;
+        self.assert_sequence_monotonicity_invariant()?;
+        Ok(())
     }
 
     /// Files at LSM `level` (read lock).

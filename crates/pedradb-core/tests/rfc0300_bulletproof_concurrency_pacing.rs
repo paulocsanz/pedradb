@@ -1,13 +1,8 @@
-//! Integration test suite for RFC-0300: Resilient Concurrency, Adaptive Backoff, and Write Pacing.
-//!
-//! Validates:
-//! 1. Smooth write pacing delay progression under L0 accumulation without stall cliffs.
-//! 2. `ConcurrentDb::transact` resilient execution under heavy multi-thread OCC contention.
-//! 3. Bounded backoff duration and jitter under conflict retry policies.
+//! Verification suite for RFC-0300 Bulletproof Concurrency, Adaptive Write Pacing,
+//! and High-Contention Transaction Retries.
 
 #![forbid(unsafe_code)]
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -18,24 +13,23 @@ use pedradb_core::resilient_tx::{ContentionTracker, TransactionRetryPolicy};
 use pedradb_core::write_admission_kernel::write_pacing_delay_micros;
 
 fn temp_db_dir() -> std::path::PathBuf {
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let nanos = SystemTime::now()
+    let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let id = SEQ.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("pedradb-rfc0300-{nanos}-{id}"));
-    let _ = std::fs::remove_dir_all(&path);
-    path
+    let dir = std::env::temp_dir().join(format!("pedra-rfc0300-test-{n}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
 }
 
 #[test]
 fn test_write_pacing_curve_boundaries() {
-    let limit = 40u64;
-    // Below 75% (30 files), delay is zero
+    let limit = 40;
+
+    // Up to 30 files, zero artificial delay
     assert_eq!(write_pacing_delay_micros(0, limit), 0);
-    assert_eq!(write_pacing_delay_micros(20, limit), 0);
-    assert_eq!(write_pacing_delay_micros(29, limit), 0);
+    assert_eq!(write_pacing_delay_micros(10, limit), 0);
     assert_eq!(write_pacing_delay_micros(30, limit), 0);
 
     // Between 30 and 40 files, delay increases smoothly from 0 to 1000us
@@ -59,8 +53,8 @@ fn test_concurrent_transact_resolves_high_contention() {
     // Initialize counter to 0
     db.put(hot_key, &0u64.to_le_bytes()).expect("initial put");
 
-    let num_threads = 4;
-    let increments_per_thread = 5;
+    let num_threads = 6;
+    let increments_per_thread = 20;
     let tracker = Arc::new(ContentionTracker::new());
 
     let mut handles = Vec::new();

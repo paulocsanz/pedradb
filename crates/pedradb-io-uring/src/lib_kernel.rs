@@ -640,7 +640,7 @@ mod tests {
         assert!(!full_uses_posix_fallback(true));
         assert!(
             !full_uses_posix_fallback_as_is(false),
-            "AS-IS tooth: claim live ring when unavailable"
+            "AS-IS dente: claim live ring when unavailable"
         );
         let env = production_env();
         let ring = env.backend() == IoBackend::IoUring;
@@ -717,7 +717,7 @@ mod tests {
         assert!(!pedradb_core::wal_on_sqe_admitted());
         assert!(
             pedradb_core::wal_on_sqe_admitted_as_is(),
-            "AS-IS tooth: WAL back on SQE"
+            "AS-IS dente: WAL back on SQE"
         );
         assert!(!pedradb_core::ring_twin_admitted());
         let dir = temp_dir();
@@ -970,7 +970,7 @@ mod tests {
         assert!(!crate::cqe_kernel::cqe_res_ok(-5));
         assert!(
             crate::cqe_kernel::cqe_res_ok_as_is(-5),
-            "AS-IS tooth: negative CQE looks Ok"
+            "AS-IS dente: negative CQE looks Ok"
         );
         let env = IoUringEnv::new().unwrap();
         let dir = temp_dir();
