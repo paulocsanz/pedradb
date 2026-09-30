@@ -2558,6 +2558,24 @@ impl<E: PedraEnv> DB<E> {
     }
 
     fn notify_compact(&self) {
+        // RFC-0305: per-apply notification woke the compact worker ~1 kHz
+        // during hydrate; its tick takes three Db read locks and walks the
+        // SST inventory (tombstone-due) — pure interference with the
+        // writer's write lock. The worker's own 5 ms poll plus at-most-20 ms
+        // of added latency here covers every trigger.
+        thread_local! {
+            static LAST_NOTIFY: std::cell::Cell<Option<std::time::Instant>> =
+                const { std::cell::Cell::new(None) };
+        }
+        const MIN_GAP: std::time::Duration = std::time::Duration::from_millis(20);
+        let should = LAST_NOTIFY.with(|l| match l.get() {
+            Some(last) => last.elapsed() >= MIN_GAP,
+            None => true,
+        });
+        if !should {
+            return;
+        }
+        LAST_NOTIFY.with(|l| l.set(Some(std::time::Instant::now())));
         if let Some(tx) = &self.flush_tx {
             let _ = tx.try_send(CompactCmd::Run);
         }
@@ -4736,6 +4754,10 @@ impl<E: PedraEnv> Drop for DB<E> {
         }
         if let Some(h) = self.compact_thread.take() {
             let _ = h.join();
+        }
+        // RFC-0305: writer-phase accounting for hydrate forensics.
+        if pedradb_core::write_diag_kernel::latched_bulk_diag_enabled() {
+            eprintln!("{}", pedradb_core::write_diag_kernel::latched_bulk_diag_line());
         }
     }
 }

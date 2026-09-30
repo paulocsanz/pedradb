@@ -6239,7 +6239,7 @@ impl<E: Env> Db<E> {
             self.flush_dead_bulk_runs()?;
             self.absorb_mem_family_into_run(family)?;
         }
-        self.bulk_append_puts(family, keys, vals)?;
+        self.bulk_append_puts(family, keys, vals, true)?;
         if crate::write_admission_kernel::batch_is_empty(tail.len() as u64) {
             let seq = self.last_sequence();
             self.publish_sequence(seq);
@@ -6497,12 +6497,19 @@ impl<E: Env> Db<E> {
         family: &str,
         mut keys: Vec<Bytes>,
         mut vals: Vec<Bytes>,
+        pre_sorted: bool,
     ) -> Result<()> {
         let n = keys.len();
         if crate::write_admission_kernel::batch_is_empty(n as u64) {
             return Ok(());
         }
-        crate::bulk_run::sort_bulk_key_vals(&mut keys, &mut vals);
+        // `pre_sorted` callers verified strictly ascending above the
+        // high-water in `observe_latched_span`; the run still tracks
+        // disorder per push and `write_sst_bulk_arrays` re-checks and
+        // sorts at flush as the final oracle either way.
+        if !pre_sorted {
+            crate::bulk_run::sort_bulk_key_vals(&mut keys, &mut vals);
+        }
         let n64 = n as u64;
         let seq0 = self.next_seq.fetch_add(n64, Ordering::Relaxed);
         let last = seq0.saturating_add(n64.saturating_sub(1));
@@ -6514,11 +6521,22 @@ impl<E: Env> Db<E> {
         }
         let mut seq = seq0;
         let cap = self.bulk_chunk_cap();
+        // RFC-0305: a fresh run pre-reserves its whole chunk so the arrays
+        // do not regrow through ~18 doubling reallocs (vm_copy of the
+        // accumulated keys/vals) on the way to 64 MiB.
+        let created = !self.bulk_runs.contains_key(family);
         // RFC-0217 P1.1: the run arrays carry no WAL frames — the rotate
         // treats this whole sequence range as WAL-less until published.
         self.walless_seq_high = self.walless_seq_high.max(last);
         let over = {
             let run = self.bulk_runs.entry(family.to_string()).or_default();
+            if created {
+                if let Some(bytes) = cap {
+                    // ~240 B/entry heuristic (200 B bench values + key +
+                    // framing); over-reserving costs one Vec header.
+                    run.reserve((bytes / 240).min(1 << 21));
+                }
+            }
             run.reserve(n);
             for (k, v) in keys.into_iter().zip(vals) {
                 let v = escape_inline_value(v);
@@ -10201,7 +10219,7 @@ impl<E: Env> Db<E> {
                 keys.push(k);
                 vals.push(v);
             }
-            self.bulk_append_puts(&fam, keys, vals)?;
+            self.bulk_append_puts(&fam, keys, vals, false)?;
         }
         if crate::write_admission_kernel::batch_is_empty(ladder.len() as u64) {
             let seq = self.last_sequence();
@@ -23020,6 +23038,46 @@ mod tests {
     /// at the bottom level; the repeated-key meta family stays on the
     /// ladder; settle does not rewrite the bulk chunks; reopen restores
     /// the levels.
+    /// RFC-0305 pre_sorted: a trusted ascending append keeps the run
+    /// sorted; a lying trusted append still flags disorder (the flush
+    /// oracle sorts either way).
+    #[test]
+    fn bulk_append_pre_sorted_flag_tracks_order() {
+        let dir = temp_dir();
+        let mut db = Db::<StdEnv>::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into()]);
+        let up: Vec<bytes::Bytes> = (0..64)
+            .map(|i| bytes::Bytes::from(format!("data\0u{:04}", i)))
+            .collect();
+        let up_vals: Vec<bytes::Bytes> = (0..64)
+            .map(|i| bytes::Bytes::from(vec![b'u', i as u8]))
+            .collect();
+        db.bulk_append_puts("data", up, up_vals, true).unwrap();
+        assert!(
+            db.bulk_runs.get("data").is_some_and(|r| r.is_sorted()),
+            "ascending pre_sorted append stays sorted"
+        );
+        let down: Vec<bytes::Bytes> = (0..64)
+            .rev()
+            .map(|i| bytes::Bytes::from(format!("data\0x{:04}", i)))
+            .collect();
+        let down_vals: Vec<bytes::Bytes> = (0..64)
+            .map(|i| bytes::Bytes::from(vec![b'x', i as u8]))
+            .collect();
+        db.bulk_append_puts("data", down, down_vals, true).unwrap();
+        assert!(
+            !db.bulk_runs.get("data").is_some_and(|r| r.is_sorted()),
+            "disorder is tracked even on the trusted path"
+        );
+    }
+
     #[test]
     fn bulk_ingest_installs_latched_family_at_bottom_level() {
         let dir = temp_dir();
