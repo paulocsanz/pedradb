@@ -318,6 +318,8 @@ pub mod disk_pressure_kernel;
 pub mod ram_pressure_kernel;
 /// Unified backpressure and protection kernel (RFC-0274).
 pub mod backpressure_kernel;
+/// RFC-0305 hydrate writer-phase diagnostics (`PEDRA_HYDRATE_DIAG`).
+pub mod write_diag_kernel;
 pub mod leftover_page_kernel;
 #[path = "lock_kernel.rs"]
 pub mod lock;
