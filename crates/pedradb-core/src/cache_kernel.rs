@@ -551,6 +551,14 @@ impl PlainBlockCache {
         g.order.push_back((key, ins_epoch));
     }
 
+    /// Whether an image of `len` decompressed bytes can fit a shard at the
+    /// current budget — a lock-free pre-admission check so the miss path can
+    /// skip the copy + insert when retention is off or cannot hold the image.
+    #[must_use]
+    pub fn admits_len(&self, len: u64) -> bool {
+        self.shard_budget() >= len
+    }
+
     /// Hit count across shards.
     #[must_use]
     pub fn hits(&self) -> u64 {

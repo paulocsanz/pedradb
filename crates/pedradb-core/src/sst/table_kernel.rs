@@ -881,46 +881,100 @@ impl SstTable {
                         .map_err(CoreError::Io)?;
                     SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                     let body = split_block_crc(&scratch.raw, &self.path)?;
-                    let plain_arc: Arc<[u8]> = if self.compressed_blocks {
+                    // Retain-eligible misses decompress into a buffer that
+                    // moves wholesale into the cache (`Arc::from(Vec)` transfers
+                    // the allocation); the old `Arc::from(slice)` re-copied
+                    // every probed block, which at dataset ≫ budget (100M on a
+                    // 4 GiB guest, ~4% expected re-probe) taxed every miss for
+                    // bytes the cache would never serve. When retention cannot
+                    // hold the image the miss seeks on the scratch buffer and
+                    // pays nothing.
+                    let retain = kit.plain.admits_len(body.len() as u64);
+                    let plain_arc: Option<Arc<[u8]>> = if !retain {
+                        if self.compressed_blocks {
+                            let (size, input) =
+                                lz4_flex::block::uncompressed_size(body).map_err(|e| {
+                                    CoreError::Internal(format!(
+                                        "SST lz4 decompress failed in {}: {e}",
+                                        self.path.display()
+                                    ))
+                                })?;
+                            scratch.plain.clear();
+                            scratch.plain.resize(size, 0);
+                            let written =
+                                lz4_flex::block::decompress_into(input, &mut scratch.plain)
+                                    .map_err(|e| {
+                                        CoreError::Internal(format!(
+                                            "SST lz4 decompress failed in {}: {e}",
+                                            self.path.display()
+                                        ))
+                                    })?;
+                            if written != size {
+                                return Err(CoreError::Internal(format!(
+                                    "SST lz4 size prefix mismatch in {}: wrote {written} of {size} bytes",
+                                    self.path.display()
+                                )));
+                            }
+                        }
+                        None
+                    } else if self.compressed_blocks {
                         let (size, input) = lz4_flex::block::uncompressed_size(body).map_err(|e| {
                             CoreError::Internal(format!(
                                 "SST lz4 decompress failed in {}: {e}",
                                 self.path.display()
                             ))
                         })?;
-                        scratch.plain.clear();
-                        scratch.plain.resize(size, 0);
-                        let written = lz4_flex::block::decompress_into(input, &mut scratch.plain).map_err(|e| {
-                            CoreError::Internal(format!(
-                                "SST lz4 decompress failed in {}: {e}",
-                                self.path.display()
-                            ))
-                        })?;
+                        let mut plain = vec![0u8; size];
+                        let written =
+                            lz4_flex::block::decompress_into(input, &mut plain).map_err(|e| {
+                                CoreError::Internal(format!(
+                                    "SST lz4 decompress failed in {}: {e}",
+                                    self.path.display()
+                                ))
+                            })?;
                         if written != size {
                             return Err(CoreError::Internal(format!(
                                 "SST lz4 size prefix mismatch in {}: wrote {written} of {size} bytes",
                                 self.path.display()
                             )));
                         }
-                        Arc::from(scratch.plain.as_slice())
+                        Some(Arc::from(plain))
                     } else {
-                        Arc::from(body)
+                        Some(Arc::from(body))
                     };
-                    kit.plain
-                        .insert(self.cache_id, h.offset, Arc::clone(&plain_arc));
-                    let found = seek_point_in_plain_block(
-                        &plain_arc,
-                        user_key,
-                        snapshot,
-                        &self.path,
-                    )?;
-                    if let Some(found) = found {
-                        if crate::lookup_kernel::prefer_newer_seq(
-                            best.is_some(),
-                            found.0,
-                            best.as_ref().map(|(s, _)| *s).unwrap_or(0),
-                        ) {
-                            best = Some(found);
+                    if let Some(plain_arc) = plain_arc {
+                        kit.plain
+                            .insert(self.cache_id, h.offset, Arc::clone(&plain_arc));
+                        if let Some(found) = seek_point_in_plain_block(
+                            &plain_arc,
+                            user_key,
+                            snapshot,
+                            &self.path,
+                        )? {
+                            if crate::lookup_kernel::prefer_newer_seq(
+                                best.is_some(),
+                                found.0,
+                                best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                            ) {
+                                best = Some(found);
+                            }
+                        }
+                    } else {
+                        let plain: &[u8] = if self.compressed_blocks {
+                            &scratch.plain
+                        } else {
+                            body
+                        };
+                        if let Some(found) =
+                            seek_point_in_plain_block(plain, user_key, snapshot, &self.path)?
+                        {
+                            if crate::lookup_kernel::prefer_newer_seq(
+                                best.is_some(),
+                                found.0,
+                                best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                            ) {
+                                best = Some(found);
+                            }
                         }
                     }
                 }

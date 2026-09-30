@@ -165,3 +165,55 @@ cargo bench --bench snapshot_backends --features fjall,rocksdb,pedradb -- get_hi
 # A/B do knob no Linux (piso): + SLIPSTREAM_BENCH_CACHE_BYTES=0
 #                            + PEDRA_PLAIN_BLOCK_BUDGET=1, BACKENDS=pedradb
 ```
+
+## 8. Post-mortem 29/09 (noite): lookup_100 @100M piorou +25% — imposto de miss + orçamento empilhado
+
+O rerun Linux do usuário (c80a105, 100M) confirmou o get_hit (37.9 µs,
+W) mas **lookup_100 regrediu**: get_loop 3.23→4.04 ms, multi_get
+3.57→4.35 ms (+25%; chaves aleatórias sobre 23.7 GiB no guest de ~4 GiB).
+
+**Duas armadilhas de medição desmontadas primeiro** (ficam registradas
+para nunca mais morder):
+
+1. **O knob do bench sobrescreve o env em todo open.**
+   `PedraDbConfig::default().cache_size_bytes = 1 GiB` (iguala Rocks/fjall)
+   → `set_block_cache(1 GiB)` → `set_block_cache_budget_bytes(1 GiB)`.
+   `PEDRA_PLAIN_BLOCK_BUDGET` só decide o nº de shards (1 vs 16) — o
+   orçamento efetivo é sempre 1 GiB. Provado por contadores no Drop do
+   cache: `budget=1073741824` em todas as corridas. A/B por env mede
+   estrutura de shard, não orçamento. A/B de orçamento no bench é por
+   `SLIPSTREAM_BENCH_CACHE_BYTES`.
+2. **Benches sob carga de host são lixo.** Duas séries invalidadas
+   (load 67: rustc+cbmc+vite+cargo-mutants de outras sessões; a §5
+   acima já tinha visto load 121). Guarda de carga obrigatória
+   (load < 8 antes de medir; A/B intercalado na mesma cadeia).
+
+**Baseline pré-0305 no mesmo bench** (worktree 2b9f0a2, Darwin 10M,
+máquina quieta): lookup_100 **14.26/10.53 ms** — o c80a105
+(0.54–0.68 ms) é **~26× mais rápido**. O cache plain é um corte
+massivamente vencedor no 10M (dataset 2.35 GiB, ~42% hits medidos).
+A exceção é 100M-em-4 GiB: hit esperado ≈ orçamento/dataset ≈ 4%, e
+cada miss pagava (a) cópia integral do bloco (`Arc::from(slice)` de
+16 KiB) para bytes que o cache quase nunca re-serve, e (b) o plain de
+1 GiB vinha **empilhado** sobre o pool de payload de 256 MiB — 1.25 GiB
+de pegada onde o Rocks tem exatamente 1.0 GiB, num box de 4 GiB com
+page cache disputado.
+
+**Corte (follow-up):**
+
+- `set_block_cache` passa a valer o **orçamento total de leitura**:
+  payload = min(knob, 256 MiB); plain = knob − payload. Pedra e Rocks
+  com a mesma pegada de memória.
+- Miss com retenção descomprime em `Vec` novo e **move** pro cache
+  (`Arc::from(Vec)` — alocação transferida, zero memcpy; antes
+  re-copiava cada bloco por probe).
+- `PlainBlockCache::admits_len` (lock-free): quando o orçamento não
+  segura a imagem, o miss busca no scratch e **nada** paga — caminho
+  idêntico ao pré-0305.
+
+**Verificação:** dentes rfc0305 3/3, compat cache 3/3; lint 977 = teto,
+zero drift (`admits_len` classificado na allowlist de `cache_kernel.rs`).
+A/B Darwin 10M pós-fix: bloqueado por load do host (guarda esperando
+quiet); **o número decisivo é o rerun Linux 100M do usuário** —
+esperado lookup_100 de volta a ~3.2 ms (nível 2b9f0a2) mantendo o get_hit
+ganhando, agora com 256 MiB a menos de RAM.
