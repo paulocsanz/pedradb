@@ -6234,7 +6234,7 @@ impl<E: Env> Db<E> {
             self.flush_dead_bulk_runs()?;
             self.absorb_mem_family_into_run(family)?;
         }
-        self.bulk_append_puts(family, keys, vals, true)?;
+        self.bulk_append_puts(family, keys, vals)?;
         if crate::write_admission_kernel::batch_is_empty(tail.len() as u64) {
             let seq = self.last_sequence();
             self.publish_sequence(seq);
@@ -6479,18 +6479,12 @@ impl<E: Env> Db<E> {
         family: &str,
         mut keys: Vec<Bytes>,
         mut vals: Vec<Bytes>,
-        pre_sorted: bool,
     ) -> Result<()> {
         let n = keys.len();
         if crate::write_admission_kernel::batch_is_empty(n as u64) {
             return Ok(());
         }
-        // `pre_sorted` callers verified strictly ascending above the
-        // high-water (bulk route); the flush writer re-checks and sorts as
-        // the final oracle either way.
-        if !pre_sorted {
-            crate::bulk_run::sort_bulk_key_vals(&mut keys, &mut vals);
-        }
+        crate::bulk_run::sort_bulk_key_vals(&mut keys, &mut vals);
         let n64 = n as u64;
         let seq0 = self.next_seq.fetch_add(n64, Ordering::Relaxed);
         let last = seq0.saturating_add(n64.saturating_sub(1));
@@ -10187,7 +10181,7 @@ impl<E: Env> Db<E> {
                 keys.push(k);
                 vals.push(v);
             }
-            self.bulk_append_puts(&fam, keys, vals, false)?;
+            self.bulk_append_puts(&fam, keys, vals)?;
         }
         if crate::write_admission_kernel::batch_is_empty(ladder.len() as u64) {
             let seq = self.last_sequence();
@@ -23006,46 +23000,6 @@ mod tests {
     /// at the bottom level; the repeated-key meta family stays on the
     /// ladder; settle does not rewrite the bulk chunks; reopen restores
     /// the levels.
-    #[test]
-    fn bulk_append_pre_sorted_flag_tracks_order() {
-        let dir = temp_dir();
-        let mut db = Db::open_with(
-            &dir,
-            OpenOptions {
-                sync: false,
-                ..OpenOptions::default()
-            },
-        )
-        .unwrap();
-        db.set_physical_cfs(vec!["data".into()]);
-        // Trusted ascending append keeps the run sorted.
-        let up: Vec<bytes::Bytes> = (0..64)
-            .map(|i| bytes::Bytes::from(format!("data\0u{:04}", i)))
-            .collect();
-        let up_vals: Vec<bytes::Bytes> = (0..64)
-            .map(|i| bytes::Bytes::from(vec![b'u', i as u8]))
-            .collect();
-        db.bulk_append_puts("data", up, up_vals, true).unwrap();
-        assert!(
-            db.bulk_runs.get("data").is_some_and(|r| r.is_sorted()),
-            "ascending pre_sorted append stays sorted"
-        );
-        // Lying pre_sorted=true with descending keys: the flag skips the
-        // batch sort and the run tracks the disorder…
-        let down: Vec<bytes::Bytes> = (0..64)
-            .rev()
-            .map(|i| bytes::Bytes::from(format!("data\0x{:04}", i)))
-            .collect();
-        let down_vals: Vec<bytes::Bytes> = (0..64)
-            .map(|i| bytes::Bytes::from(vec![b'x', i as u8]))
-            .collect();
-        db.bulk_append_puts("data", down, down_vals, true).unwrap();
-        assert!(
-            !db.bulk_runs.get("data").is_some_and(|r| r.is_sorted()),
-            "disorder is tracked even on the trusted path"
-        );
-    }
-
     #[test]
     fn bulk_ingest_installs_latched_family_at_bottom_level() {
         let dir = temp_dir();
