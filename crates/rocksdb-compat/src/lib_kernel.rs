@@ -1396,6 +1396,76 @@ fn encoded_succ(enc: &[u8]) -> Option<Vec<u8>> {
 static DEFAULT_CF_ARC: std::sync::LazyLock<Arc<str>> =
     std::sync::LazyLock::new(|| DEFAULT_CF.into());
 
+/// RFC-0306 P1: batch staging slabs. `put_cf` used to pay two
+/// allocations per op (`Bytes::copy_from_slice` of key and value — 2048
+/// per hydrate batch on the single client thread). These thread-local
+/// `BytesMut` slabs keep their capacity across batches: each op copies
+/// into the slab and takes a refcounted view (`split_to().freeze()`), and
+/// the slab rolls over to a fresh one only when its remaining capacity
+/// runs low — the previous allocation lives on through the outstanding
+/// views, so nothing is ever copied at rollover. This is the fix for the
+/// aa6d24e regression: that arena was per-batch and regrew from zero
+/// every apply (~18 reallocs of accumulated large blocks); here growth
+/// never happens under live views and rollover is one fresh allocation
+/// per ~8 MiB staged. `PEDRA_ARENA_DISABLE=1` restores the per-op path
+/// for A/B.
+const ARENA_SLAB_CAP: usize = 8 << 20;
+const ARENA_SLAB_KEEP: usize = 64 << 10;
+
+thread_local! {
+    static ARENA_KEY_SLAB: std::cell::RefCell<bytes::BytesMut> =
+        std::cell::RefCell::new(bytes::BytesMut::with_capacity(ARENA_SLAB_CAP));
+    static ARENA_VAL_SLAB: std::cell::RefCell<bytes::BytesMut> =
+        std::cell::RefCell::new(bytes::BytesMut::with_capacity(ARENA_SLAB_CAP));
+}
+
+fn arena_enabled() -> bool {
+    thread_local! {
+        static ON: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    }
+    ON.with(|c| {
+        if let Some(on) = c.get() {
+            return on;
+        }
+        let on = std::env::var_os("PEDRA_ARENA_DISABLE").is_none_or(|v| v != "1");
+        c.set(Some(on));
+        on
+    })
+}
+
+/// Copy `src` into `slab` and return an owned view of the copy.
+fn arena_view(slab: &mut bytes::BytesMut, src: &[u8]) -> bytes::Bytes {
+    if slab.capacity() < src.len().saturating_add(ARENA_SLAB_KEEP).min(ARENA_SLAB_CAP) {
+        *slab = bytes::BytesMut::with_capacity(ARENA_SLAB_CAP);
+    }
+    slab.extend_from_slice(src);
+    let n = src.len();
+    slab.split_to(n).freeze()
+}
+
+/// Stage `src` through the thread-local key slab (or a plain copy when
+/// the arena is disabled).
+fn arena_key(src: &[u8]) -> bytes::Bytes {
+    if !arena_enabled() {
+        return bytes::Bytes::copy_from_slice(src);
+    }
+    ARENA_KEY_SLAB.with(|c| {
+        let mut slab = c.borrow_mut();
+        arena_view(&mut slab, src)
+    })
+}
+
+/// Stage `src` through the thread-local value slab.
+fn arena_val(src: &[u8]) -> bytes::Bytes {
+    if !arena_enabled() {
+        return bytes::Bytes::copy_from_slice(src);
+    }
+    ARENA_VAL_SLAB.with(|c| {
+        let mut slab = c.borrow_mut();
+        arena_view(&mut slab, src)
+    })
+}
+
 /// Atomic write batch (one Pedra `apply_batch` = all-or-nothing).
 #[derive(Debug, Default)]
 pub struct WriteBatch {
@@ -1437,8 +1507,8 @@ impl WriteBatch {
         self.ops.push((
             Some(Arc::clone(&cf.name)),
             BatchOp::Put {
-                key: Bytes::copy_from_slice(key.as_ref()),
-                value: Bytes::copy_from_slice(value.as_ref()),
+                key: arena_key(key.as_ref()),
+                value: arena_val(value.as_ref()),
             },
         ));
     }
@@ -1466,7 +1536,7 @@ impl WriteBatch {
         self.ops.push((
             Some(Arc::clone(&cf.name)),
             BatchOp::Delete {
-                key: Bytes::copy_from_slice(key.as_ref()),
+                key: arena_key(key.as_ref()),
             },
         ));
     }
@@ -1492,8 +1562,8 @@ impl WriteBatch {
         self.ops.push((
             Some(Arc::clone(&cf.name)),
             BatchOp::DeleteRange {
-                start: Bytes::copy_from_slice(s),
-                end: Bytes::copy_from_slice(e),
+                start: arena_key(s),
+                end: arena_key(e),
             },
         ));
     }
@@ -2635,6 +2705,83 @@ impl<E: PedraEnv> DB<E> {
         self.inner.fast_outside_sst_miss(key)
     }
 
+    /// RFC-0306 P0: pre-TLS miss rejection. Same contract as
+    /// [`Self::fast_outside_sst_miss`] (settled ⇒ mem/imm/parked empty ⇒
+    /// a key outside every family envelope does not exist), evaluated
+    /// before the TLS ids / last-get table / `inner.get` entry — the
+    /// probe_miss p50 at 100M was 545 ns paying all of those. The
+    /// envelope copy is cached per thread and re-validated against the
+    /// settled flag and both cache epochs on every call (3 atomic loads);
+    /// any write or settle invalidates it.
+    fn fast_user_space_miss(&self, cf: &str, key: &[u8]) -> bool {
+        if !self.inner.is_settled_sst_only() {
+            return false;
+        }
+        let tls_epoch = self.inner.point_tls_epoch();
+        let read_epoch = self.inner.read_cache_epoch();
+        // `cache_epoch_base` is unique per DB instance: without it a stale
+        // envelope from another DB on the same thread (checkpoint restore,
+        // reopen) could answer a false None when the epoch counters happen
+        // to coincide.
+        let db_id = self.cache_epoch_base;
+        thread_local! {
+            static ENV: std::cell::RefCell<Option<(
+                u64,
+                u64,
+                u64,
+                std::sync::Arc<Vec<(bytes::Bytes, bytes::Bytes)>>,
+            )>> = const { std::cell::RefCell::new(None) };
+        }
+        let pairs = ENV.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            let fresh = slot.as_ref().is_none_or(|(id, te, re, _)| {
+                *id != db_id || *te != tls_epoch || *re != read_epoch
+            });
+            if fresh {
+                *slot = Some((
+                    db_id,
+                    tls_epoch,
+                    read_epoch,
+                    std::sync::Arc::new(self.inner.sst_envelope_snapshot()),
+                ));
+            }
+            match slot.as_ref() {
+                Some((_, _, _, p)) => std::sync::Arc::clone(p),
+                None => std::sync::Arc::new(Vec::new()),
+            }
+        });
+        if pairs.is_empty() {
+            return false;
+        }
+        // Encoded comparison on the stack (no alloc): identical decision
+        // to the core's encoded-envelope check.
+        const STACK: usize = 192;
+        let effective = cf_encode_effective(cf, self.codec.default_raw);
+        let decide = |enc: &[u8]| {
+            pairs
+                .iter()
+                .all(|(lo, hi)| enc < lo.as_ref() || enc > hi.as_ref())
+        };
+        if pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
+            return decide(key);
+        }
+        let n = effective.len() + 1 + key.len();
+        if n <= STACK {
+            let mut buf = [0u8; STACK];
+            buf[..effective.len()].copy_from_slice(effective.as_bytes());
+            buf[effective.len()] = 0;
+            buf[effective.len() + 1..n].copy_from_slice(key);
+            decide(&buf[..n])
+        } else {
+            let mut v = Vec::with_capacity(n);
+            v.extend_from_slice(effective.as_bytes());
+            v.push(0);
+            v.extend_from_slice(key);
+            decide(&v)
+        }
+    }
+
+
     /// Put into the default CF.
     ///
     /// # Errors
@@ -2693,6 +2840,12 @@ impl<E: PedraEnv> DB<E> {
         // RFC-0041 YCSB-C: default-CF get hashes the user key only (no
         // `default` prefix / CF compare). Same bytes as `get_named`.
         let key = key.as_ref();
+        // RFC-0306 P0: settled miss outside every family envelope answers
+        // None before the TLS ids / encode / inner entry.
+        if self.fast_user_space_miss(DEFAULT_CF, key) {
+            self.inner.note_class_point(false);
+            return Ok(None);
+        }
         let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
         if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key)) {
             self.inner.note_class_point(hit.is_some());
@@ -2755,6 +2908,12 @@ impl<E: PedraEnv> DB<E> {
     /// TLS-warmed point get on a CF name already known valid.
     fn get_cached(&self, cf: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         let key = key.as_ref();
+        // RFC-0306 P0: settled miss outside every family envelope answers
+        // None before the TLS ids / encode / inner entry.
+        if self.fast_user_space_miss(cf, key) {
+            self.inner.note_class_point(false);
+            return Ok(None);
+        }
         // Fast-path bypass is delegated to self.inner.get to ensure memtables are checked first
         // RFC-0041 YCSB-C: zipf (θ=0.99, 4096 keys) concentrates on a hot
         // set. Direct-mapped last-N skips CF-prefix encode + point-cache
@@ -7222,7 +7381,95 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Slipstream path: `WriteBatch` + `write_opt` after latch, then get.
+    /// RFC-0306 P1 teeth: a batch big enough to roll the staging slabs
+    /// over mid-batch must keep every op view readable (aa6d24e's
+    /// per-batch arena regressed here; retained slabs must not).
+    #[test]
+    fn write_batch_arena_views_survive_rollover() {
+        let dir = tmp("p1-arena-rollover");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_sync(false);
+        let db = DB::open_cf(&opts, &dir, &["data"]).unwrap();
+        let data = db.cf_handle("data").unwrap();
+        let mut wo = WriteOptions::default();
+        wo.set_sync(false);
+        let val = vec![b'v'; 200];
+        // ~12 MiB staged — the slabs roll at ~8 MiB.
+        let n = 60_000usize;
+        let mut wb = WriteBatch::default();
+        for j in 0..n {
+            wb.put_cf(&data, format!("k-{j:08}").as_bytes(), &val);
+        }
+        assert_eq!(wb.len(), n);
+        db.write_opt_owned(wb, &wo).unwrap();
+        db.flush().unwrap();
+        for j in [0usize, 1, n / 2, n - 2, n - 1] {
+            assert_eq!(
+                db.get_named("data", format!("k-{j:08}").as_bytes())
+                    .unwrap()
+                    .as_deref(),
+                Some(val.as_slice()),
+                "key {j} must read back across the slab rollover"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0306 P0 teeth:    /// RFC-0306 P0 teeth: a settled miss outside every family envelope
+    /// answers None on the pre-TLS fast path, a write outside the old
+    /// envelope invalidates the cached envelope (the new key must read
+    /// back), and the gap key inside the envelope still goes through the
+    /// full path.
+    #[test]
+    fn fast_user_space_miss_settled_and_invalidation() {
+        let dir = tmp("p0-fast-miss");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_sync(false);
+        let db = DB::open_cf(&opts, &dir, &["data", "meta"]).unwrap();
+        let data = db.cf_handle("data").unwrap();
+        let mut wo = WriteOptions::default();
+        wo.set_sync(false);
+        let mut wb = WriteBatch::default();
+        for j in 0..64u32 {
+            wb.put_cf(&data, format!("route.svc-{j:06}").as_bytes(), b"v");
+        }
+        db.write_opt_owned(wb, &wo).unwrap();
+        // Settle: flush + compact, then reopen so the settled flag is live.
+        db.flush().unwrap();
+        db.compact().unwrap();
+        assert!(db.is_settled_sst_only(), "settle must arm the envelope");
+        // (a) Outside the envelope: must be None (fast or slow, same answer).
+        assert_eq!(db.get_named("data", "route.svc-9zzzzzzz").unwrap(), None);
+        assert_eq!(
+            db.get_named("data", b"aaa-before-envelope").unwrap(),
+            None,
+            "below the envelope is also a miss"
+        );
+        // (b) Write a key far outside the old envelope: the write drops
+        // settled; the cached envelope must not answer a stale None.
+        let mut wb = WriteBatch::default();
+        wb.put_cf(&data, b"zzz-after-envelope", b"new");
+        db.write_opt_owned(wb, &wo).unwrap();
+        assert_eq!(
+            db.get_named("data", b"zzz-after-envelope").unwrap().as_deref(),
+            Some(b"new".as_slice()),
+            "a write outside the old envelope must be visible (no stale None)"
+        );
+        // (c) Settle again and re-check both directions.
+        db.flush().unwrap();
+        db.compact().unwrap();
+        assert!(db.is_settled_sst_only());
+        assert_eq!(
+            db.get_named("data", b"zzz-after-envelope").unwrap().as_deref(),
+            Some(b"new".as_slice())
+        );
+        assert_eq!(db.get_named("data", b"zzzz-way-after").unwrap(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slipstream path: `WriteBatch` + `write_opt` after latch, then get.    /// Slipstream path: `WriteBatch` + `write_opt` after latch, then get.
     #[test]
     fn write_opt_latched_hydrate_roundtrip() {
         let dir = tmp("writeopt-bulk");
