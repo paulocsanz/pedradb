@@ -4128,6 +4128,34 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// The sortedness oracle: unsorted arrays still land as a correct SST.
+    #[test]
+    fn write_sst_bulk_arrays_sorts_unsorted_input() {
+        let path = temp_path();
+        let n = 64usize;
+        let keys: Vec<Bytes> = (0..n)
+            .rev()
+            .map(|i| Bytes::from(format!("k{i:04}").into_bytes()))
+            .collect();
+        let vals: Vec<Bytes> = (0..n)
+            .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
+            .collect();
+        let seqs: Vec<u64> = (1..=n as u64).collect();
+        write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
+        let re = SstTable::open_on(&StdEnv, &path).unwrap();
+        // Descending keys, ascending-position values: position p carried
+        // key k{n-1-p} with value v{p}, so the sorted file must answer
+        // k{i} -> v{n-1-i} — the sort has to carry the right pairs.
+        for i in 0..n {
+            assert!(
+                matches!(re.get(format!("k{i:04}").as_bytes(), u64::MAX),
+                    Lookup::Found(v) if v.as_ref() == format!("v{:04}", n - 1 - i).as_bytes()),
+                "key {i} must map to its value after the oracle sort"
+            );
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
     /// v6 file CRC is header+tail; data bitrot is the per-block CRC on get.
     #[test]
     fn v6_file_crc_covers_tail_not_data() {
