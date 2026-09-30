@@ -1129,6 +1129,8 @@ impl WriteGroup {
         vals: Vec<Bytes>,
         tail: Vec<BatchOp>,
     ) -> Result<SequenceNumber> {
+        let diag = crate::write_diag_kernel::latched_bulk_diag_enabled();
+        let t0 = diag.then(Instant::now);
         self.check_concurrency_capacity()?;
         if self.submits.load(Ordering::Relaxed) % 128 == 0 {
             self.await_flush_debt(db);
@@ -1138,16 +1140,46 @@ impl WriteGroup {
         while db.read().parked_bulk_len() >= 16 {
             granted_sleep("bulk_parked_debt", Duration::from_micros(50));
         }
+        if let Some(t0) = t0 {
+            crate::write_diag_kernel::latched_bulk_add(
+                crate::write_diag_kernel::LB_DEBT,
+                t0.elapsed().as_nanos() as u64,
+            );
+        }
+        let t1 = diag.then(Instant::now);
         let active = self.begin_submit();
         let n = (keys.len() + tail.len()) as u64;
         if active == 1 && !self.recently_concurrent() {
             let mut g = db.write();
+            if let Some(t1) = t1 {
+                crate::write_diag_kernel::latched_bulk_add(
+                    crate::write_diag_kernel::LB_LOCK,
+                    t1.elapsed().as_nanos() as u64,
+                );
+            }
+            let t2 = diag.then(Instant::now);
             let result = g.apply_latched_bulk_puts(family, keys, vals, tail);
+            if let Some(t2) = t2 {
+                crate::write_diag_kernel::latched_bulk_add(
+                    crate::write_diag_kernel::LB_APPLY,
+                    t2.elapsed().as_nanos() as u64,
+                );
+            }
             if result.is_ok() {
+                let t3 = diag.then(Instant::now);
                 self.publish_apply(&g);
+                if let Some(t3) = t3 {
+                    crate::write_diag_kernel::latched_bulk_add(
+                        crate::write_diag_kernel::LB_PUBLISH,
+                        t3.elapsed().as_nanos() as u64,
+                    );
+                }
             }
             drop(g);
             self.finish_lone_ops(n);
+            if diag {
+                crate::write_diag_kernel::latched_bulk_count(1, n);
+            }
             return result;
         }
         let ops = {
