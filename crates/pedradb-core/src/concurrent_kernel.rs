@@ -2976,6 +2976,15 @@ impl<E: Env> ConcurrentDb<E> {
         self.settled_sst_only.load(Ordering::Acquire)
     }
 
+    /// Copy of the settled per-family envelope pairs (encoded keyspace),
+    /// for the compat layer's pre-TLS miss rejection (RFC-0306 P0).
+    /// Meaningful only while [`Self::is_settled_sst_only`] holds; readers
+    /// re-check the flag and the epochs around every use.
+    #[must_use]
+    pub fn sst_envelope_snapshot(&self) -> Vec<(Bytes, Bytes)> {
+        self.sst_envelope.read().clone()
+    }
+
     /// Point-cache probe (`Some` = hit, including cached miss). OCC get.
     #[must_use]
     pub(crate) fn point_cache_get(&self, key: &[u8]) -> Option<Option<Bytes>> {
