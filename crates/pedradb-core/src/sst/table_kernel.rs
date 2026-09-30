@@ -334,8 +334,11 @@ pub struct SstTable {
     /// Number of tombstones (point deletions and range deletions) in this SST (RFC-0265 P0.2).
     tombstone_count: usize,
     max_sequence: SequenceNumber,
-    /// Sparse index (v2+); empty for v1.
-    index: Vec<BlockHandle>,
+    /// Sparse index (v2+); empty for v1. Arc'd so cloning a table handle
+    /// (inventory snapshots, table cache inserts, published superversions)
+    /// is a refcount bump — the pre-Arc deep copy was O(blocks) per clone
+    /// and O(K²) across a bulk ingest's installs (RFC-0305).
+    index: Arc<Vec<BlockHandle>>,
     /// Longest prefix shared by every `index` key — the offset the `p8`
     /// windows start at. Derived with the index (`derive_index_accel`).
     key_cp: usize,
@@ -1776,7 +1779,7 @@ impl SstTable {
             num_entries: n,
             tombstone_count,
             max_sequence,
-            index,
+            index: std::sync::Arc::new(index),
             key_cp,
             bloom,
             smallest_user_key,
@@ -1828,7 +1831,7 @@ impl SstTable {
             num_entries,
             tombstone_count,
             max_sequence,
-            index,
+            index: std::sync::Arc::new(index),
             key_cp,
             bloom,
             smallest_user_key,
@@ -3214,14 +3217,28 @@ fn write_sst_bulk_arrays_body(
     let mut block_start = 0usize;
     let mut max_sequence = 0u64;
     let cap = n_entries.min(2_097_152);
-    let mut bloom = if crate::write_admission_kernel::batch_is_empty(n_entries as u64) {
-        BloomFilter::always_true()
-    } else {
-        let bpk = crate::bloom::bits_per_key_for_run(cap as u64);
-        let nparts = crate::filter_partition_kernel::filter_nparts(cap as u64);
-        BloomFilter::with_partitions(cap, bpk, nparts)
-    };
-    let bloom_active = bloom.is_active();
+    // RFC-0305: build the bloom lock-free. `with_partitions` takes a mutex
+    // per insert and hashes each key twice (partition pick + probe); at
+    // 272k keys/chunk that was 55% of bulk encode time. Local monolithic
+    // builders sized exactly like `with_partitions` keep the on-disk bytes
+    // identical (same per-part capacity, same FNV hashes, same probes).
+    let mut bloom_parts: Vec<BloomFilter> =
+        if crate::write_admission_kernel::batch_is_empty(n_entries as u64) {
+            Vec::new()
+        } else {
+            let bpk = crate::bloom::bits_per_key_for_run(cap as u64);
+            let nparts = crate::filter_partition_kernel::filter_nparts(cap as u64);
+            if nparts <= 1 {
+                vec![BloomFilter::with_capacity(cap, bpk)]
+            } else {
+                let per = cap / nparts as usize + 1;
+                (0..nparts)
+                    .map(|_| BloomFilter::with_capacity(per, bpk))
+                    .collect()
+            }
+        };
+    let bloom_active = !bloom_parts.is_empty();
+    let bloom_nparts = bloom_parts.len();
     // Encode 4 KiB blocks straight into the 4 MiB write batch. A side
     // `block_buf` plus copy was 5.75 GiB extra memcpy (v56 25M hydrate
     // 33.3 s / 0.86× vs Rocks; v54 256 KiB did the same copy at 1/64 the
@@ -3231,7 +3248,14 @@ fn write_sst_bulk_arrays_body(
         let v = vals[i].as_ref();
         let seq = seqs[i];
         if bloom_active {
-            bloom.insert(k);
+            let (h1, h2) = crate::bloom::hash_pair(k);
+            #[allow(clippy::cast_possible_truncation)]
+            let pi = if bloom_nparts > 1 {
+                (h1 % bloom_nparts as u64) as usize
+            } else {
+                0
+            };
+            bloom_parts[pi].insert_prehashed(h1, h2);
         }
         if seq > max_sequence {
             max_sequence = seq;
@@ -3278,6 +3302,13 @@ fn write_sst_bulk_arrays_body(
     let largest_user_key = keys.last().cloned();
     let data_len = pos - BULK_SST_HEADER_LEN as u64;
     let key_cp = SstTable::derive_index_accel(&mut index);
+    let bloom = if bloom_parts.is_empty() {
+        BloomFilter::always_true()
+    } else if bloom_parts.len() == 1 {
+        bloom_parts.pop().unwrap_or_else(BloomFilter::always_true)
+    } else {
+        BloomFilter::from_partition_builders(bloom_parts)
+    };
     let mut tail = Vec::with_capacity(index.len().saturating_mul(48).saturating_add(64));
     for h in &index {
         tail.extend_from_slice(&h.offset.to_le_bytes());
@@ -3332,7 +3363,7 @@ fn write_sst_bulk_arrays_body(
         num_entries: n_entries,
         tombstone_count: 0,
         max_sequence,
-        index,
+        index: std::sync::Arc::new(index),
         key_cp,
         bloom,
         smallest_user_key,
@@ -3803,7 +3834,7 @@ fn write_sst_try_sorted_body(
         num_entries: n_entries,
         tombstone_count,
         max_sequence,
-        index,
+        index: std::sync::Arc::new(index),
         key_cp,
         bloom,
         smallest_user_key,
@@ -4892,7 +4923,7 @@ mod tests {
             num_entries: 5,
             tombstone_count: 0,
             max_sequence: 5,
-            index,
+            index: std::sync::Arc::new(index),
             key_cp: 0,
             bloom: BloomFilter::always_true(),
             smallest_user_key: Some(Bytes::copy_from_slice(b"a")),
@@ -4977,7 +5008,7 @@ mod tests {
                 num_entries: 0,
                 tombstone_count: 0,
                 max_sequence: 0,
-                index,
+                index: std::sync::Arc::new(index),
                 key_cp,
                 bloom: BloomFilter::always_true(),
                 smallest_user_key: None,

@@ -2357,6 +2357,10 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
     /// G1 path holds the write lock through `fdatasync`, so observing a
     /// commit in flight must not need the `Db` RwLock (RFC-0042 P1.1).
     commit_inflight: Arc<std::sync::atomic::AtomicUsize>,
+    /// Lock-free mirror of `Db::parked_bulk.len()` (RFC-0305): idle host
+    /// workers and the hydrate writer's debt loop poll this without the
+    /// Db RwLock.
+    parked_bulk_count: Arc<std::sync::atomic::AtomicUsize>,
     writes: Arc<WriteGroup>,
     /// Single-flight flush/compact pipeline (F45): dual concurrent `prepare_flush_imm`
     /// + failed `restore_imm` could otherwise race on the one imm slot.
@@ -2419,6 +2423,7 @@ impl<E: Env> Clone for ConcurrentDb<E> {
         Self {
             inner: Arc::clone(&self.inner),
             commit_inflight: Arc::clone(&self.commit_inflight),
+            parked_bulk_count: Arc::clone(&self.parked_bulk_count),
             writes: Arc::clone(&self.writes),
             flush_lock: Arc::clone(&self.flush_lock),
             persist_lock: Arc::clone(&self.persist_lock),
@@ -2514,12 +2519,14 @@ impl<E: Env> ConcurrentDb<E> {
         let mut db = db;
         db.set_occ_floor_registry(Arc::clone(&occ_registry));
         let commit_inflight = db.commit_inflight_handle();
+        let parked_bulk_count = db.parked_bulk_count_handle();
         let vlog = Arc::new(RwLock::new(db.vlog_handle()));
         let env = db.env().clone();
         let dir = db.dir().to_path_buf();
         let vlog_use_new = Arc::new(AtomicBool::new(db.vlog_use_new()));
         let out = Self {
             inner: Arc::new(RwLock::new(db)),
+            parked_bulk_count,
             commit_inflight,
             writes: Arc::new(writes),
             flush_lock: Arc::new(Mutex::new(())),
@@ -4302,7 +4309,7 @@ impl<E: Env> ConcurrentDb<E> {
         vals: Vec<Bytes>,
         tail: Vec<BatchOp>,
     ) -> Result<SequenceNumber> {
-        while self.inner.read().parked_bulk_len() >= 16 {
+        while self.parked_bulk_count.load(Ordering::Acquire) >= 16 {
             if !self.materialize_bulk_off_lock() {
                 granted_sleep("bulk_parked_debt", Duration::from_micros(50));
             }
@@ -4471,13 +4478,20 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().has_parked_bulk()
     }
 
+    /// Lock-free variant for idle polling (RFC-0305): host workers tick at
+    /// ~1 kHz and must not fight the hydrate writer for the Db RwLock.
+    #[must_use]
+    pub fn has_parked_bulk_fast(&self) -> bool {
+        self.parked_bulk_count.load(std::sync::atomic::Ordering::Acquire) != 0
+    }
+
     /// Encode+install one parked bulk chunk off the write lock so the
     /// hydrate writer can fill the next run (RFC-0159 P1.7).
     /// Safe for concurrent callers: SST writes run on independent files
     /// without holding Db write lock or flush_lock.
     #[must_use]
     pub fn materialize_bulk_once(&self) -> bool {
-        if !self.inner.read().has_parked_bulk() {
+        if !self.has_parked_bulk_fast() && !self.inner.read().has_parked_bulk() {
             return false;
         }
         self.materialize_bulk_off_lock()
