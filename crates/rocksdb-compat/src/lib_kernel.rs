@@ -1400,6 +1400,20 @@ static DEFAULT_CF_ARC: std::sync::LazyLock<Arc<str>> =
 #[derive(Debug, Default)]
 pub struct WriteBatch {
     ops: Vec<(Option<Arc<str>>, BatchOp)>,
+    /// Bump arena backing borrowed-key/value copies: one allocation per
+    /// batch instead of two per op (hydrate stages 1024 ops per apply).
+    /// Ops hold `freeze()` views into it; bytes stay valid until every op
+    /// view is dropped.
+    arena: bytes::BytesMut,
+}
+
+/// Copy `src` into `arena` and hand back an owned view — `reserve`+`extend`
+/// plus a refcount bump, no per-call allocation.
+fn arena_bytes(arena: &mut bytes::BytesMut, src: &[u8]) -> Bytes {
+    arena.reserve(src.len());
+    arena.extend_from_slice(src);
+    let n = src.len();
+    arena.split_to(n).freeze()
 }
 
 impl WriteBatch {
@@ -1434,13 +1448,10 @@ impl WriteBatch {
 
     /// Put into a named CF.
     pub fn put_cf(&mut self, cf: &ColumnFamily, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
-        self.ops.push((
-            Some(Arc::clone(&cf.name)),
-            BatchOp::Put {
-                key: Bytes::copy_from_slice(key.as_ref()),
-                value: Bytes::copy_from_slice(value.as_ref()),
-            },
-        ));
+        let key = arena_bytes(&mut self.arena, key.as_ref());
+        let value = arena_bytes(&mut self.arena, value.as_ref());
+        self.ops
+            .push((Some(Arc::clone(&cf.name)), BatchOp::Put { key, value }));
     }
 
     /// Stage an owned-Bytes put without a second key/value copy — the
@@ -1463,12 +1474,9 @@ impl WriteBatch {
 
     /// Delete from a named CF.
     pub fn delete_cf(&mut self, cf: &ColumnFamily, key: impl AsRef<[u8]>) {
-        self.ops.push((
-            Some(Arc::clone(&cf.name)),
-            BatchOp::Delete {
-                key: Bytes::copy_from_slice(key.as_ref()),
-            },
-        ));
+        let key = arena_bytes(&mut self.arena, key.as_ref());
+        self.ops
+            .push((Some(Arc::clone(&cf.name)), BatchOp::Delete { key }));
     }
 
     /// Stage an owned-Bytes delete (see [`Self::put_cf_bytes`]).
@@ -1489,12 +1497,11 @@ impl WriteBatch {
         if s >= e {
             return;
         }
+        let start = arena_bytes(&mut self.arena, s);
+        let end = arena_bytes(&mut self.arena, e);
         self.ops.push((
             Some(Arc::clone(&cf.name)),
-            BatchOp::DeleteRange {
-                start: Bytes::copy_from_slice(s),
-                end: Bytes::copy_from_slice(e),
-            },
+            BatchOp::DeleteRange { start, end },
         ));
     }
 }
@@ -6191,6 +6198,50 @@ mod tests {
         let db = DB::open(&opts, &dir).unwrap();
         assert_eq!(db.get(b"k/000015").unwrap().as_deref(), Some(v.as_slice()));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_batch_arena_views_survive_growth() {
+        use std::sync::Arc;
+        let cf = ColumnFamily {
+            name: Arc::from("data"),
+        };
+        let mut wb = WriteBatch::new();
+        // ~672 KiB of payload forces several arena reallocs mid-batch; every
+        // frozen view must still read the bytes it was pushed with.
+        let expect: Vec<(String, Vec<u8>)> = (0..3000)
+            .map(|i| (format!("key-{:08}", i), vec![(i % 251) as u8; 200]))
+            .collect();
+        for (k, v) in &expect {
+            wb.put_cf(&cf, k, v);
+        }
+        wb.delete_cf(&cf, "zed");
+        wb.delete_range_cf(&cf, "aaa", "bbb");
+        assert_eq!(wb.len(), expect.len() + 2);
+        for (i, (k, v)) in expect.iter().enumerate() {
+            match &wb.ops[i].1 {
+                BatchOp::Put { key, value } => {
+                    assert_eq!(key.as_ref(), k.as_bytes(), "key view {i}");
+                    assert_eq!(value.as_ref(), v.as_slice(), "value view {i}");
+                }
+                other => panic!("op {i} is not a put: {other:?}"),
+            }
+        }
+        assert!(matches!(
+            &wb.ops[expect.len()].1,
+            BatchOp::Delete { key } if key.as_ref() == b"zed"
+        ));
+        assert!(matches!(
+            &wb.ops[expect.len() + 1].1,
+            BatchOp::DeleteRange { start, end }
+                if start.as_ref() == b"aaa" && end.as_ref() == b"bbb"
+        ));
+        // Early views survive later pushes that regrow the arena.
+        wb.put_cf(&cf, "tail", "tail-value");
+        match &wb.ops[0].1 {
+            BatchOp::Put { key, .. } => assert_eq!(key.as_ref(), b"key-00000000"),
+            other => panic!("op 0 is not a put: {other:?}"),
+        }
     }
 
     #[test]
