@@ -2474,13 +2474,12 @@ impl<E: PedraEnv> DB<E> {
         // SST residency. Rocks caches 4 KiB blocks; slipstream's default
         // 1 GiB knob then pinned 1 GiB of 64 MiB files on the 3.9 GiB
         // guest and v57 lookup_100 regressed. Cap whole-file residency at
-        // the 256 MiB default; a smaller knob still shrinks it. The decoded
-        // block cache stays separately capped below.
-        core_opts.sst_payload_budget_bytes = Some(
-            opts.block_cache_bytes
-                .unwrap_or(DEFAULT_SST_PAYLOAD_BUDGET_BYTES)
-                .min(DEFAULT_SST_PAYLOAD_BUDGET_BYTES),
-        );
+        // the 256 MiB default; a smaller knob still shrinks it.
+        let payload_budget = opts
+            .block_cache_bytes
+            .unwrap_or(DEFAULT_SST_PAYLOAD_BUDGET_BYTES)
+            .min(DEFAULT_SST_PAYLOAD_BUDGET_BYTES);
+        core_opts.sst_payload_budget_bytes = Some(payload_budget);
         if opts.enable_blob_files {
             core_opts.large_value_threshold = Some(opts.min_blob_size as usize);
         }
@@ -2502,12 +2501,14 @@ impl<E: PedraEnv> DB<E> {
             db.set_auto_reclaim(true);
         }
         if let Some(n) = opts.block_cache_bytes {
-            // RFC-0160 P2.3: the caller's `NewLRUCache` / `set_block_cache`
-            // sizes the 4 KiB decoded-block cache (Rocks block cache), not
-            // whole-file SST residency (capped above at 256 MiB). The old
-            // 32 MiB decoded cap left slipstream's 1 GiB knob inert and
-            // get_hit tied with Rocks at 10M+.
-            db.set_block_cache_budget_bytes(n.max(1));
+            // RFC-0160 P2.3 + RFC-0305 A/B (100M on a 4 GiB guest): the
+            // caller's `NewLRUCache` / `set_block_cache` bounds Pedra's
+            // whole read cache — payload residency above plus the decoded
+            // plain-block cache — to the same memory budget Rocks gets.
+            // Stacking the plain budget on top of the payload share
+            // oversubscribed the box by `payload_budget` and lookup_100
+            // paid cold-block churn for re-probes that never came.
+            db.set_block_cache_budget_bytes(n.saturating_sub(payload_budget).max(1));
         }
         // Rocks parity: rust-rocksdb drops superseded versions below the
         // oldest live snapshot (`Snapshot` pins / OCC begins). This bounds

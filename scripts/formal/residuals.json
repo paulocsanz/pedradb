@@ -203,6 +203,7 @@
         "vals"
       ],
       "crates/pedradb-core/src/cache_kernel.rs": [
+        "admits_len",
         "arm",
         "budget_bytes",
         "can_admit",
