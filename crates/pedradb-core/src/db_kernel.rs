@@ -1865,6 +1865,11 @@ pub struct Db<E: Env = StdEnv> {
     /// Full chunks waiting for off-lock SST materialize (writer parks,
     /// host worker encodes). Lookup still sees them.
     parked_bulk: VecDeque<(String, Arc<crate::bulk_run::BulkRun>)>,
+    /// Lock-free mirror of `parked_bulk.len()` (RFC-0305). Authoritative
+    /// under the Db write lock; idle workers poll this instead of taking
+    /// the Db read lock every tick (12 workers × 1 kHz was a cthread_yield
+    /// storm against the hydrate writer's write lock).
+    parked_bulk_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     /// Chunks workers are encoding off-lock (not in `parked_bulk`).
     bulk_encodings: Vec<(u64, String, Arc<crate::bulk_run::BulkRun>)>,
     /// Bulk SST installs since the last MANIFEST persist (RFC-0159 P1.2).
@@ -6293,6 +6298,8 @@ impl<E: Env> Db<E> {
             || !crate::write_admission_kernel::batch_is_empty(self.bulk_runs.len() as u64)
             || self.bulk_manifest_debt > 0;
         while let Some((fam, run)) = self.parked_bulk.pop_front() {
+            self.parked_bulk_count
+                .store(self.parked_bulk.len(), std::sync::atomic::Ordering::Release);
             self.install_bulk_run(&fam, run.as_ref())?;
         }
         let fams: Vec<String> = self.bulk_runs.keys().cloned().collect();
@@ -6311,6 +6318,13 @@ impl<E: Env> Db<E> {
         !crate::write_admission_kernel::batch_is_empty(self.parked_bulk.len() as u64)
     }
 
+    /// Shared lock-free mirror of the parked-chunk count (RFC-0305).
+    /// Idle host workers poll this instead of the Db read lock.
+    #[must_use]
+    pub fn parked_bulk_count_handle(&self) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+        std::sync::Arc::clone(&self.parked_bulk_count)
+    }
+
     #[cfg(test)]
     pub(crate) fn bulk_manifest_debt(&self) -> u8 {
         self.bulk_manifest_debt
@@ -6327,6 +6341,8 @@ impl<E: Env> Db<E> {
         &mut self,
     ) -> Option<(String, Arc<crate::bulk_run::BulkRun>, u64, PathBuf, E, bool)> {
         let (fam, run) = self.parked_bulk.pop_front()?;
+        self.parked_bulk_count
+            .store(self.parked_bulk.len(), std::sync::atomic::Ordering::Release);
         let num = self.alloc_file_num();
         self.bulk_encodings.push((num, fam.clone(), Arc::clone(&run)));
         let final_path = self.dir.join(format!("{num:06}.sst"));
@@ -6354,6 +6370,8 @@ impl<E: Env> Db<E> {
 
     pub(crate) fn push_parked_bulk_front(&mut self, pin: (String, Arc<crate::bulk_run::BulkRun>)) {
         self.parked_bulk.push_front(pin);
+        self.parked_bulk_count
+            .store(self.parked_bulk.len(), std::sync::atomic::Ordering::Release);
     }
 
     pub(crate) fn finish_bulk_sst(
@@ -6518,6 +6536,8 @@ impl<E: Env> Db<E> {
                 // Park so background workers and client assist encode SSTs off-lock.
                 self.parked_bulk
                     .push_back((family.to_string(), Arc::new(run)));
+                self.parked_bulk_count
+                    .store(self.parked_bulk.len(), std::sync::atomic::Ordering::Release);
             }
         }
         Ok(())

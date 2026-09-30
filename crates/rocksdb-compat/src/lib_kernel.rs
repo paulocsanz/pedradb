@@ -4987,7 +4987,10 @@ where
             .name(format!("pedra-compat-flush-{i}"))
             .spawn(move || {
                 while !shutdown_aux.load(std::sync::atomic::Ordering::Relaxed) {
-                    if inner_aux.has_parked_bulk() {
+                    // RFC-0305: lock-free idle poll — a Db read lock here ran
+                    // ~1 kHz × 12 workers against the hydrate writer's write
+                    // lock (cthread_yield storm in the 25M profile).
+                    if inner_aux.has_parked_bulk_fast() {
                         while inner_aux.materialize_bulk_once() {
                             if shutdown_aux.load(std::sync::atomic::Ordering::Relaxed) {
                                 break;

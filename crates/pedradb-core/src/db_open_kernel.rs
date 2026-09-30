@@ -603,6 +603,7 @@ impl<E: Env> Db<E> {
             bulk_route_enabled: crate::bulk_ingest::bulk_enabled(),
             bulk_runs: HashMap::new(),
             parked_bulk: VecDeque::new(),
+            parked_bulk_count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             bulk_encodings: Vec::new(),
             bulk_manifest_debt: 0,
             fold_pair_expected: None,

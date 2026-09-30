@@ -264,6 +264,29 @@ impl BloomFilter {
         }
     }
 
+    /// RFC-0305 bulk build: assemble a partitioned filter from monolithic
+    /// builders that were filled lock-free (one hash per key, direct bit
+    /// sets into plain local filters). `encode`/`may_contain` see exactly
+    /// the same state a [`Self::with_partitions`] + [`Self::insert`] build
+    /// would have produced — only the construction path is different.
+    #[must_use]
+    pub fn from_partition_builders(builders: Vec<Self>) -> Self {
+        let nparts = builders.len() as u32;
+        let loaded = builders
+            .into_iter()
+            .map(|b| Some(Box::new(b)))
+            .collect::<Vec<_>>();
+        Self {
+            bits: Arc::new(Vec::new()),
+            nbits: 0,
+            k: 0,
+            nparts,
+            encoded_parts: Arc::new(Vec::new()),
+            loaded: Arc::new(Mutex::new(loaded)),
+            parts_once: Arc::new(Vec::new()),
+        }
+    }
+
 fn partition_index(h1: u64, nparts: u32) -> u32 {
     if nparts <= 1 {
         0
@@ -282,25 +305,32 @@ fn partition_index(h1: u64, nparts: u32) -> u32 {
     /// proof. Isolated used the same rewrite (`starts_with` → byte loop).
     pub fn insert(&mut self, key: &[u8]) {
         if self.nparts > 1 {
-            let (h1, _) = hash_pair(key);
+            let (h1, h2) = hash_pair(key);
             let i = Self::partition_index(h1, self.nparts) as usize;
             let mut g = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(Some(p)) = g.get_mut(i) {
-                p.insert(key);
+                p.insert_prehashed(h1, h2);
             }
             return;
         }
-        if !self.is_active() {
+        let (h1, h2) = hash_pair(key);
+        self.insert_prehashed(h1, h2);
+    }
+
+    /// Monolithic-filter insert with a precomputed hash pair (RFC-0305).
+    ///
+    /// The bulk-SST encoder hashes each key once for partition selection
+    /// and probing; this entry point skips the second [`hash_pair`] and
+    /// hoists the single [`Arc::make_mut`] out of the probe loop.
+    pub fn insert_prehashed(&mut self, h1: u64, h2: u64) {
+        if self.nparts > 1 || !self.is_active() {
             return;
         }
-        let (h1, h2) = hash_pair(key);
         let nbits = u64::from(self.nbits);
+        let bits = Arc::make_mut(&mut self.bits);
         let mut i = 0u32;
         while i < self.k {
-            set_bit(
-                Arc::make_mut(&mut self.bits).as_mut_slice(),
-                bit_index(probe_bit(h1, h2, i, nbits)),
-            );
+            set_bit(bits, bit_index(probe_bit(h1, h2, i, nbits)));
             i += 1;
         }
     }
