@@ -5300,11 +5300,14 @@ fn flush_worker_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
     // v19 forensics: payload-pool occupancy (must sit at/below the budget)
     // and per-table decoded-entries caches (unbounded per table — the
     // other table-sized layer a growing RSS floor can come from).
-    let (pool_n, pool_b, ent_e) = inner.with_read(|db| {
+    let (pool_n, pool_b, ent_e, bulk_b, ram_b, ram_budget) = inner.with_read(|db| {
         (
             db.sst_payload_pool().tracked_tables(),
             db.sst_payload_pool().resident_bytes(),
             db.sst_cached_entries(),
+            db.bulk_ram_bytes(),
+            db.total_ram_bytes(),
+            db.max_ram_bytes(),
         )
     });
     let (tick_s, mat_n) = FLUSH_DIAG_STATE
@@ -5316,7 +5319,7 @@ fn flush_worker_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
         })
         .map_or((0, 0), |v| v);
     eprintln!(
-        "FLUSHDIAG parked_n={} parked_b={} active_b={} imm={} retired_b={} sst_n={} rss_kb={} tick_s={} mat_n={} pool_n={} pool_b={} ent_e={}",
+        "FLUSHDIAG parked_n={} parked_b={} active_b={} imm={} retired_b={} sst_n={} rss_kb={} tick_s={} mat_n={} pool_n={} pool_b={} ent_e={} bulk_b={} ram_b={} ram_budget={:?}",
         inner.parked_unflushed_count(),
         inner.parked_unflushed_bytes(),
         inner.active_mem_usage(),
@@ -5329,6 +5332,9 @@ fn flush_worker_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
         pool_n,
         pool_b,
         ent_e,
+        bulk_b,
+        ram_b,
+        ram_budget,
     );
 }
 
