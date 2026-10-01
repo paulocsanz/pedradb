@@ -70,6 +70,10 @@ fn median(v: &mut [f64]) -> f64 {
 }
 
 fn main() {
+    let mul: usize = std::env::var("PROBE_MUL")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
     // Deterministic shape: 200k entries ≈ one 64 MiB-class run staged in RAM.
     let batches: u64 = 200;
     let per_batch: u64 = 1024;
@@ -151,12 +155,14 @@ fn main() {
         .collect();
     let mut inside_ns = Vec::new();
     let a2 = ALLOCS.load(Ordering::Relaxed);
-    for _ in 0..3 {
+    for rep in 0..(3 * mul.max(1)) {
         let t = Instant::now();
         for k in &inside_keys {
             let _ = std::hint::black_box(db.get_named("data", k).unwrap());
         }
-        inside_ns.push(t.elapsed().as_secs_f64() / inside_keys.len() as f64 * 1e9);
+        if rep == 0 {
+            inside_ns.push(t.elapsed().as_secs_f64() / inside_keys.len() as f64 * 1e9);
+        }
     }
     let inside_allocs = ALLOCS.load(Ordering::Relaxed) - a2;
 
@@ -166,12 +172,14 @@ fn main() {
         .collect();
     let mut hit_us = Vec::new();
     let a3 = ALLOCS.load(Ordering::Relaxed);
-    for _ in 0..3 {
+    for rep in 0..(3 * mul.max(1)) {
         let t = Instant::now();
         for k in &hit_keys {
             let _ = std::hint::black_box(db.get_named("data", k).unwrap());
         }
-        hit_us.push(t.elapsed().as_secs_f64() / hit_keys.len() as f64 * 1e6);
+        if rep == 0 {
+            hit_us.push(t.elapsed().as_secs_f64() / hit_keys.len() as f64 * 1e6);
+        }
     }
     let hit_allocs = ALLOCS.load(Ordering::Relaxed) - a3;
 
