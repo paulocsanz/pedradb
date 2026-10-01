@@ -634,11 +634,22 @@ impl<E: Env> Db<E> {
             sst_source: source,
             sst_file_cache,
             sst_page_keep_budget: 0,
+            // RFC-0306: the warm cap scales with the EFFECTIVE memory
+            // limit (cgroup-aware), not the 3 GiB floor — a 24 GiB store
+            // in a 47 GiB container was above the flat floor, so every
+            // flushed SST got fadvise(DONTNEED) and point reads hit disk
+            // while the Rocks peer read warm page cache (get_hit 52 vs
+            // 17 µs at 100M). warm_cap_bytes(ram) = 3/4 of the ceiling
+            // (min 3 GiB floor) keeps the store hot whenever it fits.
             sst_warm_cap_bytes: std::env::var("PEDRA_SST_WARM_CAP_BYTES")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .filter(|&n| n > 0)
-                .unwrap_or(crate::scale_kernel::WARM_FLOOR_BYTES),
+                .unwrap_or_else(|| {
+                    crate::scale_kernel::warm_cap_bytes(
+                        pedradb_posix::total_physical_memory_bytes().unwrap_or(0),
+                    )
+                }),
             leftover_dontneed_issued: AtomicU64::new(0),
             scan_readahead_issued: AtomicU64::new(0),
             point_cache,
