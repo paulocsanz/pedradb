@@ -700,7 +700,7 @@ impl<E: Env> Db<E> {
             write_pressure_count: 0,
             max_ram_bytes: crate::ram_pressure_kernel::resolve_ram_budget(
                 None,
-                pedradb_posix::total_physical_memory_bytes(),
+                pedradb_posix::effective_memory_limit_bytes(),
             ),
             ram_pressure_throttle_count: 0,
             snapshot_pins: std::collections::BTreeMap::new(),
