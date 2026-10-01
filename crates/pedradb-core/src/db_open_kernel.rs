@@ -604,6 +604,7 @@ impl<E: Env> Db<E> {
             bulk_runs: HashMap::new(),
             parked_bulk: VecDeque::new(),
             parked_bulk_count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            cgroup_pressure_cache: std::sync::Mutex::new(None),
             bulk_encodings: Vec::new(),
             bulk_manifest_debt: 0,
             fold_pair_expected: None,

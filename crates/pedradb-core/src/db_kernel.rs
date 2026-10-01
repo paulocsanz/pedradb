@@ -1870,6 +1870,8 @@ pub struct Db<E: Env = StdEnv> {
     /// the Db read lock every tick (12 workers × 1 kHz was a cthread_yield
     /// storm against the hydrate writer's write lock).
     parked_bulk_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    /// RFC-0306: (verdict, valid_until) cache for cgroup pressure reads.
+    cgroup_pressure_cache: std::sync::Mutex<Option<(bool, std::time::Instant)>>,
     /// Chunks workers are encoding off-lock (not in `parked_bulk`).
     bulk_encodings: Vec<(u64, String, Arc<crate::bulk_run::BulkRun>)>,
     /// Bulk SST installs since the last MANIFEST persist (RFC-0159 P1.2).
@@ -3122,6 +3124,42 @@ impl<E: Env> Db<E> {
         let parked: usize = self.parked_bulk.iter().map(|(_, r)| r.bytes()).sum();
         let encoding: usize = self.bulk_encodings.iter().map(|(_, _, r)| r.bytes()).sum();
         runs.saturating_add(parked).saturating_add(encoding)
+    }
+
+    /// RFC-0306 fail-safe: real cgroup memory pressure (page cache
+    /// included). True when memory.current sits at/above 90% of the
+    /// effective ceiling; cached for 250 ms so the per-batch hydrate gate
+    /// pays one file read per quarter second.
+    #[must_use]
+    pub fn cgroup_pressure_over_hard(&self) -> bool {
+        const CACHE_MS: u64 = 250;
+        let now = std::time::Instant::now();
+        let cached = self
+            .cgroup_pressure_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some((ok, until)) = *cached {
+            if now < until {
+                return ok;
+            }
+        }
+        let ceiling = pedradb_posix::effective_memory_limit_bytes();
+        let verdict = match ceiling {
+            Some(limit) if limit > 0 => {
+                let raw_hard = limit.saturating_mul(9) / 10;
+                std::fs::read_to_string("/sys/fs/cgroup/memory.current")
+                    .ok()
+                    .and_then(|t| t.trim().parse::<u64>().ok())
+                    .is_some_and(|cur| cur >= raw_hard)
+            }
+            _ => false,
+        };
+        let until = now + std::time::Duration::from_millis(CACHE_MS);
+        *self
+            .cgroup_pressure_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some((verdict, until));
+        verdict
     }
 
     /// Whether the bulk layers alone are at/above the RAM hard watermark
@@ -12033,6 +12071,17 @@ impl<E: Env> Db<E> {
         }
         if is_single_bulk {
             self.incremental_append_bulk_sst(last_idx);
+            // RFC-0306: the bulk route never flushes, so the flush/compact
+            // DONTNEED sweep never runs. Once live SST bytes exceed the
+            // warm cap, drop the fresh chunk's page cache right here — a
+            // 250M hydrate (57 GiB written in a 47 GiB container) kept
+            // every written page resident and died at the cgroup wall.
+            if self.leftover_drop_pages() {
+                let p = self.ssts[last_idx].path().to_path_buf();
+                let _ = self.env.advise(&p, 0, 0, crate::env::AdviseKind::DontNeed);
+                self.leftover_dontneed_issued
+                    .fetch_add(1, Ordering::Relaxed);
+            }
         } else {
             self.note_sst_inventory_changed();
         }
