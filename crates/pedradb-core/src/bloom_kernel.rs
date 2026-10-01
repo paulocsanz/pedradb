@@ -272,6 +272,18 @@ impl BloomFilter {
     #[must_use]
     pub fn from_partition_builders(builders: Vec<Self>) -> Self {
         let nparts = builders.len() as u32;
+        // RFC-0306: pre-seed `parts_once` so point reads take the
+        // lock-free branch — an empty `parts_once` made every
+        // may_contain lock `loaded` (1.75 µs inside-envelope misses in
+        // the perf probe, mutex on every bloom check).
+        let once: Vec<_> = builders
+            .iter()
+            .map(|b| {
+                let slot = OnceLock::new();
+                let _ = slot.set(b.clone_parts_only());
+                slot
+            })
+            .collect();
         let loaded = builders
             .into_iter()
             .map(|b| Some(Box::new(b)))
@@ -283,6 +295,22 @@ impl BloomFilter {
             nparts,
             encoded_parts: Arc::new(Vec::new()),
             loaded: Arc::new(Mutex::new(loaded)),
+            parts_once: Arc::new(once),
+        }
+    }
+
+    /// Clone only the per-part monolithic state (bits/nbits/k) — used to
+    /// pre-seed read-side partitions without dragging the builder's
+    /// write-side containers along.
+    #[must_use]
+    fn clone_parts_only(&self) -> Self {
+        Self {
+            bits: Arc::clone(&self.bits),
+            nbits: self.nbits,
+            k: self.k,
+            nparts: 1,
+            encoded_parts: Arc::new(Vec::new()),
+            loaded: Arc::new(Mutex::new(Vec::new())),
             parts_once: Arc::new(Vec::new()),
         }
     }
