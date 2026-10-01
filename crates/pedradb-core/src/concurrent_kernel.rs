@@ -4355,6 +4355,19 @@ impl<E: Env> ConcurrentDb<E> {
                 granted_sleep("bulk_parked_debt", Duration::from_micros(50));
             }
         }
+        // RFC-0306: RAM backpressure on the hydrate writer. The bulk layers
+        // (open run + parked queue + encodings) are accounted in the
+        // pressure verdict; at/above the hard watermark the writer drains
+        // by encoding parked chunks inline (real work) instead of letting
+        // the queue grow into an OOM — "slow down, never OOM".
+        if self.inner.read().bulk_ram_over_hard() {
+            self.inner.write().note_ram_throttle();
+            while self.inner.read().bulk_ram_over_hard() {
+                if !self.materialize_bulk_off_lock() {
+                    granted_sleep("bulk_ram_pressure", Duration::from_millis(1));
+                }
+            }
+        }
         self.writes
             .submit_latched_bulk(&self.inner, family, keys, vals, tail)
     }
@@ -7393,6 +7406,56 @@ mod tests {
             assert_eq!(db2.get(k).as_deref(), Some(&v[..]), "post-reopen key {i}");
         }
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0159 P1.5: after the family latches, `apply_latched_bulk`
+    /// lands keys without `BatchOp` and they read back (open tail + flush).
+    #[test]
+    /// RFC-0306 teeth: the bulk layers are accounted in RAM pressure, and
+    /// the hydrate writer throttles (encodes parked chunks inline) instead
+    /// of growing the queue past the hard watermark — the 250M OOM class.
+    #[test]
+    fn bulk_hydrate_ram_backpressure_throttles_and_bounded() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: Some(1 << 20), // 1 MiB chunks park fast
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        // Tiny budget: auto (60% physical) would never trip in a test.
+        db.set_max_ram_bytes(Some(3 << 20));
+        let v = vec![b'v'; 500];
+        let mut last = None;
+        for b in 0..200u32 {
+            let mut keys = Vec::new();
+            let mut vals = Vec::new();
+            for j in 0..64u32 {
+                keys.push(format!("data {b:04}-{j:04}").into_bytes().into());
+                vals.push(bytes::Bytes::from(v.clone()));
+            }
+            last = Some(format!("data\0{:04}-{:04}", b, 63u32));
+            db.apply_latched_bulk(
+                "data",
+                keys,
+                vals,
+                vec![BatchOp::put(b"meta\0cursor".to_vec(), b.to_le_bytes().to_vec())],
+            )
+            .unwrap();
+        }
+        assert!(
+            db.inner.read().ram_pressure_throttle_count() > 0,
+            "the bulk RAM gate must engage under a tiny budget"
+        );
+        // Hydrate completed and the data reads back — backpressure, not failure.
+        assert_eq!(
+            db.get(last.unwrap().as_bytes()).as_deref(),
+            Some(v.as_slice())
+        );
     }
 
     /// RFC-0159 P1.5: after the family latches, `apply_latched_bulk`
