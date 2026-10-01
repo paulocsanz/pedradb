@@ -2705,6 +2705,18 @@ impl<E: PedraEnv> DB<E> {
         self.inner.fast_outside_sst_miss(key)
     }
 
+    /// RFC-0306 probe hook: per-run (level, tables, disjoint-armed) snapshot.
+    #[must_use]
+    pub fn sst_run_debug(&self) -> Vec<(u32, usize, bool)> {
+        self.inner.with_read(|core| core.sst_run_debug())
+    }
+
+    /// RFC-0306 probe hook: tables probed by point lookups so far.
+    #[must_use]
+    pub fn lookup_tables_probed(&self) -> u64 {
+        pedradb_core::lookup_tables_probed()
+    }
+
     /// RFC-0306 P0: pre-TLS miss rejection. Same contract as
     /// [`Self::fast_outside_sst_miss`] (settled ⇒ mem/imm/parked empty ⇒
     /// a key outside every family envelope does not exist), evaluated

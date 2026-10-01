@@ -476,6 +476,15 @@ impl SstTable {
         if !crate::write_admission_kernel::batch_is_empty(self.payload.read().img.len() as u64) {
             return Ok(true);
         }
+        // RFC-0306: coalesced files reach hundreds of MiB; promoting one on
+        // the first point touch memcpy'd the whole body through the page
+        // cache (hundreds of ms) and the criterion get_hit MEAN amortized
+        // those storms — the 28.5 vs 17 µs gap. Point reads serve large
+        // files via single-block preads + the shared block caches instead;
+        // scans keep readahead and never enter this path.
+        if self.payload_len as u64 > MAX_POINT_PROMOTE_BYTES {
+            return Ok(false);
+        }
         let Some(kit) = self.kit.read().clone() else {
             return Ok(false);
         };
@@ -3214,6 +3223,9 @@ pub fn write_sst_bulk_arrays(
 }
 
 const BULK_SST_HEADER_LEN: usize = 40;
+/// RFC-0306: payloads above this are never promoted whole on the point
+/// path — a first touch must not memcpy a coalesced 270 MiB body.
+const MAX_POINT_PROMOTE_BYTES: u64 = 32 << 20;
 /// Stage this many encoded bytes before a `write` (hot cache, few syscalls).
 const BULK_STREAM_BATCH: usize = 4 * 1024 * 1024;
 

@@ -74,10 +74,15 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1);
-    // Deterministic shape: 200k entries ≈ one 64 MiB-class run staged in RAM.
-    let batches: u64 = 200;
+    let n_target: u64 = std::env::var("PROBE_N")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(204_800);
     let per_batch: u64 = 1024;
+    let batches = (n_target / per_batch).max(1);
     let n = batches * per_batch;
+    // Deterministic shape: PROBE_N entries (default 200k ≈ 1-2 chunks;
+    // 25M ≈ 92 chunks — the multi-table residency regime of 100M+).
     let pool = value_pool();
     let dir = std::env::temp_dir().join(format!("perf-probe-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -126,6 +131,10 @@ fn main() {
     db.flush().unwrap();
     db.compact().unwrap();
     assert!(db.is_settled_sst_only(), "probe requires a settled store");
+    let runs = db.sst_run_debug();
+    let total: usize = runs.iter().map(|(_, n, _)| n).sum();
+    let armed: usize = runs.iter().filter(|(_, _, d)| *d).map(|(_, n, _)| n).sum();
+    println!("  runs       : {:?} | tables {} | disjoint-armed {}", runs, total, armed);
 
     // --- Phase 2: outside-envelope miss (ns/op) ---
     let mut miss_ns = Vec::new();
@@ -172,6 +181,9 @@ fn main() {
         .collect();
     let mut hit_us = Vec::new();
     let a3 = ALLOCS.load(Ordering::Relaxed);
+    let blocks0 = rocksdb_compat::probe_counters().blocks_decoded;
+    let crc0 = rocksdb_compat::probe_counters().block_crc_skipped;
+    let tables0 = db.lookup_tables_probed();
     for rep in 0..(3 * mul.max(1)) {
         let t = Instant::now();
         for k in &hit_keys {
@@ -182,6 +194,10 @@ fn main() {
         }
     }
     let hit_allocs = ALLOCS.load(Ordering::Relaxed) - a3;
+    let tables_probed = db.lookup_tables_probed() - tables0;
+    let blocks_decoded = rocksdb_compat::probe_counters().blocks_decoded - blocks0;
+    let crc_skipped = rocksdb_compat::probe_counters().block_crc_skipped - crc0;
+    let gets = 20_000u64 * (3 * mul.max(1)) as u64;
 
     let per_op = |c: u64, ops: u64| c as f64 / ops as f64;
     println!("PERFPROBE n={n}");
@@ -191,19 +207,22 @@ fn main() {
         miss_ns.iter().cloned().fold(f64::INFINITY, f64::min), per_op(miss_allocs, 20_000 * 4));
     println!("  miss-in    : {:>9.1} ns/op | allocs/op {:>6.2}",
         median(&mut inside_ns), per_op(inside_allocs, 20_000 * 3));
-    println!("  hit-warm   : {:>9.2} µs/op | allocs/op {:>6.2}",
-        median(&mut hit_us), per_op(hit_allocs, 20_000 * 3));
+    println!("  hit-warm   : {:>9.2} µs/op | allocs/op {:>6.2} | blocks/get {:.3} | tables/get {:.3} | crc-skip/get {:.3}",
+        median(&mut hit_us), per_op(hit_allocs, 20_000 * 3),
+        blocks_decoded as f64 / gets as f64, tables_probed as f64 / gets as f64,
+        crc_skipped as f64 / gets as f64);
     if std::env::var_os("PEDRA_HYDRATE_DIAG").is_some() {
         println!("  {}", pedradb_core::write_diag_kernel::latched_bulk_diag_line());
     }
     println!(
-        "PERFPROBE_JSON {{\"n\":{n},\"apply_us\":{:.1},\"apply_allocs_per_op\":{:.2},\"miss_out_ns\":{:.0},\"miss_in_ns\":{:.0},\"hit_us\":{:.2},\"hit_allocs_per_op\":{:.2},\"miss_wall_s\":{:.3}}}",
+        "PERFPROBE_JSON {{\"n\":{n},\"apply_us\":{:.1},\"apply_allocs_per_op\":{:.2},\"miss_out_ns\":{:.0},\"miss_in_ns\":{:.0},\"hit_us\":{:.2},\"hit_allocs_per_op\":{:.2},\"blocks_per_get\":{:.3},\"miss_wall_s\":{:.3}}}",
         median(&mut batch_us.clone()),
         per_op(apply_allocs, n),
         miss_ns.iter().cloned().fold(f64::INFINITY, f64::min),
         median(&mut inside_ns),
         median(&mut hit_us),
         per_op(hit_allocs, 20_000 * 3),
+        blocks_decoded as f64 / gets as f64,
         miss_wall
     );
 
