@@ -55,6 +55,15 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+
+/// RFC-0306 read-bottleneck counter: SST tables probed by point lookups.
+static LOOKUP_TABLES_PROBED: AtomicU64 = AtomicU64::new(0);
+
+/// Tables probed by point lookups since process start (probe diagnostics).
+#[must_use]
+pub fn lookup_tables_probed() -> u64 {
+    LOOKUP_TABLES_PROBED.load(Ordering::Relaxed)
+}
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -3180,6 +3189,21 @@ impl<E: Env> Db<E> {
     pub fn note_ram_throttle(&mut self) {
         self.ram_pressure_throttle_count = self.ram_pressure_throttle_count.saturating_add(1);
     }
+    /// RFC-0306 probe diagnostics: per-run (level, tables, disjoint-armed).
+    #[must_use]
+    pub fn sst_run_debug(&self) -> Vec<(u32, usize, bool)> {
+        self.sst_runs
+            .iter()
+            .map(|r| {
+                (
+                    r.level,
+                    r.tables_newest_first.len(),
+                    r.disjoint_by_lo.is_some(),
+                )
+            })
+            .collect()
+    }
+
     /// Current RAM pressure verdict for write admission.
     #[must_use]
     pub fn ram_pressure_verdict(&self) -> crate::ram_pressure_kernel::RamPressureVerdict {
@@ -9965,6 +9989,7 @@ impl<E: Env> Db<E> {
         let ssts = &self.ssts;
         let (key_h1, key_h2) = crate::bloom_kernel::hash_pair(key);
         let mut probe = |table: &SstTable| -> Option<(SequenceNumber, Lookup)> {
+            LOOKUP_TABLES_PROBED.fetch_add(1, Ordering::Relaxed);
             if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
                 if key < lo || key > hi {
                     return None;
