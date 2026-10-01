@@ -3098,6 +3098,7 @@ impl<E: Env> Db<E> {
             .saturating_add(block_cache_bytes)
             .saturating_add(entries_bytes)
             .saturating_add(sst_meta_bytes)
+            .saturating_add(self.bulk_ram_bytes())
     }
 
     /// Configured maximum RAM budget in bytes.
@@ -3111,6 +3112,36 @@ impl<E: Env> Db<E> {
         self.max_ram_bytes = bytes.filter(|n| *n > 0);
     }
 
+
+    /// Bytes held by the latched bulk layers: open runs, the parked queue
+    /// and chunks mid-encode (RFC-0306 — the 250M hydrate OOM: these were
+    /// invisible to the pressure verdict).
+    #[must_use]
+    pub fn bulk_ram_bytes(&self) -> usize {
+        let runs: usize = self.bulk_runs.values().map(|r| r.bytes()).sum();
+        let parked: usize = self.parked_bulk.iter().map(|(_, r)| r.bytes()).sum();
+        let encoding: usize = self.bulk_encodings.iter().map(|(_, _, r)| r.bytes()).sum();
+        runs.saturating_add(parked).saturating_add(encoding)
+    }
+
+    /// Whether the bulk layers alone are at/above the RAM hard watermark
+    /// (per-batch hydrate admission gate).
+    #[must_use]
+    pub fn bulk_ram_over_hard(&self) -> bool {
+        let Some(budget) = self.max_ram_bytes.map(|b| b as u64) else {
+            return false;
+        };
+        if budget == 0 {
+            return false;
+        }
+        let (_, hard) = crate::ram_pressure_kernel::ram_watermarks(budget);
+        self.bulk_ram_bytes() as u64 >= hard
+    }
+
+    /// Count one hydrate-writer RAM throttle event (RFC-0306 bulk gate).
+    pub fn note_ram_throttle(&mut self) {
+        self.ram_pressure_throttle_count = self.ram_pressure_throttle_count.saturating_add(1);
+    }
     /// Current RAM pressure verdict for write admission.
     #[must_use]
     pub fn ram_pressure_verdict(&self) -> crate::ram_pressure_kernel::RamPressureVerdict {
