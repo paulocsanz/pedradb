@@ -281,6 +281,10 @@ pub struct PointSeekScratch {
     raw: Vec<u8>,
     /// Decompressed block image.
     plain: Vec<u8>,
+    /// RFC-0306: point-scan scratch — key assembly buffers reused across
+    /// gets (the per-call `Vec::new()` pairs were allocs on every hit).
+    uk_buf: Vec<u8>,
+    restart_uk: Vec<u8>,
 }
 
 thread_local! {
@@ -697,6 +701,8 @@ impl SstTable {
                         user_key,
                         snapshot,
                         &self.path,
+                        &mut scratch.uk_buf,
+                        &mut scratch.restart_uk,
                     )? {
                         if crate::lookup_kernel::prefer_newer_seq(
                             best.is_some(),
@@ -767,7 +773,7 @@ impl SstTable {
                             self.compressed_blocks,
                             user_key,
                             snapshot,
-                            &mut scratch.plain,
+                            scratch,
                             &self.path,
                         )? {
                             if crate::lookup_kernel::prefer_newer_seq(
@@ -796,7 +802,7 @@ impl SstTable {
                                 self.compressed_blocks,
                                 user_key,
                                 snapshot,
-                                &mut scratch.plain,
+                                scratch,
                                 &self.path,
                             )?;
                             w.mark_verified(bi, self.index.len());
@@ -839,7 +845,7 @@ impl SstTable {
                         self.compressed_blocks,
                         user_key,
                         snapshot,
-                        &mut scratch.plain,
+                        scratch,
                         &self.path,
                     )?;
                     if let Some(found) = found {
@@ -867,6 +873,8 @@ impl SstTable {
                         user_key,
                         snapshot,
                         &self.path,
+                        &mut scratch.uk_buf,
+                        &mut scratch.restart_uk,
                     )? {
                         if crate::lookup_kernel::prefer_newer_seq(
                             best.is_some(),
@@ -953,6 +961,8 @@ impl SstTable {
                             user_key,
                             snapshot,
                             &self.path,
+                            &mut scratch.uk_buf,
+                            &mut scratch.restart_uk,
                         )? {
                             if crate::lookup_kernel::prefer_newer_seq(
                                 best.is_some(),
@@ -969,7 +979,14 @@ impl SstTable {
                             body
                         };
                         if let Some(found) =
-                            seek_point_in_plain_block(plain, user_key, snapshot, &self.path)?
+                            seek_point_in_plain_block(
+                                plain,
+                                user_key,
+                                snapshot,
+                                &self.path,
+                                &mut scratch.uk_buf,
+                                &mut scratch.restart_uk,
+                            )?
                         {
                             if crate::lookup_kernel::prefer_newer_seq(
                                 best.is_some(),
@@ -2364,11 +2381,11 @@ fn seek_point_in_block_image(
     compressed: bool,
     user_key: &[u8],
     snapshot: SequenceNumber,
-    plain_scratch: &mut Vec<u8>,
+    scratch: &mut PointSeekScratch,
     path: &Path,
 ) -> Result<Option<(SequenceNumber, Lookup)>> {
     let body = split_block_crc(raw, path)?;
-    seek_point_in_block_body(body, compressed, user_key, snapshot, plain_scratch, path)
+    seek_point_in_block_body(body, compressed, user_key, snapshot, scratch, path)
 }
 
 /// Seek a CRC-stripped block body the caller already verified: decompress
@@ -2378,9 +2395,10 @@ fn seek_point_in_block_body(
     compressed: bool,
     user_key: &[u8],
     snapshot: SequenceNumber,
-    plain_scratch: &mut Vec<u8>,
+    scratch: &mut PointSeekScratch,
     path: &Path,
 ) -> Result<Option<(SequenceNumber, Lookup)>> {
+    let plain_scratch = &mut scratch.plain;
     let plain: &[u8] = if compressed {
         let (size, input) = lz4_flex::block::uncompressed_size(body).map_err(|e| {
             CoreError::Internal(format!(
@@ -2406,7 +2424,14 @@ fn seek_point_in_block_body(
     } else {
         body
     };
-    seek_point_in_plain_block(plain, user_key, snapshot, path)
+    seek_point_in_plain_block(
+        plain,
+        user_key,
+        snapshot,
+        path,
+        &mut scratch.uk_buf,
+        &mut scratch.restart_uk,
+    )
 }
 
 /// Newest visible point version of `user_key` in one decoded block image.
@@ -2424,6 +2449,8 @@ fn seek_point_in_plain_block(
     user_key: &[u8],
     snapshot: SequenceNumber,
     path: &Path,
+    uk_buf: &mut Vec<u8>,
+    restart_uk: &mut Vec<u8>,
 ) -> Result<Option<(SequenceNumber, Lookup)>> {
     let (plain, hash_tr) = split_block_hash(plain);
     if let Some(tr) = hash_tr {
@@ -2431,14 +2458,14 @@ fn seek_point_in_plain_block(
         match block_hash_lookup(tr, user_key) {
             Some(BlockHashHit::Free) => return Ok(None),
             Some(BlockHashHit::Restart(restart)) => {
-                return seek_point_from_restart(plain, user_key, snapshot, path, restart);
+                return seek_point_from_restart(plain, user_key, snapshot, path, restart, uk_buf, restart_uk);
             }
             Some(BlockHashHit::Conflict) | None => {
                 BLOCK_HASH_FALLBACKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
     }
-    seek_point_scan(plain, user_key, snapshot, path, 0)
+    seek_point_scan(plain, user_key, snapshot, path, 0, uk_buf, restart_uk)
 }
 
 enum BlockHashHit {
@@ -2474,8 +2501,18 @@ fn seek_point_from_restart(
     snapshot: SequenceNumber,
     path: &Path,
     restart: usize,
+    uk_buf: &mut Vec<u8>,
+    restart_uk: &mut Vec<u8>,
 ) -> Result<Option<(SequenceNumber, Lookup)>> {
-    seek_point_scan(plain, user_key, snapshot, path, restart.saturating_mul(BLOCK_RESTART))
+    seek_point_scan(
+        plain,
+        user_key,
+        snapshot,
+        path,
+        restart.saturating_mul(BLOCK_RESTART),
+        uk_buf,
+        restart_uk,
+    )
 }
 
 fn consider_point(
@@ -2519,12 +2556,13 @@ fn seek_point_scan(
     snapshot: SequenceNumber,
     path: &Path,
     skip_entries: usize,
+    uk_buf: &mut Vec<u8>,
+    restart_uk: &mut Vec<u8>,
 ) -> Result<Option<(SequenceNumber, Lookup)>> {
     let mut pos = 0usize;
     let mut best: Option<(SequenceNumber, Lookup)> = None;
-    let mut restart_uk: Vec<u8> = Vec::new();
+
     let mut entry_i = 0usize;
-    let mut uk_buf: Vec<u8> = Vec::new();
     while pos < plain.len() {
         let mut cur = crate::codec::SafeCursor::new(&plain[pos..]);
         let raw_len = cur.read_u32_le().map_err(|_| {
