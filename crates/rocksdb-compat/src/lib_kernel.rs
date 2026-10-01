@@ -2908,27 +2908,98 @@ impl<E: PedraEnv> DB<E> {
     /// TLS-warmed point get on a CF name already known valid.
     fn get_cached(&self, cf: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         let key = key.as_ref();
-        // RFC-0306 P0: settled miss outside every family envelope answers
-        // None before the TLS ids / encode / inner entry.
-        if self.fast_user_space_miss(cf, key) {
-            self.inner.note_class_point(false);
-            return Ok(None);
-        }
         // Fast-path bypass is delegated to self.inner.get to ensure memtables are checked first
         // RFC-0041 YCSB-C: zipf (θ=0.99, 4096 keys) concentrates on a hot
         // set. Direct-mapped last-N skips CF-prefix encode + point-cache
         // mutex. Bytes stay shared with the point cache; we copy into Vec
         // only for the rust-rocksdb return type. Epoch bumps on publish.
-        let (epoch, gen) = self.tls_point_ids(cf, key);
-        if let Some(hit) = LAST_CF.with(|slot| slot.borrow().get(epoch, gen, cf, key)) {
-            self.inner.note_class_point(hit.is_some());
-            return Ok(hit.map(|b| b.to_vec()));
+        //
+        // RFC-0306: encode once — `cf\0key` is built in a thread-local
+        // buffer and the same bytes feed the settled-envelope check, the
+        // TLS generation (`bucket_of(encoded)` ≡ `bucket_prefixed(pfx,
+        // key)` — identical byte sequence, same FxHash) and the inner get.
+        // The wrapper previously encoded twice and hashed a third time.
+        let effective = cf_encode_effective(cf, self.codec.default_raw);
+        thread_local! {
+            static ENC: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
         }
-        let got = self.codec.encode_with(cf, key, |enc| self.inner.get(enc));
-        if got.is_some() {
-            LAST_CF.with(|slot| slot.borrow_mut().store(epoch, gen, cf, key, got.clone()));
+        ENC.with(|cell| -> Result<Option<Vec<u8>>> {
+            let mut buf = cell.borrow_mut();
+            buf.clear();
+            if !pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
+                buf.extend_from_slice(effective.as_bytes());
+                buf.push(0);
+            }
+            buf.extend_from_slice(key);
+            let enc: &[u8] = &buf;
+            // Settled miss outside every family envelope answers None
+            // before the TLS ids / point cache / inner entry.
+            if self.fast_encoded_miss(enc) {
+                drop(buf);
+                self.inner.note_class_point(false);
+                return Ok(None);
+            }
+            let epoch = self.cache_epoch_base + self.inner.point_tls_epoch();
+            let gen = self.inner.key_tls_gen(enc);
+            if let Some(hit) = LAST_CF.with(|slot| slot.borrow().get(epoch, gen, cf, key)) {
+                drop(buf);
+                self.inner.note_class_point(hit.is_some());
+                return Ok(hit.map(|b| b.to_vec()));
+            }
+            let got = self.inner.get(enc);
+            drop(buf);
+            if got.is_some() {
+                LAST_CF.with(|slot| slot.borrow_mut().store(epoch, gen, cf, key, got.clone()));
+            }
+            Ok(got.map(|b| b.to_vec()))
+        })
+    }
+
+    /// RFC-0306: settled-envelope rejection over already-encoded bytes
+    /// (same contract as [`Self::fast_outside_sst_miss`], zero rebuild).
+    fn fast_encoded_miss(&self, enc: &[u8]) -> bool {
+        if !self.inner.is_settled_sst_only() {
+            return false;
         }
-        Ok(got.map(|b| b.to_vec()))
+        let tls_epoch = self.inner.point_tls_epoch();
+        let read_epoch = self.inner.read_cache_epoch();
+        // `cache_epoch_base` is unique per DB instance: without it a stale
+        // envelope from another DB on the same thread (checkpoint restore,
+        // reopen) could answer a false None when the epoch counters happen
+        // to coincide.
+        let db_id = self.cache_epoch_base;
+        thread_local! {
+            static ENV: std::cell::RefCell<Option<(
+                u64,
+                u64,
+                u64,
+                std::sync::Arc<Vec<(bytes::Bytes, bytes::Bytes)>>,
+            )>> = const { std::cell::RefCell::new(None) };
+        }
+        let pairs = ENV.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            let fresh = slot.as_ref().is_none_or(|(id, te, re, _)| {
+                *id != db_id || *te != tls_epoch || *re != read_epoch
+            });
+            if fresh {
+                *slot = Some((
+                    db_id,
+                    tls_epoch,
+                    read_epoch,
+                    std::sync::Arc::new(self.inner.sst_envelope_snapshot()),
+                ));
+            }
+            match slot.as_ref() {
+                Some((_, _, _, p)) => std::sync::Arc::clone(p),
+                None => std::sync::Arc::new(Vec::new()),
+            }
+        });
+        if pairs.is_empty() {
+            return false;
+        }
+        pairs
+            .iter()
+            .all(|(lo, hi)| enc < lo.as_ref() || enc > hi.as_ref())
     }
 
     /// Test helper: named get is a LAST_CF hit (no encode / inner get).
