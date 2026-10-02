@@ -1396,76 +1396,6 @@ fn encoded_succ(enc: &[u8]) -> Option<Vec<u8>> {
 static DEFAULT_CF_ARC: std::sync::LazyLock<Arc<str>> =
     std::sync::LazyLock::new(|| DEFAULT_CF.into());
 
-/// RFC-0306 P1: batch staging slabs. `put_cf` used to pay two
-/// allocations per op (`Bytes::copy_from_slice` of key and value — 2048
-/// per hydrate batch on the single client thread). These thread-local
-/// `BytesMut` slabs keep their capacity across batches: each op copies
-/// into the slab and takes a refcounted view (`split_to().freeze()`), and
-/// the slab rolls over to a fresh one only when its remaining capacity
-/// runs low — the previous allocation lives on through the outstanding
-/// views, so nothing is ever copied at rollover. This is the fix for the
-/// aa6d24e regression: that arena was per-batch and regrew from zero
-/// every apply (~18 reallocs of accumulated large blocks); here growth
-/// never happens under live views and rollover is one fresh allocation
-/// per ~8 MiB staged. `PEDRA_ARENA_DISABLE=1` restores the per-op path
-/// for A/B.
-const ARENA_SLAB_CAP: usize = 8 << 20;
-const ARENA_SLAB_KEEP: usize = 64 << 10;
-
-thread_local! {
-    static ARENA_KEY_SLAB: std::cell::RefCell<bytes::BytesMut> =
-        std::cell::RefCell::new(bytes::BytesMut::with_capacity(ARENA_SLAB_CAP));
-    static ARENA_VAL_SLAB: std::cell::RefCell<bytes::BytesMut> =
-        std::cell::RefCell::new(bytes::BytesMut::with_capacity(ARENA_SLAB_CAP));
-}
-
-fn arena_enabled() -> bool {
-    thread_local! {
-        static ON: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
-    }
-    ON.with(|c| {
-        if let Some(on) = c.get() {
-            return on;
-        }
-        let on = std::env::var_os("PEDRA_ARENA_DISABLE").is_none_or(|v| v != "1");
-        c.set(Some(on));
-        on
-    })
-}
-
-/// Copy `src` into `slab` and return an owned view of the copy.
-fn arena_view(slab: &mut bytes::BytesMut, src: &[u8]) -> bytes::Bytes {
-    if slab.capacity() < src.len().saturating_add(ARENA_SLAB_KEEP).min(ARENA_SLAB_CAP) {
-        *slab = bytes::BytesMut::with_capacity(ARENA_SLAB_CAP);
-    }
-    slab.extend_from_slice(src);
-    let n = src.len();
-    slab.split_to(n).freeze()
-}
-
-/// Stage `src` through the thread-local key slab (or a plain copy when
-/// the arena is disabled).
-fn arena_key(src: &[u8]) -> bytes::Bytes {
-    if !arena_enabled() {
-        return bytes::Bytes::copy_from_slice(src);
-    }
-    ARENA_KEY_SLAB.with(|c| {
-        let mut slab = c.borrow_mut();
-        arena_view(&mut slab, src)
-    })
-}
-
-/// Stage `src` through the thread-local value slab.
-fn arena_val(src: &[u8]) -> bytes::Bytes {
-    if !arena_enabled() {
-        return bytes::Bytes::copy_from_slice(src);
-    }
-    ARENA_VAL_SLAB.with(|c| {
-        let mut slab = c.borrow_mut();
-        arena_view(&mut slab, src)
-    })
-}
-
 /// Atomic write batch (one Pedra `apply_batch` = all-or-nothing).
 #[derive(Debug, Default)]
 pub struct WriteBatch {
@@ -1507,8 +1437,8 @@ impl WriteBatch {
         self.ops.push((
             Some(Arc::clone(&cf.name)),
             BatchOp::Put {
-                key: arena_key(key.as_ref()),
-                value: arena_val(value.as_ref()),
+                key: Bytes::copy_from_slice(key.as_ref()),
+                value: Bytes::copy_from_slice(value.as_ref()),
             },
         ));
     }
@@ -1536,7 +1466,7 @@ impl WriteBatch {
         self.ops.push((
             Some(Arc::clone(&cf.name)),
             BatchOp::Delete {
-                key: arena_key(key.as_ref()),
+                key: Bytes::copy_from_slice(key.as_ref()),
             },
         ));
     }
@@ -1562,8 +1492,8 @@ impl WriteBatch {
         self.ops.push((
             Some(Arc::clone(&cf.name)),
             BatchOp::DeleteRange {
-                start: arena_key(s),
-                end: arena_key(e),
+                start: Bytes::copy_from_slice(s),
+                end: Bytes::copy_from_slice(e),
             },
         ));
     }
@@ -7467,41 +7397,6 @@ mod tests {
             db.get_named("data", &last).unwrap().as_deref(),
             Some(val.as_slice())
         );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// RFC-0306 P1 teeth: a batch big enough to roll the staging slabs
-    /// over mid-batch must keep every op view readable (aa6d24e's
-    /// per-batch arena regressed here; retained slabs must not).
-    #[test]
-    fn write_batch_arena_views_survive_rollover() {
-        let dir = tmp("p1-arena-rollover");
-        let mut opts = Options::new();
-        opts.create_if_missing(true);
-        opts.set_sync(false);
-        let db = DB::open_cf(&opts, &dir, &["data"]).unwrap();
-        let data = db.cf_handle("data").unwrap();
-        let mut wo = WriteOptions::default();
-        wo.set_sync(false);
-        let val = vec![b'v'; 200];
-        // ~12 MiB staged — the slabs roll at ~8 MiB.
-        let n = 60_000usize;
-        let mut wb = WriteBatch::default();
-        for j in 0..n {
-            wb.put_cf(&data, format!("k-{j:08}").as_bytes(), &val);
-        }
-        assert_eq!(wb.len(), n);
-        db.write_opt_owned(wb, &wo).unwrap();
-        db.flush().unwrap();
-        for j in [0usize, 1, n / 2, n - 2, n - 1] {
-            assert_eq!(
-                db.get_named("data", format!("k-{j:08}").as_bytes())
-                    .unwrap()
-                    .as_deref(),
-                Some(val.as_slice()),
-                "key {j} must read back across the slab rollover"
-            );
-        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
