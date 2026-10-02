@@ -1413,12 +1413,50 @@ pub fn probe_counters() -> ProbeCounters {
 }
 
 /// Atomic write batch (one Pedra `apply_batch` = all-or-nothing).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct WriteBatch {
     ops: Vec<(Option<Arc<str>>, BatchOp)>,
+    /// RFC-0306 P1: batch-scoped staging bump. `put_cf`/`delete_*` append
+    /// here and hand out `Bytes` views of one shared backing instead of
+    /// one allocation per key and per value (4.03 allocs/op measured at
+    /// 25M). Unlike the retired thread-local arena this cannot outlive
+    /// the batch: the buffer is owned by the `WriteBatch`, and views the
+    /// engine retains keep only this batch's backing alive — bounded by
+    /// the live run/chunk, never by the process.
+    staging: bytes::BytesMut,
+}
+
+/// Initial staging capacity: sized so a hydrate batch (~1024 ops x 240 B)
+/// never forces a grow while views are outstanding (a shared-block grow
+/// copies the live tail). Amortized to ~0 allocations per op.
+const WRITE_BATCH_STAGING_BYTES: usize = 128 * 1024;
+
+impl Default for WriteBatch {
+    fn default() -> Self {
+        Self {
+            ops: Vec::new(),
+            staging: bytes::BytesMut::with_capacity(WRITE_BATCH_STAGING_BYTES),
+        }
+    }
 }
 
 impl WriteBatch {
+    /// Copy `raw` into the staging bump and return a shared view of it.
+    fn stage(&mut self, raw: &[u8]) -> Bytes {
+        self.staging.extend_from_slice(raw);
+        self.staging.split_to(raw.len()).freeze()
+    }
+
+    /// Stage `key` and `value` with one bump append and one detach:
+    /// `Bytes::slice` on the frozen pair is a zero-copy view.
+    fn stage_kv(&mut self, key: &[u8], value: &[u8]) -> (Bytes, Bytes) {
+        self.staging.extend_from_slice(key);
+        self.staging.extend_from_slice(value);
+        let pair = self.staging.split_to(key.len() + value.len()).freeze();
+        let k = pair.slice(..key.len());
+        let v = pair.slice(key.len()..);
+        (k, v)
+    }
     /// Empty batch.
     #[must_use]
     pub fn new() -> Self {
@@ -1450,13 +1488,9 @@ impl WriteBatch {
 
     /// Put into a named CF.
     pub fn put_cf(&mut self, cf: &ColumnFamily, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
-        self.ops.push((
-            Some(Arc::clone(&cf.name)),
-            BatchOp::Put {
-                key: Bytes::copy_from_slice(key.as_ref()),
-                value: Bytes::copy_from_slice(value.as_ref()),
-            },
-        ));
+        let (key, value) = self.stage_kv(key.as_ref(), value.as_ref());
+        self.ops
+            .push((Some(Arc::clone(&cf.name)), BatchOp::Put { key, value }));
     }
 
     /// Stage an owned-Bytes put without a second key/value copy — the
@@ -1479,12 +1513,9 @@ impl WriteBatch {
 
     /// Delete from a named CF.
     pub fn delete_cf(&mut self, cf: &ColumnFamily, key: impl AsRef<[u8]>) {
-        self.ops.push((
-            Some(Arc::clone(&cf.name)),
-            BatchOp::Delete {
-                key: Bytes::copy_from_slice(key.as_ref()),
-            },
-        ));
+        let key = self.stage(key.as_ref());
+        self.ops
+            .push((Some(Arc::clone(&cf.name)), BatchOp::Delete { key }));
     }
 
     /// Stage an owned-Bytes delete (see [`Self::put_cf_bytes`]).
@@ -1505,12 +1536,11 @@ impl WriteBatch {
         if s >= e {
             return;
         }
+        let start = self.stage(s);
+        let end = self.stage(e);
         self.ops.push((
             Some(Arc::clone(&cf.name)),
-            BatchOp::DeleteRange {
-                start: Bytes::copy_from_slice(s),
-                end: Bytes::copy_from_slice(e),
-            },
+            BatchOp::DeleteRange { start, end },
         ));
     }
 }

@@ -48,6 +48,7 @@ pub mod d1_modelo_kernel;
 #[path = "db_kernel.rs"]
 pub mod db;
 pub use db::lookup_tables_probed;
+pub use db::bulk_boundary_diag_take;
 pub mod durability_spine_kernel;
 #[path = "env_kernel.rs"]
 pub mod env;
