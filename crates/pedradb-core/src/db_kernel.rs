@@ -1382,11 +1382,67 @@ struct UnappliedOp {
 /// the same tables sorted by `lo` key when the run is provably pairwise
 /// disjoint. Disjoint runs bisect to the single candidate table instead of
 /// walking every table's bounds + bloom.
+fn short(b: &[u8]) -> String {
+    String::from_utf8_lossy(&b[..b.len().min(8)]).into_owned()
+}
+
 struct SstRun {
     level: u32,
     tables_newest_first: Vec<usize>,
     disjoint_by_lo: Option<Vec<usize>>,
+    /// RFC-0306 P2: `disjoint_by_lo`'s bounds as one contiguous array of
+    /// fixed 32-byte slots. The bisection used to chase
+    /// `ssts[i].smallest_user_key()` — a fat-struct hop plus a `Bytes`
+    /// pointer deref per step — and at 355 tables every point get paid
+    /// ~2-3 cache misses x 9 steps in metadata that no longer fits LLC
+    /// (miss-in scaled 1.4µs @ 89 tables -> 10µs @ 355). Slot compare vs
+    /// the query key's first 31 bytes is EXACT whenever every stored `lo`
+    /// is <= 31 bytes (a longer shared prefix implies `lo` is a prefix of
+    /// the key, and prefix < whole in bytewise order — same verdict in
+    /// both compare forms). Longer `lo`s keep `None` and the chase path.
+    disjoint_los_flat: Option<Vec<Bound32>>,
     has_range_tombstones: bool,
+}
+
+/// Fixed-stride inline bound key for the flat bisection array.
+#[derive(Clone, Copy)]
+struct Bound32 {
+    len: u8,
+    bytes: [u8; 31],
+}
+
+impl Bound32 {
+    fn of(lo: &[u8]) -> Option<Self> {
+        if lo.len() > 31 {
+            return None;
+        }
+        let mut bytes = [0u8; 31];
+        bytes[..lo.len()].copy_from_slice(lo);
+        Some(Self {
+            len: lo.len() as u8,
+            bytes,
+        })
+    }
+
+    /// `self <= key`, exact when every `lo` backing the array is <= 31 B.
+    #[inline]
+    fn le_key(&self, key: &[u8]) -> bool {
+        let lo = &self.bytes[..self.len as usize];
+        let k = &key[..key.len().min(31)];
+        // Equal prefixes mean `lo` is a prefix of `key` (len <= 31), and a
+        // proper prefix sorts below the whole key.
+        lo <= k
+    }
+}
+
+/// Contiguous `lo` slots parallel to `by_lo`, `None` when any `lo` > 31 B.
+fn flat_los(ssts: &[SstTable], by_lo: &[usize]) -> Option<Vec<Bound32>> {
+    let mut out = Vec::with_capacity(by_lo.len());
+    for &i in by_lo {
+        let lo = ssts.get(i)?.smallest_user_key()?;
+        out.push(Bound32::of(lo)?);
+    }
+    Some(out)
 }
 
 impl SstRun {
@@ -1444,7 +1500,7 @@ impl SstRun {
 /// from ~#SSTs to ~#levels + L0 + memtables, cutting sift levels per row.
 struct LevelRunStream<'a, E: Env> {
     db: &'a Db<E>,
-    files_by_lo: Vec<usize>,
+    files_by_lo: &'a [usize],
     next_file: usize,
     start: Bound<Bytes>,
     end: Bound<Bytes>,
@@ -1458,7 +1514,7 @@ struct LevelRunStream<'a, E: Env> {
 impl<'a, E: Env> LevelRunStream<'a, E> {
     fn new(
         db: &'a Db<E>,
-        files_by_lo: Vec<usize>,
+        files_by_lo: &'a [usize],
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
         snapshot: SequenceNumber,
@@ -4567,6 +4623,7 @@ impl<E: Env> Db<E> {
                     level,
                     tables_newest_first: vec![sst_i],
                     disjoint_by_lo: None,
+                    disjoint_los_flat: None,
                     has_range_tombstones: false,
                 }),
             }
@@ -4574,6 +4631,10 @@ impl<E: Env> Db<E> {
         for run in &mut runs {
             run.disjoint_by_lo =
                 SstRun::disjoint_sorted_by_lo(&self.ssts, &run.tables_newest_first);
+            run.disjoint_los_flat = run
+                .disjoint_by_lo
+                .as_ref()
+                .and_then(|by_lo| flat_los(&self.ssts, by_lo));
             run.has_range_tombstones = run
                 .tables_newest_first
                 .iter()
@@ -4633,16 +4694,35 @@ impl<E: Env> Db<E> {
                 let new_hi = self.ssts[new_idx].largest_user_key();
                 if let (Some(l_hi), Some(n_lo), Some(_)) = (last_hi, new_lo, new_hi) {
                     if n_lo > l_hi {
-                        by_lo.push(new_idx);
+                        match Bound32::of(n_lo) {
+                            Some(slot) => {
+                                by_lo.push(new_idx);
+                                if let Some(flat) = run.disjoint_los_flat.as_mut() {
+                                    flat.push(slot);
+                                }
+                            }
+                            None => {
+                                by_lo.push(new_idx);
+                                run.disjoint_los_flat = None;
+                            }
+                        }
                     } else {
                         run.disjoint_by_lo =
                             SstRun::disjoint_sorted_by_lo(&self.ssts, &run.tables_newest_first);
+                        run.disjoint_los_flat = run
+                            .disjoint_by_lo
+                            .as_ref()
+                            .and_then(|by_lo| flat_los(&self.ssts, by_lo));
                     }
                 } else {
                     run.disjoint_by_lo = None;
+                    run.disjoint_los_flat = None;
                 }
             } else if run.tables_newest_first.len() == 1 {
                 run.disjoint_by_lo = Some(vec![new_idx]);
+                run.disjoint_los_flat = flat_los(&self.ssts, run.disjoint_by_lo.as_deref().unwrap_or(&[]));
+            } else {
+                run.disjoint_los_flat = None;
             }
         } else {
             self.rebuild_sst_runs();
@@ -5211,13 +5291,44 @@ impl<E: Env> Db<E> {
         // Range tombstones from EVERY table (G2): a covering delete whose
         // start sits before `start` must still hide keys in the window,
         // including tables a grouped stream has not pulled from yet.
-        for table in self.ssts.iter() {
-            // RFC-0233 P2.3: skip disjoint files with no range tombs (setup
-            // was 97% of deps_scan @10M walking every SST).
-            if !table.has_range_tombstones() && !table.overlaps_user_range(start, end) {
-                continue;
+        // RFC-0306 P2: a run whose summary says "no range tombstones"
+        // contributes nothing here — skip it wholesale. The per-table walk
+        // was O(#SSTs) fat-struct pointer chases per scan (886 tables at
+        // 250M ≈ 25-35µs of every prefix_scan). Guard: if the runs do not
+        // cover the whole inventory (any install path that has not rebuilt
+        // them yet), fall back to the global walk rather than risk missing
+        // a tombstone (a missed tombstone resurrects deleted keys).
+        let runs_cover_inventory = self
+            .sst_runs
+            .iter()
+            .map(|r| r.tables_newest_first.len())
+            .sum::<usize>()
+            == self.ssts.len();
+        if runs_cover_inventory {
+            for run in self.sst_runs.iter() {
+                if !run.has_range_tombstones {
+                    continue;
+                }
+                for &ti in run.tables_newest_first.iter() {
+                    let table = &self.ssts[ti];
+                    // RFC-0233 P2.3: skip disjoint files with no range
+                    // tombs (setup was 97% of deps_scan @10M walking every
+                    // SST).
+                    if !table.has_range_tombstones()
+                        && !table.overlaps_user_range(start, end)
+                    {
+                        continue;
+                    }
+                    table.collect_range_tombstones(snapshot, &mut range_dels);
+                }
             }
-            table.collect_range_tombstones(snapshot, &mut range_dels);
+        } else {
+            for table in self.ssts.iter() {
+                if !table.has_range_tombstones() && !table.overlaps_user_range(start, end) {
+                    continue;
+                }
+                table.collect_range_tombstones(snapshot, &mut range_dels);
+            }
         }
         // A strictly disjoint level collapses into ONE lazy concatenated
         // stream ([`LevelRunStream`]): heap width drops from #SSTs to
@@ -5227,7 +5338,7 @@ impl<E: Env> Db<E> {
             if let Some(by_lo) = run.disjoint_by_lo.as_ref() {
                 streams.push(Box::new(LevelRunStream::new(
                     self,
-                    by_lo.clone(),
+                    by_lo.as_slice(),
                     start,
                     end,
                     snapshot,
@@ -9939,6 +10050,96 @@ impl<E: Env> Db<E> {
     ///
     /// Merges point versions and range tombstones across all layers so a range
     /// delete in a newer layer correctly hides older puts.
+    /// RFC-0306 stale-read hunt: per-layer point view of `key` (diagnostics
+    /// only; called from the differential oracle's mismatch triage).
+    pub fn debug_lookup_trace(&self, key: &[u8]) -> String {
+        let mut out = String::new();
+        let layers = self.mem_layers();
+        for (i, table) in layers.iter().enumerate() {
+            let entry = table
+                .get_entry(key, MAX_SEQUENCE_NUMBER)
+                .map(|(seq, look)| format!("{seq}/{}", match look {
+                    Lookup::Found(v) => format!("Found({}B)", v.len()),
+                    Lookup::Deleted => "Del".into(),
+                    Lookup::NotFound => "NF".into(),
+                }))
+                .unwrap_or_else(|| "-".into());
+            let mut tombs = Vec::new();
+            table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
+            let tk: Vec<String> = tombs
+                .iter()
+                .filter(|t| t.covers(key))
+                .map(|t| format!("{}..{}@{}", short(t.start.as_ref()), short(t.end.as_ref()), t.sequence))
+                .collect();
+            out.push_str(&format!(
+                "  L{i} entry={entry} covering_tombs=[{}]\n",
+                tk.join(",")
+            ));
+        }
+        out.push_str(&format!(
+            "  ssts n={} runs={}\n",
+            self.ssts.len(),
+            self.sst_runs.len()
+        ));
+        for (ri, run) in self.sst_runs.iter().enumerate() {
+            out.push_str(&format!(
+                "  R{ri} level={} tables={} disjoint={:?} tombs={}\n",
+                run.level,
+                run.tables_newest_first.len(),
+                run.disjoint_by_lo.is_some(),
+                run.has_range_tombstones
+            ));
+            for &ti in run.tables_newest_first.iter() {
+                let t = &self.ssts[ti];
+                let entry = t
+                    .point_at(key, MAX_SEQUENCE_NUMBER)
+                    .map(|(seq, look)| format!("{seq}/{}", match look {
+                        Lookup::Found(v) => format!("Found({}B)", v.len()),
+                        Lookup::Deleted => "Del".into(),
+                        Lookup::NotFound => "NF".into(),
+                    }))
+                    .unwrap_or_else(|| "err".into());
+                // RFC-0306 hunt: the production probe is the seek chain.
+                // If it misses what `point_at` finds, the bug is seek
+                // recall, not tombstones.
+                let seek_entry = {
+                    let mut scratch = take_tls_point_seek_scratch();
+                    let (h1, h2) = crate::bloom_kernel::hash_pair(key);
+                    let r = t.point_at_seeking_with_hashes(
+                        key,
+                        MAX_SEQUENCE_NUMBER,
+                        &mut scratch,
+                        h1,
+                        h2,
+                    );
+                    put_tls_point_seek_scratch(scratch);
+                    r.ok()
+                        .flatten()
+                        .map(|(seq, look)| format!("{seq}/{}", match look {
+                            Lookup::Found(v) => format!("Found({}B)", v.len()),
+                            Lookup::Deleted => "Del".into(),
+                            Lookup::NotFound => "NF".into(),
+                        }))
+                        .unwrap_or_else(|| "err".into())
+                };
+                let mut tombs = Vec::new();
+                t.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
+                let covering: Vec<String> = tombs
+                    .iter()
+                    .filter(|t| t.covers(key))
+                    .map(|t| format!("seq{}", t.sequence))
+                    .collect();
+                out.push_str(&format!(
+                    "    T{ti} lo={:?} hi={:?} entry={entry} seek={seek_entry} covering_tombs=[{}]\n",
+                    t.smallest_user_key().map(|b| short(b)),
+                    t.largest_user_key().map(|b| short(b)),
+                    covering.join(",")
+                ));
+            }
+        }
+        out
+    }
+
     pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
         let mut best_point_seq: Option<SequenceNumber> = None;
         let mut best_point: Lookup = Lookup::NotFound;
@@ -10051,7 +10252,22 @@ impl<E: Env> Db<E> {
                     ssts[sst_i].collect_range_tombstones(snapshot, &mut range_tombs);
                 }
             }
-            if let Some(by_lo) = &run.disjoint_by_lo {
+            if let (Some(flat), Some(by_lo)) =
+                (run.disjoint_los_flat.as_ref(), run.disjoint_by_lo.as_ref())
+            {
+                // RFC-0306 P2: contiguous fixed-stride bounds — the walk
+                // stays in one array instead of chasing a fat struct plus
+                // a `Bytes` deref per step. Verdicts match the chase path
+                // exactly (see `Bound32::le_key`).
+                let p = flat.partition_point(|slot| slot.le_key(key));
+                if p > 0 {
+                    if let Some((seq, look)) = probe(&ssts[by_lo[p - 1]]) {
+                        best_point_seq = Some(seq);
+                        best_point = look;
+                        break 'runs;
+                    }
+                }
+            } else if let Some(by_lo) = &run.disjoint_by_lo {
                 // Sorted by `lo`, pairwise disjoint: the last table whose
                 // `lo <= key` is the only one that can hold `key` (every
                 // earlier `hi` sits below the next `lo`). The probe's own

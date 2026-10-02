@@ -2520,6 +2520,12 @@ impl ConcurrentDb<StdEnv> {
 }
 
 impl<E: Env> ConcurrentDb<E> {
+    /// RFC-0306 stale-read hunt: per-layer point trace of an encoded key
+    /// (diagnostics; see `Db::debug_lookup_trace`).
+    pub fn point_lookup_trace(&self, enc: &[u8]) -> String {
+        self.inner.read().debug_lookup_trace(enc)
+    }
+
     /// Wrap an existing `Db`.
     #[must_use]
     pub fn from_db(db: Db<E>) -> Self {

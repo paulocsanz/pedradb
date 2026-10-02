@@ -2687,6 +2687,16 @@ impl<E: PedraEnv> DB<E> {
         self.inner.with_read(|core| core.sst_run_debug())
     }
 
+    /// RFC-0306 stale-read hunt: engine encoding of a user key.
+    pub fn debug_encode(&self, cf: &str, key: &[u8]) -> Vec<u8> {
+        self.codec.encode(cf, key).into()
+    }
+
+    /// RFC-0306 stale-read hunt: per-layer trace of an ENCODED key.
+    pub fn debug_lookup_trace_encoded(&self, enc: &[u8]) -> String {
+        self.inner.point_lookup_trace(enc)
+    }
+
     /// RFC-0306 probe hook: tables probed by point lookups so far.
     #[must_use]
     pub fn lookup_tables_probed(&self) -> u64 {
@@ -5181,6 +5191,14 @@ where
     E::File: Send + Sync + 'static,
 {
     let (tx, rx) = mpsc::sync_channel(1);
+    if worker_count == 0 {
+        // RFC-0306 triage / API honesty: max_background_jobs = 0 spawns no
+        // workers and arms no flush backpressure. The old clamp(1,16) at
+        // the call site turned 0 into 1, so "no background jobs" still ran
+        // a poller — the differential oracle's no-worker knob was a no-op.
+        drop(rx);
+        return (None, None, Vec::new());
+    }
     // Flush backpressure is armed: with this worker draining parked mems,
     // submits may block on flush debt (WriteGroup::await_flush_debt).
     inner.set_flush_worker_attached(true);
