@@ -64,6 +64,15 @@ static LOOKUP_TABLES_PROBED: AtomicU64 = AtomicU64::new(0);
 pub fn lookup_tables_probed() -> u64 {
     LOOKUP_TABLES_PROBED.load(Ordering::Relaxed)
 }
+
+/// RFC-0306 boundary attribution: (was_sorted, park-path ns) per parked chunk.
+static BULK_BOUNDARY_DIAG: std::sync::Mutex<Vec<(bool, u64)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// RFC-0306 boundary attribution: take the per-chunk (was_sorted, ns) log.
+pub fn bulk_boundary_diag_take() -> Vec<(bool, u64)> {
+    std::mem::take(&mut *BULK_BOUNDARY_DIAG.lock().unwrap_or_else(|e| e.into_inner()))
+}
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -6353,7 +6362,12 @@ impl<E: Env> Db<E> {
                     // RFC-0217 P1.1: no WAL frame — a rotate may only drop
                     // the segment once a publish covers this sequence.
                     self.walless_seq_high = self.walless_seq_high.max(seq);
-                    let value = escape_inline_value(value);
+                    // RFC-0306 P1: the memtable is long-lived and this op
+                    // is overwritten every batch — stage views here would
+                    // pin every batch's staging backing until a mem flush
+                    // that a one-key cursor never triggers. Copy-owned.
+                    let value = escape_inline_value(Bytes::copy_from_slice(&value));
+                    let key = Bytes::copy_from_slice(&key);
                     self.mem
                         .write()
                         .insert(InternalKey::new(key, seq, ValueType::Value), value);
@@ -6589,6 +6603,7 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
+
     fn bulk_append_puts(
         &mut self,
         family: &str,
@@ -6645,9 +6660,15 @@ impl<E: Env> Db<E> {
         };
         if over {
             if let Some(mut run) = self.bulk_runs.remove(family) {
-                if !run.is_sorted() {
+                let t_sort0 = std::time::Instant::now();
+                let was_sorted = run.is_sorted();
+                if !was_sorted {
                     run.sort();
                 }
+                BULK_BOUNDARY_DIAG
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push((was_sorted, t_sort0.elapsed().as_nanos() as u64));
                 // Park so background workers and client assist encode SSTs off-lock.
                 self.parked_bulk
                     .push_back((family.to_string(), Arc::new(run)));
