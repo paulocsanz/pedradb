@@ -314,6 +314,10 @@ pub const DEFAULT_SST_PAYLOAD_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 /// lock it is 90→23 persists at 25M / 64 MiB.
 const BULK_MANIFEST_EVERY: u8 = 4;
 
+/// RFC-0306: bulk chunks self-tune to this ceiling (validated hydrate
+/// and read shape at every scale; see `bulk_chunk_cap`).
+const BULK_CHUNK_DEFAULT_BYTES: usize = 64 << 20;
+
 /// Default read-handle cache size for bounded opens
 /// ([`crate::env::FileHandleCache`]): covers the post-settle file count of
 /// the 25M slipstream shape (~85 SSTs) with fd headroom. RocksDB holds the
@@ -7232,6 +7236,15 @@ impl<E: Env> Db<E> {
 
     /// Bulk-run flush size: per-CF / global write buffer, clamped by
     /// `PEDRA_STAGE_MAX_BYTES` when set.
+    /// Bulk-run flush size: per-CF / global write buffer, clamped by
+    /// `PEDRA_STAGE_MAX_BYTES` when set.
+    /// RFC-0306: bulk chunks self-tune to 64 MiB — no user knob. Larger
+    /// staged chunks (a 256 MiB CF buffer) quadrupled parked-queue bytes,
+    /// halved hydrate throughput on the bench box (1.04 vs 2.07+ M/s) and
+    /// grew settle-time file sizes fourfold; 64 MiB was the validated
+    /// shape at every scale. `PEDRA_STAGE_MAX_BYTES` remains a strict
+    /// DOWNWARD override for experiments only — it can never raise the
+    /// cap.
     fn bulk_chunk_cap(&self) -> Option<usize> {
         let mut cap = self.auto_flush_bytes.filter(|n| *n > 0);
         for &n in self.cf_write_buffer.values() {
@@ -7240,13 +7253,15 @@ impl<E: Env> Db<E> {
             }
         }
         if let Some(c) = cap {
+            let capped = c.min(BULK_CHUNK_DEFAULT_BYTES);
             if let Ok(v) = std::env::var("PEDRA_STAGE_MAX_BYTES") {
                 if let Ok(max) = v.parse::<usize>() {
-                    if max > 0 && max < c {
+                    if max > 0 && max < capped {
                         return Some(max);
                     }
                 }
             }
+            return Some(capped);
         }
         cap
     }
@@ -23759,6 +23774,30 @@ mod tests {
 
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bulk_chunk_cap_self_tunes_to_64mib() {
+        let dir = temp_dir();
+        let mut db = Db::<StdEnv>::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_cf_write_buffer("data", 256 << 20);
+        let cap = db.bulk_chunk_cap().unwrap_or(0);
+        assert_eq!(
+            cap,
+            64 << 20,
+            "256 MiB CF buffer must self-tune to the 64 MiB chunk ceiling"
+        );
+        // Smaller global cap stays respected (min semantics).
+        db.set_cf_write_buffer("data", 8 << 20);
+        assert_eq!(db.bulk_chunk_cap().unwrap_or(0), 8 << 20);
+        db.close().unwrap();
     }
 }
 
