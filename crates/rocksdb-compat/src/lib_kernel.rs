@@ -1396,6 +1396,22 @@ fn encoded_succ(enc: &[u8]) -> Option<Vec<u8>> {
 static DEFAULT_CF_ARC: std::sync::LazyLock<Arc<str>> =
     std::sync::LazyLock::new(|| DEFAULT_CF.into());
 
+/// RFC-0306 probe hook: point-path block counters (main-thread TLS read).
+#[derive(Debug, Clone, Copy)]
+pub struct ProbeCounters {
+    pub blocks_decoded: usize,
+    pub block_crc_skipped: usize,
+}
+
+/// Snapshot of the calling thread's point-path counters.
+#[must_use]
+pub fn probe_counters() -> ProbeCounters {
+    ProbeCounters {
+        blocks_decoded: pedradb_core::sst::sst_blocks_decoded(),
+        block_crc_skipped: pedradb_core::sst::sst_block_crc_skipped(),
+    }
+}
+
 /// Atomic write batch (one Pedra `apply_batch` = all-or-nothing).
 #[derive(Debug, Default)]
 pub struct WriteBatch {
