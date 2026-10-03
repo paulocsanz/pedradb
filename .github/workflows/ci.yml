@@ -29,6 +29,8 @@ jobs:
         run: cargo test -q -p pedradb-core --lib --no-run
       - name: Run tests
         run: cargo test -q -p pedradb-core --lib 2>&1 | tee test.log
+      - name: Run compat oracle + adversarial suites
+        run: cargo test -q -p rocksdb-compat --tests 2>&1 | tee -a test.log
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4

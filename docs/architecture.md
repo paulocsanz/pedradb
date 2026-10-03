@@ -236,25 +236,12 @@ pedradb/
 │   ├── pedradb-dst/          # deterministic simulation testing
 │   ├── pedradb-oracle/       # RocksDB oracle for differential tests
 │   ├── pedradb-ops/          # backup · WAL shipping · point-in-time restore
-│   ├── pedradb-apply/        # atomic apply (the "better thing to wrap")
-│   ├── pedradb-replicate/    # replication seam
-│   ├── pedradb-raft/         # raft log storage seams
-│   ├── pedradb-dcs/          # coordination-service seams
-│   ├── pedradb-store/        # store layering
-│   ├── pedradb-lease/        # leases
-│   ├── pedradb-index/        # index building blocks
-│   ├── pedradb-journal/      # journal primitives
-│   ├── pedradb-fold/         # folding / aggregation scans
-│   ├── pedradb-stream/       # change streams
-│   ├── pedradb-http/         # embedded HTTP surface
-│   ├── pedradb-sql/          # SQL layer experiments
-│   ├── pedradb-world/        # world model for simulation
-│   ├── pedradb-cli/          # CLI
-│   ├── pedradb-capi/         # C API (header: crates/pedradb-capi/include/)
 │   ├── rocksdb-compat/       # rust-rocksdb 0.22 API surface (migration path)
-│   ├── rocksdb/              # crate-name shim over rocksdb-compat
-│   ├── rocksdb-parity-bench/ # parity bench harness vs RocksDB
-│   └── montanha-fdb-recipes/ # FDB-layer recipes over the engine
+│   └── rocksdb-parity-bench/ # parity bench harness vs RocksDB
+│
+│   (distributed building blocks under development — store, raft, sql,
+│   http, replication, and the name-shim experiments — live in the
+│   development tree, not this mirror)
 ├── docs/                     # benchmarks · architecture · metrics · verification
 └── formal/                   # Aeneas/Lean kernel sources
 ```

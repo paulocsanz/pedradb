@@ -50,8 +50,26 @@ PUBLIC_ROOT_FILES = frozenset(
         "SECURITY.md",
         "clippy.toml",
         "deny.toml",
-        "lint.log",  # README links it as the verification snapshot
         "rust-toolchain.toml",
+    }
+)
+
+# The crates the public mirror ships — the embedded-engine product
+# surface, crate-granular (the 2026-10-03 scope regression: the release
+# shipped 29 crates because this list did not exist and `crates/` passed
+# wholesale through PUBLIC_ROOT_DIRS). Adding an entry is a product
+# decision: it ships to everyone and CI compiles it.
+PUBLIC_CRATES = frozenset(
+    {
+        "pedradb-core",
+        "pedradb-spec",
+        "pedradb-posix",
+        "pedradb-io-uring",
+        "pedradb-sim",
+        "pedradb-ops",
+        "rocksdb-compat",
+        "rocksdb-parity-bench",
+        "snapshot-bench",
     }
 )
 
@@ -161,6 +179,20 @@ def prune_scripts(root: Path) -> list[str]:
     return removed
 
 
+def prune_crates(root: Path) -> list[str]:
+    """Delete every crates/ entry the manifest does not declare (the sync
+    side of the PUBLIC_CRATES gate)."""
+    crates = root / "crates"
+    if not crates.is_dir():
+        return []
+    removed = []
+    for p in sorted(crates.iterdir()):
+        if p.name not in PUBLIC_CRATES:
+            removed.append(f"crates/{p.name}/")
+            shutil.rmtree(p)
+    return removed
+
+
 def prune_root(root: Path) -> list[str]:
     """Delete every root entry the public manifest does not declare.
     Returns the removed names. Never touches .git."""
@@ -232,6 +264,16 @@ def main() -> int:
             "HYGIENE FAIL: .public-mirror marker missing — the formal lint "
             "cannot engage mirror mode (RFC-0331); re-run scripts/sync_public_repo.sh"
         )
+
+    crates_dir = ROOT / "crates"
+    if crates_dir.is_dir():
+        present_crates = {p.name for p in crates_dir.iterdir()}
+        for name in sorted(present_crates - PUBLIC_CRATES):
+            print(f"HYGIENE FAIL: crate not in the public product manifest: crates/{name}")
+            bad = True
+        for name in sorted(PUBLIC_CRATES - present_crates):
+            print(f"HYGIENE FAIL: declared public crate missing: crates/{name}")
+            bad = True
 
     docs_dir = ROOT / "docs"
     if docs_dir.is_dir():

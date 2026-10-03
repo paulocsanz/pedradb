@@ -19,9 +19,9 @@ Pedra still `fdatasync`s before Ok. That is the product: more durability
 Product floor (RFC-0041, re-baselined 2026-08-24 — registered product
 decision): the official gate is `ROCKS_PARITY_RATIO_FLOOR=1.0` on the
 drop-in same-class column (async Pedra vs that default peer; 15/15 shapes
-≥ 1.254, `findings/rocks-parity-floor1x/`). The G1 product column
+≥ 1.254; per-shape tables are dev-tree evidence, not shipped in the mirror). The G1 product column
 (fdatasync before Ok) is the published per-shape claim table
-(`findings/rocks-parity-floor1x-g1/`): reads 1.128–1.986× default with
+(dev-tree evidence: `findings/rocks-parity-floor1x-g1/`, not shipped in the mirror): reads 1.128–1.986× default with
 stronger durability; single-client write-per-op shapes are fd-ceiling
 below 1× by construction (one full barrier per op vs the peer's zero;
 group commit closes them under concurrency — apply_mc4 2.788× head3).

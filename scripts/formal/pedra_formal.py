@@ -373,6 +373,11 @@ STORE_LIVE_PATH = "crates/pedradb-store/src/lib_kernel.rs"
 
 def check_store_live(_root: Path, catalog: dict, r: Report) -> None:
     """Refuse a vote/ae_entry catalog that is not wired through store live RPC."""
+    if (_root / ".public-mirror").is_file():
+        # Mirror mode: the store/raft layer is not shipped (RFC-0331
+        # product-surface manifest) — the store-live wiring check is N/A.
+        r.good("store live: N/A in mirror mode (store/raft not shipped)")
+        return
     print("== store live (RFC-0152: queued RV/AE is the catalog kernel) ==")
     ids = {p["id"]: p for p in catalog["pairs"]}
     for pid, (path, handler) in STORE_LIVE_KERNELS.items():
@@ -399,6 +404,9 @@ def check_store_live(_root: Path, catalog: dict, r: Report) -> None:
 
 
 def check_raft_store_live(root: Path, catalog: dict, r: Report) -> None:
+    if (root / ".public-mirror").is_file():
+        r.good("raft store live: N/A in mirror mode (store/raft not shipped)")
+        return
     """Raft-kernel data_fate pair that store lib.rs calls must list live_callers."""
     print("== raft→store live_callers (RFC-0152 C) ==")
     store = load_text(root, STORE_LIVE_PATH)
@@ -617,10 +625,8 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
 # 2026-08-31-leveling-kernel-unenrolled). The allowlist is empty; keep it
 # that way (transitional states get a comment, not a permanent row).
 TCB_FREEZE_ALLOWLIST: dict[str, str] = {
-    "crates/montanha-fdb-recipes/src/lib_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-capi/src/lib_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/prefix_kernel.rs":
+        "mirror scope cut 2026-10-03: proof pair ships with the store layer (dev tree)",
     "crates/pedradb-core/src/buggify_hooks_kernel.rs":
         "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/bulk_ingest_kernel.rs":
@@ -779,47 +785,9 @@ TCB_FREEZE_ALLOWLIST: dict[str, str] = {
         "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/wal_buffer_kernel.rs":
         "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-dcs/src/command_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-dcs/src/lib_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-fold/src/applied_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-fold/src/bin/fold_smoke_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-fold/src/host_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-fold/src/export_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-fold/src/follow_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-fold/src/lib_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-fold/src/roles_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-fold/src/ship_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-fold/src/store_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-fold/src/watch_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-http/src/lib_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-io-uring/src/lib_kernel.rs":
         "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-io-uring/src/ring_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-journal/src/lib_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-raft/src/bin/pedra-raft-node_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-raft/src/lib_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-raft/src/net_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-raft/src/persist_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-replicate/src/lib_kernel.rs":
         "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-spec/src/composition_m2_kernel.rs":
         "RFC-0332 M2 grand inductive invariant chaining and composition kernel",
@@ -829,96 +797,6 @@ TCB_FREEZE_ALLOWLIST: dict[str, str] = {
         "RFC-0332 POSIX and io_uring contracted syscall glue verification kernel",
     "crates/pedradb-spec/src/fault_grid_crash_kernel.rs":
         "RFC-0333 42-cell fault-grid and concurrent crash consistency verification kernel",
-    "crates/pedradb-store/src/ae_ack_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/bin/cluster_real_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/bin/montanha-fdb-bench_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/bin/montanha-fdb-compare_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/bin/montanha-perf-gate_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/bin/montanha-scale-gate_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/bin/montanha-store-smoke_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/bin/montanha-tcp_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/client_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/commit_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/fdb_compat_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/fdb_layers_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/layers_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/lib_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/msg_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/tcp_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/three_teeth_queued_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/tls_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-store/src/vote_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-stream/src/lib_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bandit_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/gate_coverage_floor_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/gate_crash_injection_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/gate_exhaustive_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/gate_seed_ratchet_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/multiproc_trace_smoke_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/peer_msg_tcp_lab_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/world_buggify_matrix_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/world_hunt_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/world_invariant_soak_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/world_partition_storm_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/world_shrink_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/world_smoke_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/world_soak_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/bin/world_swarm_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/buggify_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/coverage_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/lib_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/net_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/pct_concurrent_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/pct_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/schedule_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/scheduler_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/swarm_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
-    "crates/pedradb-world/src/wenv_kernel.rs":
-        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/rocksdb-compat/src/api_kernel.rs":
         "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/rocksdb-compat/src/backup_kernel.rs":
@@ -1253,7 +1131,7 @@ def check_proof_vs_campaign(_root: Path, catalog: dict, r: Report) -> None:
         )
 
 
-ISLAND_CRATES = ("pedradb-posix", "pedradb-io-uring", "pedradb-capi")
+ISLAND_CRATES = ("pedradb-posix", "pedradb-io-uring")
 RFC_0061 = "docs/rfc/0061-residuals-sel4-ironfleet.md"
 
 

@@ -11,8 +11,6 @@ description = "Runnable PedraDB gallery: from hello-world to a small ledger"
 bytes.workspace = true
 pedradb-core.workspace = true
 pedradb-ops.workspace = true
-pedradb-sql.workspace = true
-pedradb-stream.workspace = true
 rocksdb-compat = { path = "../crates/rocksdb-compat" }
 
 [[example]]
@@ -62,14 +60,6 @@ path = "large_values.rs"
 [[example]]
 name = "backup"
 path = "backup.rs"
-
-[[example]]
-name = "durable_stream"
-path = "durable_stream.rs"
-
-[[example]]
-name = "sql"
-path = "sql.rs"
 
 [[example]]
 name = "rocksdb_dropin"

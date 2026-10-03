@@ -57,20 +57,26 @@ Rocks's async WAL so a comparison is the same durability class.
 ## Verification
 
 Decision kernels are proved on the file `rustc` links (Charon + Aeneas →
-Lean). The catalog has **151 pairs**, each one the shipped function, not a
+Lean). The catalog has **172 pairs**, each one the shipped function, not a
 model written beside it. CI runs `scripts/formal/pedra_formal.py --lint`
 in its own job (seconds — never starved by a long test build): drift
-between a kernel and its extract stamp fails the build, and the current
-tree has **0 drift FAILs and 0 classification debt FAILs** (summary:
-**2,053 ok, 0 gap, 0 fail** in [`lint.log`](lint.log)). Any drift or unclassified public
-surface fails CI. The engine crate has **1,325 passing tests** (4 ignored).
+between a kernel and its extract stamp fails the build, and any drift or
+unclassified public surface fails CI (debt ceiling 0 — a new unclassified
+function is a red build, not a warning). The engine crate has **1,325
+passing tests** (4 ignored); the CI also runs the `rocksdb-compat`
+differential oracle and adversarial suites.
 
 Decision kernels enforce the **Three Teeth Principle** (RFC-0151 / RFC-0329):
 synthetic mutants planted in the decision kernels are killed with a 100% kill
 rate by automated test oracles using zero-recompile mutation switching.
 
-Not proved: the OS, the disk, rustc, Aeneas, Lean, or Z3. Store and raft
-are not in this repository, so their proofs are not either.
+This repository ships the embedded engine and its operational surface
+(`pedradb-core`, `-posix`, `-io-uring`, `-sim`, `-spec`, `-ops`,
+`rocksdb-compat`, and the bench harnesses). The distributed building
+blocks under development (store, raft, sql, http, replication) live in
+the development tree and are not claimed here.
+
+Not proved: the OS, the disk, rustc, Aeneas, Lean, or Z3.
 
 The catalog map, what each check refuses, and how to run it:
 [`docs/verification.md`](docs/verification.md).
