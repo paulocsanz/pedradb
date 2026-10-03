@@ -30,7 +30,7 @@ fn run() -> pedradb_core::Result<()> {
     let dir = scratch("crash");
 
     {
-        let db = ConcurrentDb::open(&dir)?;
+        let mut db = ConcurrentDb::open(&dir)?;
         let mut tx = db.begin_occ();
         tx.put(b"row/42", br#"{"name":"ada"}"#)?;
         tx.put(b"idx/ada", b"42")?;
@@ -50,7 +50,7 @@ fn run() -> pedradb_core::Result<()> {
 
     // Uncommitted staging never reaches the WAL.
     {
-        let db = ConcurrentDb::open(&dir)?;
+        let mut db = ConcurrentDb::open(&dir)?;
         let mut tx = db.begin_occ();
         tx.put(b"row/99", b"ghost")?;
         tx.put(b"idx/ghost", b"99")?;

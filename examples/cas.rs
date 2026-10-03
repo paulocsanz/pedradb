@@ -24,7 +24,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 fn run() -> pedradb_core::Result<()> {
     let dir = scratch("cas");
-    let db = ConcurrentDb::open(&dir)?;
+    let mut db = ConcurrentDb::open(&dir)?;
 
     // Acquire a free lease (IF NOT EXISTS).
     db.put_if_absent(b"lease/volume-1", b"node-a")?;
