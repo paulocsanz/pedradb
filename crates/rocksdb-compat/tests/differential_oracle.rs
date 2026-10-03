@@ -260,6 +260,18 @@ fn differential_oracle_randomized_workload() {
                         pre_actual.as_ref().map(|x| String::from_utf8_lossy(x)),
                         pre_expected.as_ref().map(|x| String::from_utf8_lossy(x))
                     );
+                    let (vis, last) = db.debug_seqs();
+                    let br = db.debug_point_branches();
+                    eprintln!(
+                        "  SEQ visible={vis} last={last} | BRANCHES cache_hit={} try_read={} published={}",
+                        br[0], br[1], br[2]
+                    );
+                    let enc = db.debug_encode(cf, key);
+                    eprintln!(
+                        "  LAYER TRACE ({}B):\n{}",
+                        enc.len(),
+                        db.debug_lookup_trace_encoded(&enc)
+                    );
                     let enc = db.debug_encode(cf, key);
                     eprintln!("  LAYER TRACE (encoded {}B):\n{}", enc.len(), db.debug_lookup_trace_encoded(&enc));
                 }
@@ -321,6 +333,18 @@ fn differential_oracle_randomized_workload() {
                     if let Some(hist) = model.history.get(&(cf.to_string(), key.to_vec())) {
                         eprintln!("  KEY HISTORY: {:#?}", hist);
                     }
+                    let (vis, last) = db.debug_seqs();
+                    let br = db.debug_point_branches();
+                    eprintln!(
+                        "  SEQ visible={vis} last={last} | BRANCHES cache_hit={} try_read={} published={}",
+                        br[0], br[1], br[2]
+                    );
+                    let enc = db.debug_encode(cf, key);
+                    eprintln!(
+                        "  LAYER TRACE ({}B):\n{}",
+                        enc.len(),
+                        db.debug_lookup_trace_encoded(&enc)
+                    );
                 }
                 assert_eq!(
                     actual, expected,

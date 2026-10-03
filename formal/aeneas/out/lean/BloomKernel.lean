@@ -190,6 +190,16 @@ axiom core.option.Option.unwrap_or_default
   {T : Type} (defaultDefaultInst : core.default.Default T) :
   Option T → Result T
 
+/-- [core::option::{core::option::Option<T>}::map]:
+    Source: '/rustc/library/core/src/option.rs', lines 1157:4-1159:53
+    Name pattern: [core::option::{core::option::Option<@T>}::map]
+    Visibility: public -/
+@[rust_fun "core::option::{core::option::Option<@T>}::map"]
+axiom core.option.Option.map
+  {T : Type} {U : Type} {F : Type} (opsfunctionFnOnceFTupleTUInst :
+  core.ops.function.FnOnce F T U) :
+  Option T → F → Result (Option U)
+
 /-- [core::option::{core::option::Option<T>}::map_or_else]:
     Source: '/rustc/library/core/src/option.rs', lines 1268:4-1271:53
     Name pattern: [core::option::{core::option::Option<@T>}::map_or_else]
@@ -331,6 +341,14 @@ axiom std.sync.once_lock.OnceLock (T : Type) : Type
 @[rust_fun "std::sync::once_lock::{std::sync::once_lock::OnceLock<@T>}::new"]
 axiom std.sync.once_lock.OnceLock.new
   (T : Type) : Result (std.sync.once_lock.OnceLock T)
+
+/-- [std::sync::once_lock::{std::sync::once_lock::OnceLock<T>}::get]:
+    Source: '/rustc/library/std/src/sync/once_lock.rs', lines 155:4-155:35
+    Name pattern: [std::sync::once_lock::{std::sync::once_lock::OnceLock<@T>}::get]
+    Visibility: public -/
+@[rust_fun "std::sync::once_lock::{std::sync::once_lock::OnceLock<@T>}::get"]
+axiom std.sync.once_lock.OnceLock.get
+  {T : Type} : std.sync.once_lock.OnceLock T → Result (Option T)
 
 /-- [std::sync::once_lock::{std::sync::once_lock::OnceLock<T>}::set]:
     Source: '/rustc/library/std/src/sync/once_lock.rs', lines 238:4-238:48
@@ -1073,7 +1091,7 @@ def BloomFilter.Insts.CoreCmpEq : core.cmp.Eq BloomFilter := {
 }
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::always_true]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 192:4-202:5
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 232:4-242:5
     Visibility: public -/
 def BloomFilter.always_true : Result BloomFilter := do
   let a ← alloc.sync.Arc.new (alloc.vec.Vec.new Std.U8)
@@ -1086,483 +1104,8 @@ def BloomFilter.always_true : Result BloomFilter := do
       BloomFilter))
   ok (BloomFilter.mk a 0#u32 0#u32 0#u32 a1 a2 a3)
 
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::is_active]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 209:4-217:5
-    Visibility: public -/
-def BloomFilter.is_active (self : BloomFilter) : Result Bool := do
-  if self.nparts > 1#u32
-  then ok true
-  else
-    if self.nbits > 0#u32
-    then
-      if self.k > 0#u32
-      then
-        let v ← alloc.sync.Arc.Insts.CoreOpsDerefDeref.deref Global self.bits
-        let i := alloc.vec.Vec.len v
-        ok (i != 0#usize)
-      else ok false
-    else ok false
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::with_capacity]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 227:4-243:5
-    Visibility: public -/
-def BloomFilter.with_capacity
-  (n_keys : Std.Usize) (bits_per_key : Std.Usize) : Result BloomFilter := do
-  if n_keys = 0#usize
-  then BloomFilter.always_true
-  else
-    if bits_per_key = 0#usize
-    then BloomFilter.always_true
-    else
-      let i ← saturating_product n_keys bits_per_key
-      let i1 ← at_least_64 i
-      let nbits ← cap_u32 i1
-      let k ← k_from_bits_per_key bits_per_key
-      let nbytes ← nbytes_for_nbits nbits
-      let v ← alloc.vec.from_elem core.clone.CloneU8 0#u8 nbytes
-      let a ← alloc.sync.Arc.new v
-      let a1 ← alloc.sync.Arc.new (alloc.vec.Vec.new (alloc.vec.Vec Std.U8))
-      let m ←
-        std.sync.poison.mutex.Mutex.new (alloc.vec.Vec.new (Option
-          BloomFilter))
-      let a2 ← alloc.sync.Arc.new m
-      let a3 ←
-        alloc.sync.Arc.new (alloc.vec.Vec.new (std.sync.once_lock.OnceLock
-          BloomFilter))
-      ok (BloomFilter.mk a nbits k 1#u32 a1 a2 a3)
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::with_partitions]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 253:8-255:9
-    Visibility: public -/
-@[rust_loop_body]
-def BloomFilter.with_partitions_loop.body
-  (bits_per_key : Std.Usize) (per : Std.Usize)
-  (iter : core.ops.range.Range Std.U32)
-  (loaded : alloc.vec.Vec (Option BloomFilter)) :
-  Result (ControlFlow ((core.ops.range.Range Std.U32) × (alloc.vec.Vec (Option
-    BloomFilter))) (alloc.vec.Vec (Option BloomFilter)))
-  := do
-  let (o, iter1) ←
-    core.iter.range.IteratorRange.next core.iter.range.StepU32 iter
-  match o with
-  | none => ok (done loaded)
-  | some _ =>
-    let bf ← BloomFilter.with_capacity per bits_per_key
-    let loaded1 ← alloc.vec.Vec.push loaded (some bf)
-    ok (cont (iter1, loaded1))
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::with_partitions]: loop 0:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 253:8-255:9
-    Visibility: public -/
-@[rust_loop]
-def BloomFilter.with_partitions_loop
-  (iter : core.ops.range.Range Std.U32) (bits_per_key : Std.Usize)
-  (per : Std.Usize) (loaded : alloc.vec.Vec (Option BloomFilter)) :
-  Result (alloc.vec.Vec (Option BloomFilter))
-  := do
-  loop
-    (fun (iter1, loaded1) => BloomFilter.with_partitions_loop.body bits_per_key
-      per iter1 loaded1)
-    (iter, loaded)
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::with_partitions]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 247:4-265:5
-    Visibility: public -/
-def BloomFilter.with_partitions
-  (n_keys : Std.Usize) (bits_per_key : Std.Usize) (nparts : Std.U32) :
-  Result BloomFilter
-  := do
-  if nparts <= 1#u32
-  then BloomFilter.with_capacity n_keys bits_per_key
-  else
-    let i ← lift (UScalar.cast .Usize nparts)
-    let i1 ← n_keys / i
-    let per ← i1 + 1#usize
-    let i2 ← lift (UScalar.cast .Usize nparts)
-    let loaded := alloc.vec.Vec.with_capacity (Option BloomFilter) i2
-    let loaded1 ←
-      BloomFilter.with_partitions_loop { start := 0#u32, «end» := nparts }
-        bits_per_key per loaded
-    let a ← alloc.sync.Arc.new (alloc.vec.Vec.new Std.U8)
-    let a1 ← alloc.sync.Arc.new (alloc.vec.Vec.new (alloc.vec.Vec Std.U8))
-    let m ← std.sync.poison.mutex.Mutex.new loaded1
-    let a2 ← alloc.sync.Arc.new m
-    let a3 ←
-      alloc.sync.Arc.new (alloc.vec.Vec.new (std.sync.once_lock.OnceLock
-        BloomFilter))
-    ok (BloomFilter.mk a 0#u32 0#u32 nparts a1 a2 a3)
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure#1]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 289:17-289:38 -/
-@[reducible]
-def BloomFilter.from_partition_builders.closure_1 := Unit
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnMut<(pedra_aeneas_bloom_kernel::BloomFilter,), core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure#1}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 289:17-289:38 -/
-def
-  BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnMutTupleBloomFilterOptionBoxBloomFilter.call_mut
-  (c : BloomFilter.from_partition_builders.closure_1)
-  (tupled_args : BloomFilter) :
-  Result ((Option BloomFilter) ×
-    BloomFilter.from_partition_builders.closure_1)
-  := do
-  ok (some tupled_args, c)
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnOnce<(pedra_aeneas_bloom_kernel::BloomFilter,), core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 289:17-289:38 -/
-def
-  BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnOnceTupleBloomFilterOptionBoxBloomFilter.call_once
-  (c : BloomFilter.from_partition_builders.closure_1) (bf : BloomFilter) :
-  Result (Option BloomFilter)
-  := do
-  let (o, _) ←
-    BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnMutTupleBloomFilterOptionBoxBloomFilter.call_mut
-      c bf
-  ok o
-
-/-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnOnce<(pedra_aeneas_bloom_kernel::BloomFilter,), core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure#1}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 289:17-289:38 -/
-@[reducible]
-def
-  BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnOnceTupleBloomFilterOptionBoxBloomFilter
-  : core.ops.function.FnOnce BloomFilter.from_partition_builders.closure_1
-  BloomFilter (Option BloomFilter) := {
-  call_once :=
-    BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnOnceTupleBloomFilterOptionBoxBloomFilter.call_once
-}
-
-/-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnMut<(pedra_aeneas_bloom_kernel::BloomFilter,), core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure#1}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 289:17-289:38 -/
-@[reducible]
-def
-  BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnMutTupleBloomFilterOptionBoxBloomFilter
-  : core.ops.function.FnMut BloomFilter.from_partition_builders.closure_1
-  BloomFilter (Option BloomFilter) := {
-  FnOnceInst :=
-    BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnOnceTupleBloomFilterOptionBoxBloomFilter
-  call_mut :=
-    BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnMutTupleBloomFilterOptionBoxBloomFilter.call_mut
-}
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::clone_parts_only]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 306:4-316:5 -/
-def BloomFilter.clone_parts_only
-  (self : BloomFilter) : Result BloomFilter := do
-  let a ←
-    alloc.sync.Arc.Insts.CoreCloneClone.clone core.core.clone.CloneGlobal
-      self.bits
-  let a1 ← alloc.sync.Arc.new (alloc.vec.Vec.new (alloc.vec.Vec Std.U8))
-  let m ←
-    std.sync.poison.mutex.Mutex.new (alloc.vec.Vec.new (Option BloomFilter))
-  let a2 ← alloc.sync.Arc.new m
-  let a3 ←
-    alloc.sync.Arc.new (alloc.vec.Vec.new (std.sync.once_lock.OnceLock
-      BloomFilter))
-  ok (BloomFilter.mk a self.nbits self.k 1#u32 a1 a2 a3)
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 281:17-285:13 -/
-@[reducible]
-def BloomFilter.from_partition_builders.closure := Unit
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_bloom_kernel::BloomFilter,), std::sync::once_lock::OnceLock<pedra_aeneas_bloom_kernel::BloomFilter>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 281:17-285:13 -/
-def
-  BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnMutTupleSharedBloomFilterOnceLockBloomFilter.call_mut
-  (c : BloomFilter.from_partition_builders.closure) (tupled_args : BloomFilter)
-  :
-  Result ((std.sync.once_lock.OnceLock BloomFilter) ×
-    BloomFilter.from_partition_builders.closure)
-  := do
-  let slot ← std.sync.once_lock.OnceLock.new BloomFilter
-  let bf ← BloomFilter.clone_parts_only tupled_args
-  let _ ← std.sync.once_lock.OnceLock.set slot bf
-  ok (slot, c)
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_bloom_kernel::BloomFilter,), std::sync::once_lock::OnceLock<pedra_aeneas_bloom_kernel::BloomFilter>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure}::call_once]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 281:17-285:13 -/
-def
-  BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnOnceTupleSharedBloomFilterOnceLockBloomFilter.call_once
-  (c : BloomFilter.from_partition_builders.closure) (bf : BloomFilter) :
-  Result (std.sync.once_lock.OnceLock BloomFilter)
-  := do
-  let (ol, _) ←
-    BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnMutTupleSharedBloomFilterOnceLockBloomFilter.call_mut
-      c bf
-  ok ol
-
-/-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_bloom_kernel::BloomFilter,), std::sync::once_lock::OnceLock<pedra_aeneas_bloom_kernel::BloomFilter>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 281:17-285:13 -/
-@[reducible]
-def
-  BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnOnceTupleSharedBloomFilterOnceLockBloomFilter
-  : core.ops.function.FnOnce BloomFilter.from_partition_builders.closure
-  BloomFilter (std.sync.once_lock.OnceLock BloomFilter) := {
-  call_once :=
-    BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnOnceTupleSharedBloomFilterOnceLockBloomFilter.call_once
-}
-
-/-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_bloom_kernel::BloomFilter,), std::sync::once_lock::OnceLock<pedra_aeneas_bloom_kernel::BloomFilter>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 281:17-285:13 -/
-@[reducible]
-def
-  BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnMutTupleSharedBloomFilterOnceLockBloomFilter
-  : core.ops.function.FnMut BloomFilter.from_partition_builders.closure
-  BloomFilter (std.sync.once_lock.OnceLock BloomFilter) := {
-  FnOnceInst :=
-    BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnOnceTupleSharedBloomFilterOnceLockBloomFilter
-  call_mut :=
-    BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnMutTupleSharedBloomFilterOnceLockBloomFilter.call_mut
-}
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 273:4-300:5
-    Visibility: public -/
-def BloomFilter.from_partition_builders
-  (builders : alloc.vec.Vec BloomFilter) : Result BloomFilter := do
-  let i := alloc.vec.Vec.len builders
-  let nparts ← lift (UScalar.cast .U32 i)
-  let s := alloc.vec.Vec.deref builders
-  let i1 ← core.slice.Slice.iter s
-  let m ←
-    core.iter.traits.iterator.Iterator.map.default
-      (core.iter.traits.iterator.IteratorSliceIter BloomFilter)
-      BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnMutTupleSharedBloomFilterOnceLockBloomFilter
-      i1 ()
-  let once ←
-    core.iter.traits.iterator.Iterator.collect.default
-      (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
-      (core.iter.traits.iterator.IteratorSliceIter BloomFilter)
-      BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnMutTupleSharedBloomFilterOnceLockBloomFilter)
-      (core.iter.traits.collect.FromIteratorVec (std.sync.once_lock.OnceLock
-      BloomFilter)) m
-  let ii ← alloc.vec.IntoIteratorVec.into_iter builders
-  let m1 ←
-    core.iter.traits.iterator.Iterator.map.default
-      (core.iter.traits.iterator.IteratorVecIntoIter BloomFilter)
-      BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnMutTupleBloomFilterOptionBoxBloomFilter
-      ii ()
-  let loaded ←
-    core.iter.traits.iterator.Iterator.collect.default
-      (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
-      (core.iter.traits.iterator.IteratorVecIntoIter BloomFilter)
-      BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnMutTupleBloomFilterOptionBoxBloomFilter)
-      (core.iter.traits.collect.FromIteratorVec (Option BloomFilter)) m1
-  let a ← alloc.sync.Arc.new (alloc.vec.Vec.new Std.U8)
-  let a1 ← alloc.sync.Arc.new (alloc.vec.Vec.new (alloc.vec.Vec Std.U8))
-  let m2 ← std.sync.poison.mutex.Mutex.new loaded
-  let a2 ← alloc.sync.Arc.new m2
-  let a3 ← alloc.sync.Arc.new once
-  ok (BloomFilter.mk a 0#u32 0#u32 nparts a1 a2 a3)
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::partition_index]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 318:0-327:1 -/
-def BloomFilter.partition_index
-  (h1 : Std.U64) (nparts : Std.U32) : Result Std.U32 := do
-  if nparts <= 1#u32
-  then ok 0#u32
-  else
-    let i ← lift (core.convert.num.FromU64U32.from nparts)
-    let i1 ← h1 % i
-    ok (UScalar.cast .U32 i1)
-
-/-- [pedra_aeneas_bloom_kernel::hash_pair::FNV_PRIME]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 658:4-658:44 -/
-@[global_simps, irreducible]
-def hash_pair.FNV_PRIME : Std.U64 := 1099511628211#u64
-
-/-- [pedra_aeneas_bloom_kernel::hash_pair]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 659:4-663:5
-    Visibility: public -/
-@[rust_loop_body]
-def hash_pair_loop.body
-  (iter : core.slice.iter.Iter Std.U8) (h1 : Std.U64) (h2 : Std.U64) :
-  Result (ControlFlow ((core.slice.iter.Iter Std.U8) × Std.U64 × Std.U64)
-    (Std.U64 × Std.U64))
-  := do
-  let (o, iter1) ← core.slice.iter.IteratorSliceIter.next iter
-  match o with
-  | none => ok (done (h1, h2))
-  | some b =>
-    let byte ← lift (core.convert.num.FromU64U8.from b)
-    let i ← lift (h1 ^^^ byte)
-    let h11 ← lift (core.num.U64.wrapping_mul i hash_pair.FNV_PRIME)
-    let i1 ← lift (h2 ^^^ byte)
-    let h21 ← lift (core.num.U64.wrapping_mul i1 hash_pair.FNV_PRIME)
-    ok (cont (iter1, h11, h21))
-
-/-- [pedra_aeneas_bloom_kernel::hash_pair]: loop 0:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 659:4-663:5
-    Visibility: public -/
-@[rust_loop]
-def hash_pair_loop
-  (iter : core.slice.iter.Iter Std.U8) (h1 : Std.U64) (h2 : Std.U64) :
-  Result (Std.U64 × Std.U64)
-  := do
-  loop
-    (fun (iter1, h11, h21) => hash_pair_loop.body iter1 h11 h21)
-    (iter, h1, h2)
-
-/-- [pedra_aeneas_bloom_kernel::hash_pair]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 655:0-669:1
-    Visibility: public -/
-def hash_pair (key : Slice Std.U8) : Result (Std.U64 × Std.U64) := do
-  let iter ←
-    SharedSlice.Insts.CoreIterTraitsCollectIntoIteratorSharedIter.into_iter key
-  let (h1, h2) ←
-    hash_pair_loop iter 14695981039346656037#u64 11400714819323198485#u64
-  if h2 = 0#u64
-  then ok (h1, 11400714819323198485#u64)
-  else ok (h1, h2)
-
-/-- [pedra_aeneas_bloom_kernel::set_bit]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 646:0-648:1
-    Visibility: public -/
-def set_bit (bits : Slice Std.U8) (i : Std.Usize) : Result (Slice Std.U8) := do
-  let i1 ← i % 8#usize
-  let i2 ← 1#u8 <<< i1
-  let i3 ← i / 8#usize
-  let i4 ← Slice.index_usize bits i3
-  let i5 ← lift (i4 ||| i2)
-  Slice.update bits i3 i5
-
-/-- [pedra_aeneas_bloom_kernel::probe_bit]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 642:0-644:1
-    Visibility: public -/
-def probe_bit
-  (h1 : Std.U64) (h2 : Std.U64) (i : Std.U32) (nbits : Std.U64) :
-  Result Std.U64
-  := do
-  let i1 ← lift (core.convert.num.FromU64U32.from i)
-  let i2 ← lift (core.num.U64.wrapping_mul i1 h2)
-  let i3 ← lift (core.num.U64.wrapping_add h1 i2)
-  i3 % nbits
-
-/-- [pedra_aeneas_bloom_kernel::bit_index]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 630:0-639:1
-    Visibility: public -/
-def bit_index (bit : Std.U64) : Result Std.Usize := do
-  let i ← lift (core.convert.num.FromU64U32.from core.num.U32.MAX)
-  if bit > i
-  then ok 0#usize
-  else let i1 ← lift (UScalar.cast .U32 bit)
-       ok (UScalar.cast .Usize i1)
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert_prehashed]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 360:8-363:9
-    Visibility: public -/
-@[rust_loop_body]
-def BloomFilter.insert_prehashed_loop.body
-  (i : Std.U32) (h1 : Std.U64) (h2 : Std.U64) (nbits : Std.U64)
-  (bits : alloc.vec.Vec Std.U8) (i1 : Std.U32) :
-  Result (ControlFlow ((alloc.vec.Vec Std.U8) × Std.U32) (alloc.vec.Vec
-    Std.U8))
-  := do
-  if i1 < i
-  then
-    let (s, deref_mut_back) ← lift (alloc.vec.Vec.deref_mut bits)
-    let i2 ← probe_bit h1 h2 i1 nbits
-    let i3 ← bit_index i2
-    let s1 ← set_bit s i3
-    let i4 ← i1 + 1#u32
-    let bits1 := deref_mut_back s1
-    ok (cont (bits1, i4))
-  else ok (done bits)
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert_prehashed]: loop 0:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 360:8-363:9
-    Visibility: public -/
-@[rust_loop]
-def BloomFilter.insert_prehashed_loop
-  (i : Std.U32) (h1 : Std.U64) (h2 : Std.U64) (nbits : Std.U64)
-  (bits : alloc.vec.Vec Std.U8) (i1 : Std.U32) :
-  Result (alloc.vec.Vec Std.U8)
-  := do
-  loop
-    (fun (bits1, i2) => BloomFilter.insert_prehashed_loop.body i h1 h2 nbits
-      bits1 i2)
-    (bits, i1)
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert_prehashed]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 353:4-364:5
-    Visibility: public -/
-def BloomFilter.insert_prehashed
-  (self : BloomFilter) (h1 : Std.U64) (h2 : Std.U64) : Result BloomFilter := do
-  if self.nparts > 1#u32
-  then ok self
-  else
-    let b ← BloomFilter.is_active self
-    if b
-    then
-      let nbits ← lift (core.convert.num.FromU64U32.from self.nbits)
-      let (bits, make_mut_back) ←
-        alloc.sync.Arc.make_mut (core.clone.CloneToUninit.Blanket
-          (core.clone.CloneallocvecVec core.clone.CloneU8))
-          core.core.clone.CloneGlobal self.bits
-      let bits1 ←
-        BloomFilter.insert_prehashed_loop self.k h1 h2 nbits bits 0#u32
-      let a := make_mut_back bits1
-      ok (BloomFilter.mk a self.nbits self.k self.nparts self.encoded_parts
-        self.loaded self.parts_once)
-    else ok self
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert::closure]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 338:58-338:76 -/
-@[reducible]
-def BloomFilter.insert.closure := Unit
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert::{impl core::ops::function::FnOnce<(std::sync::poison::PoisonError<std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>>,), std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert::closure}::call_once]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 338:58-338:76 -/
-def
-  BloomFilter.insert.closure.Insts.CoreOpsFunctionFnOnceTuplePoisonErrorMutexGuardVecOptionBoxBloomFilterMutexGuardVecOptionBoxBloomFilter.call_once
-  (c : BloomFilter.insert.closure)
-  (tupled_args : std.sync.poison.PoisonError (std.sync.poison.mutex.MutexGuard
-  (alloc.vec.Vec (Option BloomFilter)))) :
-  Result (std.sync.poison.mutex.MutexGuard (alloc.vec.Vec (Option
-    BloomFilter)))
-  := do
-  sorry
-
-/-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert::{impl core::ops::function::FnOnce<(std::sync::poison::PoisonError<std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>>,), std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert::closure}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 338:58-338:76 -/
-@[reducible]
-def
-  BloomFilter.insert.closure.Insts.CoreOpsFunctionFnOnceTuplePoisonErrorMutexGuardVecOptionBoxBloomFilterMutexGuardVecOptionBoxBloomFilter
-  : core.ops.function.FnOnce BloomFilter.insert.closure
-  (std.sync.poison.PoisonError (std.sync.poison.mutex.MutexGuard (alloc.vec.Vec
-  (Option BloomFilter)))) (std.sync.poison.mutex.MutexGuard (alloc.vec.Vec
-  (Option BloomFilter))) := {
-  call_once :=
-    BloomFilter.insert.closure.Insts.CoreOpsFunctionFnOnceTuplePoisonErrorMutexGuardVecOptionBoxBloomFilterMutexGuardVecOptionBoxBloomFilter.call_once
-}
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 334:4-346:5
-    Visibility: public -/
-def BloomFilter.insert
-  (self : BloomFilter) (key : Slice Std.U8) : Result BloomFilter := do
-  sorry
-
-/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert_as_is]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 367:4-367:50
-    Visibility: public -/
-def BloomFilter.insert_as_is
-  (self : BloomFilter) (_key : Slice Std.U8) : Result BloomFilter := do
-  ok self
-
-/-- [pedra_aeneas_bloom_kernel::test_bit]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 650:0-652:1
-    Visibility: public -/
-def test_bit (bits : Slice Std.U8) (i : Std.Usize) : Result Bool := do
-  let i1 ← i / 8#usize
-  let i2 ← Slice.index_usize bits i1
-  let i3 ← i % 8#usize
-  let i4 ← 1#u8 <<< i3
-  let i5 ← lift (i2 &&& i4)
-  ok (i5 != 0#u8)
-
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::decode_mono]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 546:4-579:5 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 586:4-619:5 -/
 def BloomFilter.decode_mono
   (buf : Slice Std.U8) : Result (core.result.Result BloomFilter String) := do
   let b ← core.slice.Slice.is_empty buf
@@ -1684,18 +1227,528 @@ def BloomFilter.decode_mono
                 let s1 ← core.hint.must_use s
                 ok (core.result.Result.Err s1)
 
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::warm_partitions::closure]
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 201:62-201:73 -/
+@[reducible]
+def BloomFilter.warm_partitions.closure := Unit
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::warm_partitions::{impl core::ops::function::FnOnce<(&'_ alloc::vec::Vec<u8>,), usize> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::warm_partitions::closure}::call_once]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 201:62-201:73 -/
+def
+  BloomFilter.warm_partitions.closure.Insts.CoreOpsFunctionFnOnceTupleSharedVecU8Usize.call_once
+  (c : BloomFilter.warm_partitions.closure)
+  (tupled_args : alloc.vec.Vec Std.U8) :
+  Result Std.Usize
+  := do
+  ok (alloc.vec.Vec.len tupled_args)
+
+/-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::warm_partitions::{impl core::ops::function::FnOnce<(&'_ alloc::vec::Vec<u8>,), usize> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::warm_partitions::closure}]
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 201:62-201:73 -/
+@[reducible]
+def
+  BloomFilter.warm_partitions.closure.Insts.CoreOpsFunctionFnOnceTupleSharedVecU8Usize
+  : core.ops.function.FnOnce BloomFilter.warm_partitions.closure (alloc.vec.Vec
+  Std.U8) Std.Usize := {
+  call_once :=
+    BloomFilter.warm_partitions.closure.Insts.CoreOpsFunctionFnOnceTupleSharedVecU8Usize.call_once
+}
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::warm_partitions]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 195:4-228:5
+    Visibility: public -/
+def BloomFilter.warm_partitions
+  (self : BloomFilter) (budget : Std.Usize) :
+  Result (Std.Usize × Std.Usize)
+  := do
+  sorry
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::is_active]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 249:4-257:5
+    Visibility: public -/
+def BloomFilter.is_active (self : BloomFilter) : Result Bool := do
+  if self.nparts > 1#u32
+  then ok true
+  else
+    if self.nbits > 0#u32
+    then
+      if self.k > 0#u32
+      then
+        let v ← alloc.sync.Arc.Insts.CoreOpsDerefDeref.deref Global self.bits
+        let i := alloc.vec.Vec.len v
+        ok (i != 0#usize)
+      else ok false
+    else ok false
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::with_capacity]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 267:4-283:5
+    Visibility: public -/
+def BloomFilter.with_capacity
+  (n_keys : Std.Usize) (bits_per_key : Std.Usize) : Result BloomFilter := do
+  if n_keys = 0#usize
+  then BloomFilter.always_true
+  else
+    if bits_per_key = 0#usize
+    then BloomFilter.always_true
+    else
+      let i ← saturating_product n_keys bits_per_key
+      let i1 ← at_least_64 i
+      let nbits ← cap_u32 i1
+      let k ← k_from_bits_per_key bits_per_key
+      let nbytes ← nbytes_for_nbits nbits
+      let v ← alloc.vec.from_elem core.clone.CloneU8 0#u8 nbytes
+      let a ← alloc.sync.Arc.new v
+      let a1 ← alloc.sync.Arc.new (alloc.vec.Vec.new (alloc.vec.Vec Std.U8))
+      let m ←
+        std.sync.poison.mutex.Mutex.new (alloc.vec.Vec.new (Option
+          BloomFilter))
+      let a2 ← alloc.sync.Arc.new m
+      let a3 ←
+        alloc.sync.Arc.new (alloc.vec.Vec.new (std.sync.once_lock.OnceLock
+          BloomFilter))
+      ok (BloomFilter.mk a nbits k 1#u32 a1 a2 a3)
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::with_partitions]: loop body 0:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 293:8-295:9
+    Visibility: public -/
+@[rust_loop_body]
+def BloomFilter.with_partitions_loop.body
+  (bits_per_key : Std.Usize) (per : Std.Usize)
+  (iter : core.ops.range.Range Std.U32)
+  (loaded : alloc.vec.Vec (Option BloomFilter)) :
+  Result (ControlFlow ((core.ops.range.Range Std.U32) × (alloc.vec.Vec (Option
+    BloomFilter))) (alloc.vec.Vec (Option BloomFilter)))
+  := do
+  let (o, iter1) ←
+    core.iter.range.IteratorRange.next core.iter.range.StepU32 iter
+  match o with
+  | none => ok (done loaded)
+  | some _ =>
+    let bf ← BloomFilter.with_capacity per bits_per_key
+    let loaded1 ← alloc.vec.Vec.push loaded (some bf)
+    ok (cont (iter1, loaded1))
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::with_partitions]: loop 0:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 293:8-295:9
+    Visibility: public -/
+@[rust_loop]
+def BloomFilter.with_partitions_loop
+  (iter : core.ops.range.Range Std.U32) (bits_per_key : Std.Usize)
+  (per : Std.Usize) (loaded : alloc.vec.Vec (Option BloomFilter)) :
+  Result (alloc.vec.Vec (Option BloomFilter))
+  := do
+  loop
+    (fun (iter1, loaded1) => BloomFilter.with_partitions_loop.body bits_per_key
+      per iter1 loaded1)
+    (iter, loaded)
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::with_partitions]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 287:4-305:5
+    Visibility: public -/
+def BloomFilter.with_partitions
+  (n_keys : Std.Usize) (bits_per_key : Std.Usize) (nparts : Std.U32) :
+  Result BloomFilter
+  := do
+  if nparts <= 1#u32
+  then BloomFilter.with_capacity n_keys bits_per_key
+  else
+    let i ← lift (UScalar.cast .Usize nparts)
+    let i1 ← n_keys / i
+    let per ← i1 + 1#usize
+    let i2 ← lift (UScalar.cast .Usize nparts)
+    let loaded := alloc.vec.Vec.with_capacity (Option BloomFilter) i2
+    let loaded1 ←
+      BloomFilter.with_partitions_loop { start := 0#u32, «end» := nparts }
+        bits_per_key per loaded
+    let a ← alloc.sync.Arc.new (alloc.vec.Vec.new Std.U8)
+    let a1 ← alloc.sync.Arc.new (alloc.vec.Vec.new (alloc.vec.Vec Std.U8))
+    let m ← std.sync.poison.mutex.Mutex.new loaded1
+    let a2 ← alloc.sync.Arc.new m
+    let a3 ←
+      alloc.sync.Arc.new (alloc.vec.Vec.new (std.sync.once_lock.OnceLock
+        BloomFilter))
+    ok (BloomFilter.mk a 0#u32 0#u32 nparts a1 a2 a3)
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure#1]
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 329:17-329:38 -/
+@[reducible]
+def BloomFilter.from_partition_builders.closure_1 := Unit
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnMut<(pedra_aeneas_bloom_kernel::BloomFilter,), core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure#1}::call_mut]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 329:17-329:38 -/
+def
+  BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnMutTupleBloomFilterOptionBoxBloomFilter.call_mut
+  (c : BloomFilter.from_partition_builders.closure_1)
+  (tupled_args : BloomFilter) :
+  Result ((Option BloomFilter) ×
+    BloomFilter.from_partition_builders.closure_1)
+  := do
+  ok (some tupled_args, c)
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnOnce<(pedra_aeneas_bloom_kernel::BloomFilter,), core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure#1}::call_once]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 329:17-329:38 -/
+def
+  BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnOnceTupleBloomFilterOptionBoxBloomFilter.call_once
+  (c : BloomFilter.from_partition_builders.closure_1) (bf : BloomFilter) :
+  Result (Option BloomFilter)
+  := do
+  let (o, _) ←
+    BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnMutTupleBloomFilterOptionBoxBloomFilter.call_mut
+      c bf
+  ok o
+
+/-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnOnce<(pedra_aeneas_bloom_kernel::BloomFilter,), core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure#1}]
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 329:17-329:38 -/
+@[reducible]
+def
+  BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnOnceTupleBloomFilterOptionBoxBloomFilter
+  : core.ops.function.FnOnce BloomFilter.from_partition_builders.closure_1
+  BloomFilter (Option BloomFilter) := {
+  call_once :=
+    BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnOnceTupleBloomFilterOptionBoxBloomFilter.call_once
+}
+
+/-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnMut<(pedra_aeneas_bloom_kernel::BloomFilter,), core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure#1}]
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 329:17-329:38 -/
+@[reducible]
+def
+  BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnMutTupleBloomFilterOptionBoxBloomFilter
+  : core.ops.function.FnMut BloomFilter.from_partition_builders.closure_1
+  BloomFilter (Option BloomFilter) := {
+  FnOnceInst :=
+    BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnOnceTupleBloomFilterOptionBoxBloomFilter
+  call_mut :=
+    BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnMutTupleBloomFilterOptionBoxBloomFilter.call_mut
+}
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::clone_parts_only]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 346:4-356:5 -/
+def BloomFilter.clone_parts_only
+  (self : BloomFilter) : Result BloomFilter := do
+  let a ←
+    alloc.sync.Arc.Insts.CoreCloneClone.clone core.core.clone.CloneGlobal
+      self.bits
+  let a1 ← alloc.sync.Arc.new (alloc.vec.Vec.new (alloc.vec.Vec Std.U8))
+  let m ←
+    std.sync.poison.mutex.Mutex.new (alloc.vec.Vec.new (Option BloomFilter))
+  let a2 ← alloc.sync.Arc.new m
+  let a3 ←
+    alloc.sync.Arc.new (alloc.vec.Vec.new (std.sync.once_lock.OnceLock
+      BloomFilter))
+  ok (BloomFilter.mk a self.nbits self.k 1#u32 a1 a2 a3)
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure]
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 321:17-325:13 -/
+@[reducible]
+def BloomFilter.from_partition_builders.closure := Unit
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_bloom_kernel::BloomFilter,), std::sync::once_lock::OnceLock<pedra_aeneas_bloom_kernel::BloomFilter>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure}::call_mut]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 321:17-325:13 -/
+def
+  BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnMutTupleSharedBloomFilterOnceLockBloomFilter.call_mut
+  (c : BloomFilter.from_partition_builders.closure) (tupled_args : BloomFilter)
+  :
+  Result ((std.sync.once_lock.OnceLock BloomFilter) ×
+    BloomFilter.from_partition_builders.closure)
+  := do
+  let slot ← std.sync.once_lock.OnceLock.new BloomFilter
+  let bf ← BloomFilter.clone_parts_only tupled_args
+  let _ ← std.sync.once_lock.OnceLock.set slot bf
+  ok (slot, c)
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_bloom_kernel::BloomFilter,), std::sync::once_lock::OnceLock<pedra_aeneas_bloom_kernel::BloomFilter>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure}::call_once]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 321:17-325:13 -/
+def
+  BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnOnceTupleSharedBloomFilterOnceLockBloomFilter.call_once
+  (c : BloomFilter.from_partition_builders.closure) (bf : BloomFilter) :
+  Result (std.sync.once_lock.OnceLock BloomFilter)
+  := do
+  let (ol, _) ←
+    BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnMutTupleSharedBloomFilterOnceLockBloomFilter.call_mut
+      c bf
+  ok ol
+
+/-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_bloom_kernel::BloomFilter,), std::sync::once_lock::OnceLock<pedra_aeneas_bloom_kernel::BloomFilter>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure}]
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 321:17-325:13 -/
+@[reducible]
+def
+  BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnOnceTupleSharedBloomFilterOnceLockBloomFilter
+  : core.ops.function.FnOnce BloomFilter.from_partition_builders.closure
+  BloomFilter (std.sync.once_lock.OnceLock BloomFilter) := {
+  call_once :=
+    BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnOnceTupleSharedBloomFilterOnceLockBloomFilter.call_once
+}
+
+/-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_bloom_kernel::BloomFilter,), std::sync::once_lock::OnceLock<pedra_aeneas_bloom_kernel::BloomFilter>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders::closure}]
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 321:17-325:13 -/
+@[reducible]
+def
+  BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnMutTupleSharedBloomFilterOnceLockBloomFilter
+  : core.ops.function.FnMut BloomFilter.from_partition_builders.closure
+  BloomFilter (std.sync.once_lock.OnceLock BloomFilter) := {
+  FnOnceInst :=
+    BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnOnceTupleSharedBloomFilterOnceLockBloomFilter
+  call_mut :=
+    BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnMutTupleSharedBloomFilterOnceLockBloomFilter.call_mut
+}
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::from_partition_builders]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 313:4-340:5
+    Visibility: public -/
+def BloomFilter.from_partition_builders
+  (builders : alloc.vec.Vec BloomFilter) : Result BloomFilter := do
+  let i := alloc.vec.Vec.len builders
+  let nparts ← lift (UScalar.cast .U32 i)
+  let s := alloc.vec.Vec.deref builders
+  let i1 ← core.slice.Slice.iter s
+  let m ←
+    core.iter.traits.iterator.Iterator.map.default
+      (core.iter.traits.iterator.IteratorSliceIter BloomFilter)
+      BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnMutTupleSharedBloomFilterOnceLockBloomFilter
+      i1 ()
+  let once ←
+    core.iter.traits.iterator.Iterator.collect.default
+      (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
+      (core.iter.traits.iterator.IteratorSliceIter BloomFilter)
+      BloomFilter.from_partition_builders.closure.Insts.CoreOpsFunctionFnMutTupleSharedBloomFilterOnceLockBloomFilter)
+      (core.iter.traits.collect.FromIteratorVec (std.sync.once_lock.OnceLock
+      BloomFilter)) m
+  let ii ← alloc.vec.IntoIteratorVec.into_iter builders
+  let m1 ←
+    core.iter.traits.iterator.Iterator.map.default
+      (core.iter.traits.iterator.IteratorVecIntoIter BloomFilter)
+      BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnMutTupleBloomFilterOptionBoxBloomFilter
+      ii ()
+  let loaded ←
+    core.iter.traits.iterator.Iterator.collect.default
+      (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
+      (core.iter.traits.iterator.IteratorVecIntoIter BloomFilter)
+      BloomFilter.from_partition_builders.closure_1.Insts.CoreOpsFunctionFnMutTupleBloomFilterOptionBoxBloomFilter)
+      (core.iter.traits.collect.FromIteratorVec (Option BloomFilter)) m1
+  let a ← alloc.sync.Arc.new (alloc.vec.Vec.new Std.U8)
+  let a1 ← alloc.sync.Arc.new (alloc.vec.Vec.new (alloc.vec.Vec Std.U8))
+  let m2 ← std.sync.poison.mutex.Mutex.new loaded
+  let a2 ← alloc.sync.Arc.new m2
+  let a3 ← alloc.sync.Arc.new once
+  ok (BloomFilter.mk a 0#u32 0#u32 nparts a1 a2 a3)
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::partition_index]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 358:0-367:1 -/
+def BloomFilter.partition_index
+  (h1 : Std.U64) (nparts : Std.U32) : Result Std.U32 := do
+  if nparts <= 1#u32
+  then ok 0#u32
+  else
+    let i ← lift (core.convert.num.FromU64U32.from nparts)
+    let i1 ← h1 % i
+    ok (UScalar.cast .U32 i1)
+
+/-- [pedra_aeneas_bloom_kernel::hash_pair::FNV_PRIME]
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 698:4-698:44 -/
+@[global_simps, irreducible]
+def hash_pair.FNV_PRIME : Std.U64 := 1099511628211#u64
+
+/-- [pedra_aeneas_bloom_kernel::hash_pair]: loop body 0:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 699:4-703:5
+    Visibility: public -/
+@[rust_loop_body]
+def hash_pair_loop.body
+  (iter : core.slice.iter.Iter Std.U8) (h1 : Std.U64) (h2 : Std.U64) :
+  Result (ControlFlow ((core.slice.iter.Iter Std.U8) × Std.U64 × Std.U64)
+    (Std.U64 × Std.U64))
+  := do
+  let (o, iter1) ← core.slice.iter.IteratorSliceIter.next iter
+  match o with
+  | none => ok (done (h1, h2))
+  | some b =>
+    let byte ← lift (core.convert.num.FromU64U8.from b)
+    let i ← lift (h1 ^^^ byte)
+    let h11 ← lift (core.num.U64.wrapping_mul i hash_pair.FNV_PRIME)
+    let i1 ← lift (h2 ^^^ byte)
+    let h21 ← lift (core.num.U64.wrapping_mul i1 hash_pair.FNV_PRIME)
+    ok (cont (iter1, h11, h21))
+
+/-- [pedra_aeneas_bloom_kernel::hash_pair]: loop 0:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 699:4-703:5
+    Visibility: public -/
+@[rust_loop]
+def hash_pair_loop
+  (iter : core.slice.iter.Iter Std.U8) (h1 : Std.U64) (h2 : Std.U64) :
+  Result (Std.U64 × Std.U64)
+  := do
+  loop
+    (fun (iter1, h11, h21) => hash_pair_loop.body iter1 h11 h21)
+    (iter, h1, h2)
+
+/-- [pedra_aeneas_bloom_kernel::hash_pair]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 695:0-709:1
+    Visibility: public -/
+def hash_pair (key : Slice Std.U8) : Result (Std.U64 × Std.U64) := do
+  let iter ←
+    SharedSlice.Insts.CoreIterTraitsCollectIntoIteratorSharedIter.into_iter key
+  let (h1, h2) ←
+    hash_pair_loop iter 14695981039346656037#u64 11400714819323198485#u64
+  if h2 = 0#u64
+  then ok (h1, 11400714819323198485#u64)
+  else ok (h1, h2)
+
+/-- [pedra_aeneas_bloom_kernel::set_bit]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 686:0-688:1
+    Visibility: public -/
+def set_bit (bits : Slice Std.U8) (i : Std.Usize) : Result (Slice Std.U8) := do
+  let i1 ← i % 8#usize
+  let i2 ← 1#u8 <<< i1
+  let i3 ← i / 8#usize
+  let i4 ← Slice.index_usize bits i3
+  let i5 ← lift (i4 ||| i2)
+  Slice.update bits i3 i5
+
+/-- [pedra_aeneas_bloom_kernel::probe_bit]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 682:0-684:1
+    Visibility: public -/
+def probe_bit
+  (h1 : Std.U64) (h2 : Std.U64) (i : Std.U32) (nbits : Std.U64) :
+  Result Std.U64
+  := do
+  let i1 ← lift (core.convert.num.FromU64U32.from i)
+  let i2 ← lift (core.num.U64.wrapping_mul i1 h2)
+  let i3 ← lift (core.num.U64.wrapping_add h1 i2)
+  i3 % nbits
+
+/-- [pedra_aeneas_bloom_kernel::bit_index]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 670:0-679:1
+    Visibility: public -/
+def bit_index (bit : Std.U64) : Result Std.Usize := do
+  let i ← lift (core.convert.num.FromU64U32.from core.num.U32.MAX)
+  if bit > i
+  then ok 0#usize
+  else let i1 ← lift (UScalar.cast .U32 bit)
+       ok (UScalar.cast .Usize i1)
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert_prehashed]: loop body 0:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 400:8-403:9
+    Visibility: public -/
+@[rust_loop_body]
+def BloomFilter.insert_prehashed_loop.body
+  (i : Std.U32) (h1 : Std.U64) (h2 : Std.U64) (nbits : Std.U64)
+  (bits : alloc.vec.Vec Std.U8) (i1 : Std.U32) :
+  Result (ControlFlow ((alloc.vec.Vec Std.U8) × Std.U32) (alloc.vec.Vec
+    Std.U8))
+  := do
+  if i1 < i
+  then
+    let (s, deref_mut_back) ← lift (alloc.vec.Vec.deref_mut bits)
+    let i2 ← probe_bit h1 h2 i1 nbits
+    let i3 ← bit_index i2
+    let s1 ← set_bit s i3
+    let i4 ← i1 + 1#u32
+    let bits1 := deref_mut_back s1
+    ok (cont (bits1, i4))
+  else ok (done bits)
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert_prehashed]: loop 0:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 400:8-403:9
+    Visibility: public -/
+@[rust_loop]
+def BloomFilter.insert_prehashed_loop
+  (i : Std.U32) (h1 : Std.U64) (h2 : Std.U64) (nbits : Std.U64)
+  (bits : alloc.vec.Vec Std.U8) (i1 : Std.U32) :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  loop
+    (fun (bits1, i2) => BloomFilter.insert_prehashed_loop.body i h1 h2 nbits
+      bits1 i2)
+    (bits, i1)
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert_prehashed]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 393:4-404:5
+    Visibility: public -/
+def BloomFilter.insert_prehashed
+  (self : BloomFilter) (h1 : Std.U64) (h2 : Std.U64) : Result BloomFilter := do
+  if self.nparts > 1#u32
+  then ok self
+  else
+    let b ← BloomFilter.is_active self
+    if b
+    then
+      let nbits ← lift (core.convert.num.FromU64U32.from self.nbits)
+      let (bits, make_mut_back) ←
+        alloc.sync.Arc.make_mut (core.clone.CloneToUninit.Blanket
+          (core.clone.CloneallocvecVec core.clone.CloneU8))
+          core.core.clone.CloneGlobal self.bits
+      let bits1 ←
+        BloomFilter.insert_prehashed_loop self.k h1 h2 nbits bits 0#u32
+      let a := make_mut_back bits1
+      ok (BloomFilter.mk a self.nbits self.k self.nparts self.encoded_parts
+        self.loaded self.parts_once)
+    else ok self
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert::closure]
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 378:58-378:76 -/
+@[reducible]
+def BloomFilter.insert.closure := Unit
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert::{impl core::ops::function::FnOnce<(std::sync::poison::PoisonError<std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>>,), std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert::closure}::call_once]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 378:58-378:76 -/
+def
+  BloomFilter.insert.closure.Insts.CoreOpsFunctionFnOnceTuplePoisonErrorMutexGuardVecOptionBoxBloomFilterMutexGuardVecOptionBoxBloomFilter.call_once
+  (c : BloomFilter.insert.closure)
+  (tupled_args : std.sync.poison.PoisonError (std.sync.poison.mutex.MutexGuard
+  (alloc.vec.Vec (Option BloomFilter)))) :
+  Result (std.sync.poison.mutex.MutexGuard (alloc.vec.Vec (Option
+    BloomFilter)))
+  := do
+  sorry
+
+/-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert::{impl core::ops::function::FnOnce<(std::sync::poison::PoisonError<std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>>,), std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert::closure}]
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 378:58-378:76 -/
+@[reducible]
+def
+  BloomFilter.insert.closure.Insts.CoreOpsFunctionFnOnceTuplePoisonErrorMutexGuardVecOptionBoxBloomFilterMutexGuardVecOptionBoxBloomFilter
+  : core.ops.function.FnOnce BloomFilter.insert.closure
+  (std.sync.poison.PoisonError (std.sync.poison.mutex.MutexGuard (alloc.vec.Vec
+  (Option BloomFilter)))) (std.sync.poison.mutex.MutexGuard (alloc.vec.Vec
+  (Option BloomFilter))) := {
+  call_once :=
+    BloomFilter.insert.closure.Insts.CoreOpsFunctionFnOnceTuplePoisonErrorMutexGuardVecOptionBoxBloomFilterMutexGuardVecOptionBoxBloomFilter.call_once
+}
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 374:4-386:5
+    Visibility: public -/
+def BloomFilter.insert
+  (self : BloomFilter) (key : Slice Std.U8) : Result BloomFilter := do
+  sorry
+
+/-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert_as_is]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 407:4-407:50
+    Visibility: public -/
+def BloomFilter.insert_as_is
+  (self : BloomFilter) (_key : Slice Std.U8) : Result BloomFilter := do
+  ok self
+
+/-- [pedra_aeneas_bloom_kernel::test_bit]:
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 690:0-692:1
+    Visibility: public -/
+def test_bit (bits : Slice Std.U8) (i : Std.Usize) : Result Bool := do
+  let i1 ← i / 8#usize
+  let i2 ← Slice.index_usize bits i1
+  let i3 ← i % 8#usize
+  let i4 ← 1#u8 <<< i3
+  let i5 ← lift (i2 &&& i4)
+  ok (i5 != 0#u8)
+
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure#4]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 432:33-432:75 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 472:33-472:75 -/
 def BloomFilter.may_contain_part_with_hashes.closure_4 :=
   Slice Std.U8 × Std.U64 × Std.U64
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure#3]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 429:64-429:87 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 469:64-469:87 -/
 @[reducible]
 def BloomFilter.may_contain_part_with_hashes.closure_3 := Unit
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::{impl core::ops::function::FnOnce<(alloc::string::String,), pedra_aeneas_bloom_kernel::BloomFilter> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure#3}::call_once]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 429:64-429:87 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 469:64-469:87 -/
 def
   BloomFilter.may_contain_part_with_hashes.closure_3.Insts.CoreOpsFunctionFnOnceTupleStringBloomFilter.call_once
   (c : BloomFilter.may_contain_part_with_hashes.closure_3)
@@ -1705,7 +1758,7 @@ def
   BloomFilter.always_true
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::{impl core::ops::function::FnOnce<(alloc::string::String,), pedra_aeneas_bloom_kernel::BloomFilter> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure#3}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 429:64-429:87 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 469:64-469:87 -/
 @[reducible]
 def
   BloomFilter.may_contain_part_with_hashes.closure_3.Insts.CoreOpsFunctionFnOnceTupleStringBloomFilter
@@ -1716,12 +1769,12 @@ def
 }
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure#2]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 421:48-421:55 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 461:48-461:55 -/
 @[reducible]
 def BloomFilter.may_contain_part_with_hashes.closure_2 := Unit
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::{impl core::ops::function::FnMut<(), core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure#2}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 421:48-421:55 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 461:48-461:55 -/
 def
   BloomFilter.may_contain_part_with_hashes.closure_2.Insts.CoreOpsFunctionFnMutTupleOptionBoxBloomFilter.call_mut
   (c : BloomFilter.may_contain_part_with_hashes.closure_2) (_ : Unit) :
@@ -1731,7 +1784,7 @@ def
   ok (none, c)
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::{impl core::ops::function::FnOnce<(), core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure#2}::call_once]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 421:48-421:55 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 461:48-461:55 -/
 def
   BloomFilter.may_contain_part_with_hashes.closure_2.Insts.CoreOpsFunctionFnOnceTupleOptionBoxBloomFilter.call_once
   (c : BloomFilter.may_contain_part_with_hashes.closure_2) (_ : Unit) :
@@ -1743,7 +1796,7 @@ def
   ok o
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::{impl core::ops::function::FnOnce<(), core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure#2}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 421:48-421:55 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 461:48-461:55 -/
 @[reducible]
 def
   BloomFilter.may_contain_part_with_hashes.closure_2.Insts.CoreOpsFunctionFnOnceTupleOptionBoxBloomFilter
@@ -1754,7 +1807,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::{impl core::ops::function::FnMut<(), core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure#2}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 421:48-421:55 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 461:48-461:55 -/
 @[reducible]
 def
   BloomFilter.may_contain_part_with_hashes.closure_2.Insts.CoreOpsFunctionFnMutTupleOptionBoxBloomFilter
@@ -1767,12 +1820,12 @@ def
 }
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure#1]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 419:54-419:72 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 459:54-459:72 -/
 @[reducible]
 def BloomFilter.may_contain_part_with_hashes.closure_1 := Unit
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::{impl core::ops::function::FnOnce<(std::sync::poison::PoisonError<std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>>,), std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 419:54-419:72 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 459:54-459:72 -/
 def
   BloomFilter.may_contain_part_with_hashes.closure_1.Insts.CoreOpsFunctionFnOnceTuplePoisonErrorMutexGuardVecOptionBoxBloomFilterMutexGuardVecOptionBoxBloomFilter.call_once
   (c : BloomFilter.may_contain_part_with_hashes.closure_1)
@@ -1784,7 +1837,7 @@ def
   sorry
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::{impl core::ops::function::FnOnce<(std::sync::poison::PoisonError<std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>>,), std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure#1}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 419:54-419:72 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 459:54-459:72 -/
 @[reducible]
 def
   BloomFilter.may_contain_part_with_hashes.closure_1.Insts.CoreOpsFunctionFnOnceTuplePoisonErrorMutexGuardVecOptionBoxBloomFilterMutexGuardVecOptionBoxBloomFilter
@@ -1797,12 +1850,12 @@ def
 }
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure::closure]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 415:55-415:78 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 455:55-455:78 -/
 @[reducible]
 def BloomFilter.may_contain_part_with_hashes.closure.closure := Unit
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure::{impl core::ops::function::FnOnce<(alloc::string::String,), pedra_aeneas_bloom_kernel::BloomFilter> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure::closure}::call_once]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 415:55-415:78 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 455:55-455:78 -/
 def
   BloomFilter.may_contain_part_with_hashes.closure.closure.Insts.CoreOpsFunctionFnOnceTupleStringBloomFilter.call_once
   (c : BloomFilter.may_contain_part_with_hashes.closure.closure)
@@ -1812,7 +1865,7 @@ def
   BloomFilter.always_true
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure::{impl core::ops::function::FnOnce<(alloc::string::String,), pedra_aeneas_bloom_kernel::BloomFilter> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure::closure}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 415:55-415:78 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 455:55-455:78 -/
 @[reducible]
 def
   BloomFilter.may_contain_part_with_hashes.closure.closure.Insts.CoreOpsFunctionFnOnceTupleStringBloomFilter
@@ -1824,12 +1877,12 @@ def
 }
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 411:40-416:13 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 451:40-456:13 -/
 def BloomFilter.may_contain_part_with_hashes.closure :=
   BloomFilter × Std.Usize
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::{impl core::ops::function::FnOnce<(), pedra_aeneas_bloom_kernel::BloomFilter> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure<'_0, '_1>}::call_once]:
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 411:40-416:13 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 451:40-456:13 -/
 def
   BloomFilter.may_contain_part_with_hashes.closure.Insts.CoreOpsFunctionFnOnceTupleBloomFilter.call_once
   (c : BloomFilter.may_contain_part_with_hashes.closure) (_ : Unit) :
@@ -1865,7 +1918,7 @@ def
     r ()
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::{impl core::ops::function::FnOnce<(), pedra_aeneas_bloom_kernel::BloomFilter> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain_part_with_hashes::closure<'_0, '_1>}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 411:40-416:13 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 451:40-456:13 -/
 @[reducible]
 def
   BloomFilter.may_contain_part_with_hashes.closure.Insts.CoreOpsFunctionFnOnceTupleBloomFilter
@@ -1876,17 +1929,17 @@ def
 }
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::encode_partitioned::closure#1]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 456:59-456:73 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 496:59-496:73 -/
 @[reducible]
 def BloomFilter.encode_partitioned.closure_1 := Unit
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::encode_partitioned::closure]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 452:50-452:68 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 492:50-492:68 -/
 @[reducible]
 def BloomFilter.encode_partitioned.closure := Unit
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::encode_partitioned::{impl core::ops::function::FnOnce<(std::sync::poison::PoisonError<std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>>,), std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::encode_partitioned::closure}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 452:50-452:68 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 492:50-492:68 -/
 @[reducible]
 def
   BloomFilter.encode_partitioned.closure.Insts.CoreOpsFunctionFnOnceTuplePoisonErrorMutexGuardVecOptionBoxBloomFilterMutexGuardVecOptionBoxBloomFilter
@@ -1898,12 +1951,12 @@ def
 }
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::decode_partitioned::closure]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 606:58-606:77 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 646:58-646:77 -/
 @[reducible]
 def BloomFilter.decode_partitioned.closure := Unit
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::decode_partitioned::{impl core::ops::function::FnOnce<(usize,), std::sync::once_lock::OnceLock<pedra_aeneas_bloom_kernel::BloomFilter>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::decode_partitioned::closure}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 606:58-606:77 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 646:58-646:77 -/
 @[reducible]
 def
   BloomFilter.decode_partitioned.closure.Insts.CoreOpsFunctionFnOnceTupleUsizeOnceLockBloomFilter
@@ -1913,7 +1966,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::decode_partitioned::{impl core::ops::function::FnMut<(usize,), std::sync::once_lock::OnceLock<pedra_aeneas_bloom_kernel::BloomFilter>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::decode_partitioned::closure}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 606:58-606:77 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 646:58-646:77 -/
 @[reducible]
 def
   BloomFilter.decode_partitioned.closure.Insts.CoreOpsFunctionFnMutTupleUsizeOnceLockBloomFilter
@@ -1925,12 +1978,12 @@ def
 }
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::freeze_partitions::closure#2]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 540:65-540:84 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 580:65-580:84 -/
 @[reducible]
 def BloomFilter.freeze_partitions.closure_2 := Unit
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::freeze_partitions::{impl core::ops::function::FnOnce<(usize,), std::sync::once_lock::OnceLock<pedra_aeneas_bloom_kernel::BloomFilter>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::freeze_partitions::closure#2}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 540:65-540:84 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 580:65-580:84 -/
 @[reducible]
 def
   BloomFilter.freeze_partitions.closure_2.Insts.CoreOpsFunctionFnOnceTupleUsizeOnceLockBloomFilter
@@ -1940,7 +1993,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::freeze_partitions::{impl core::ops::function::FnMut<(usize,), std::sync::once_lock::OnceLock<pedra_aeneas_bloom_kernel::BloomFilter>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::freeze_partitions::closure#2}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 540:65-540:84 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 580:65-580:84 -/
 @[reducible]
 def
   BloomFilter.freeze_partitions.closure_2.Insts.CoreOpsFunctionFnMutTupleUsizeOnceLockBloomFilter
@@ -1952,12 +2005,12 @@ def
 }
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::freeze_partitions::closure#1]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 532:62-532:76 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 572:62-572:76 -/
 @[reducible]
 def BloomFilter.freeze_partitions.closure_1 := Unit
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::freeze_partitions::{impl core::ops::function::FnOnce<(&'_ alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>,), alloc::vec::Vec<u8>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::freeze_partitions::closure#1}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 532:62-532:76 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 572:62-572:76 -/
 @[reducible]
 def
   BloomFilter.freeze_partitions.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedBoxBloomFilterVecU8
@@ -1967,12 +2020,12 @@ def
 }
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::freeze_partitions::closure]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 528:50-528:68 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 568:50-568:68 -/
 @[reducible]
 def BloomFilter.freeze_partitions.closure := Unit
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::freeze_partitions::{impl core::ops::function::FnOnce<(std::sync::poison::PoisonError<std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>>,), std::sync::poison::mutex::MutexGuard<'_, alloc::vec::Vec<core::option::Option<alloc::boxed::Box<pedra_aeneas_bloom_kernel::BloomFilter>>>>> for pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::freeze_partitions::closure}]
-    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 528:50-528:68 -/
+    Source: '../../../crates/pedradb-core/src/bloom_kernel.rs', lines 568:50-568:68 -/
 @[reducible]
 def
   BloomFilter.freeze_partitions.closure.Insts.CoreOpsFunctionFnOnceTuplePoisonErrorMutexGuardVecOptionBoxBloomFilterMutexGuardVecOptionBoxBloomFilter

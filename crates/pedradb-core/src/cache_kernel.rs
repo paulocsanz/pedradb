@@ -885,7 +885,84 @@ pub struct AnswerCache<V> {
 }
 
 /// Latest-snapshot point get (`None` = cached absence).
-pub type PointCache = AnswerCache<Option<Bytes>>;
+/// RFC-0308 Pilar C: 16-way sharded answer cache. The single-Mutex
+/// `AnswerCache` serialized EVERY point get behind one lock (lookup + lock
+/// even on miss, ~2 hash + mutex per op); 16 independent shards keyed by
+/// the same FxHash used elsewhere give uncontended reads up to 16 reader
+/// threads. Capacity divides evenly so the total budget is unchanged.
+/// Method surface mirrors `AnswerCache` exactly — `PointCache` swaps the
+/// alias, no caller changes.
+pub struct ShardedAnswerCache<V: Clone> {
+    shards: Box<[AnswerCache<V>]>,
+}
+
+const ANSWER_SHARDS: usize = 16;
+
+fn answer_shard_of(key: &[u8]) -> usize {
+    let mut fx = FxHasher::default();
+    fx.write(key);
+    (fx.finish() as usize) & (ANSWER_SHARDS - 1)
+}
+
+impl<V: Clone> ShardedAnswerCache<V> {
+    /// Create with the TOTAL max cached keys (divided across shards).
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        let per = (capacity / ANSWER_SHARDS).max(1);
+        Self {
+            shards: (0..ANSWER_SHARDS)
+                .map(|_| AnswerCache::new(per))
+                .collect(),
+        }
+    }
+
+    /// `None` = miss.
+    #[must_use]
+    pub fn get(&self, key: &[u8]) -> Option<V> {
+        self.shards[answer_shard_of(key)].get(key)
+    }
+
+    /// Store a latest-snapshot answer.
+    pub fn insert(&self, key: &[u8], value: V) {
+        self.shards[answer_shard_of(key)].insert(key, value);
+    }
+
+    /// Invalidate every entry (write path) — gen-bumps all shards.
+    pub fn clear(&self) {
+        for s in &self.shards {
+            s.clear();
+        }
+    }
+
+    /// Drop one key (other latest-snapshot hits stay).
+    pub fn invalidate(&self, key: &[u8]) {
+        self.shards[answer_shard_of(key)].invalidate(key);
+    }
+
+    /// Drop several keys — one acquire per TOUCHED shard (publish path).
+    pub fn invalidate_many(&self, keys: &[Bytes]) {
+        let mut seen = [false; ANSWER_SHARDS];
+        for k in keys {
+            let s = answer_shard_of(k);
+            if !seen[s] {
+                seen[s] = true;
+            }
+        }
+        for (i, s) in self.shards.iter().enumerate() {
+            if seen[i] {
+                s.invalidate_many(keys);
+            }
+        }
+    }
+
+    /// No cached answers in any shard.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.shards.iter().all(|s| s.is_empty())
+    }
+}
+
+pub type PointCache = ShardedAnswerCache<Option<Bytes>>;
 
 /// Fixed-key fast hash (fxhash-class). Cache keys are compared exactly on
 /// every hit, so a weak (non-DoS-resistant) hasher only trades speed for

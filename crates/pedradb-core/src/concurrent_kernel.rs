@@ -52,6 +52,14 @@ thread_local! {
 static GET_LSM_LOCKS: AtomicU64 = AtomicU64::new(0);
 static GET_USED_PUBLISHED_SV: AtomicU64 = AtomicU64::new(0);
 
+/// RFC-0308 stale-read hunt: point-get branch counters — [cache-hit,
+/// try_read-full, published-sv]. Diagnostics only.
+static POINT_GET_BRANCH: [AtomicU64; 3] = [
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+];
+
 /// RFC-0236 SuperVersion: mem + imm + SST snapshot readers clone.
 ///
 /// `ssts` is L0 newest → older → L1+ (the locked lookup order), not
@@ -2690,14 +2698,17 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn get(&self, key: &[u8]) -> Option<Bytes> {
         self.reads_served.fetch_add(1, Ordering::Relaxed);
         if let Some(v) = self.point_cache.get(key) {
+            POINT_GET_BRANCH[0].fetch_add(1, Ordering::Relaxed);
             self.note_class_point(v.is_some());
             return v;
         }
         if let Some(g) = self.inner.try_read() {
+            POINT_GET_BRANCH[1].fetch_add(1, Ordering::Relaxed);
             note_lsm_lock();
             return g.get_after_point_miss(key);
         }
         GET_USED_PUBLISHED_SV.fetch_add(1, Ordering::Relaxed);
+        POINT_GET_BRANCH[2].fetch_add(1, Ordering::Relaxed);
         note_lsm_lock();
         // Write lock is held (compact/apply). Apply publishes SuperVersion
         // before dropping the lock, so unflushed mem keys are visible.
@@ -3622,6 +3633,15 @@ impl<E: Env> ConcurrentDb<E> {
 
     /// Durable/published sequence default reads observe (lock-free).
     #[must_use]
+    /// RFC-0308 stale-read hunt: point-get branch counters (diagnostics).
+    pub fn point_get_branch_counters(&self) -> [u64; 3] {
+        [
+            POINT_GET_BRANCH[0].load(Ordering::Relaxed),
+            POINT_GET_BRANCH[1].load(Ordering::Relaxed),
+            POINT_GET_BRANCH[2].load(Ordering::Relaxed),
+        ]
+    }
+
     pub fn visible_sequence(&self) -> SequenceNumber {
         self.published_seq.load(Ordering::Acquire)
     }
@@ -8103,6 +8123,67 @@ mod tests {
     /// Deletes stay on the ladder and must hide a key already in BulkRun.
     /// lookup used to return Found from the run without merging mem tombs.
     #[test]
+    /// RFC-0307 P0 regression: a put that revives a range-deleted key
+    /// must read back while the key lives in an open bulk run. The old
+    /// `range_deleted(key, 0, ..)` placeholder let ANY covering tombstone
+    /// hide the value — tombstone OLDER than the put included — so the
+    /// get returned None until the run settled into an SST. Ascending
+    /// batches engage the latch deterministically. Mutation-verified: the
+    /// test fails against the `point_seq = 0` form.
+    #[test]
+    fn bulk_run_put_after_range_delete_is_visible() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
+        let v1 = vec![b'o'; 64];
+        let v2 = vec![b'n'; 64];
+        // Ascending stream: latch engages, all keys live in the bulk run.
+        for b in 0..12u32 {
+            let mut batch = Vec::new();
+            for j in 0..16u32 {
+                let k = format!("data\0{b:04}-{j:04}").into_bytes();
+                batch.push(BatchOp::put(k, v1.clone()));
+            }
+            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
+            db.apply_batch_vec(batch).unwrap();
+        }
+        // The latch must have engaged — otherwise the puts live in the
+        // memtable and this test exercises nothing of the run path.
+        assert!(
+            db.with_read(|d| d.bulk_live_bytes()) > 0,
+            "test shape broken: bulk run never engaged"
+        );
+        let victim = b"data\00003-0008";
+        assert_eq!(db.get(victim).as_deref(), Some(&v1[..]));
+        // Range-delete covers the victim, then a newer put revives it.
+        db.apply_batch_vec(vec![BatchOp::delete_range(
+            b"data\00003-0000".to_vec(),
+            b"data\00003-0016".to_vec(),
+        )])
+        .unwrap();
+        assert_eq!(db.get(victim), None, "range delete must hide the old value");
+        db.apply_batch_vec(vec![BatchOp::put(victim.to_vec(), v2.clone())])
+            .unwrap();
+        assert_eq!(
+            db.get(victim).as_deref(),
+            Some(&v2[..]),
+            "put newer than the tombstone must be visible in the open bulk run"
+        );
+        // And the settled state agrees.
+        db.flush().unwrap();
+        db.compact().unwrap();
+        assert_eq!(db.get(victim).as_deref(), Some(&v2[..]));
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn bulk_open_tail_delete_hides_key() {
         let dir = temp_dir();
         let db = ConcurrentDb::open_with(

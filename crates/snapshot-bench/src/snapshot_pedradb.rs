@@ -226,9 +226,10 @@ pub struct PedraDbReader {
 impl PedraDbReader {
     /// Live entry for `key`, or `None` if absent/deleted.
     pub fn get(&self, key: &str) -> Result<Option<KvEntry>, SnapshotError> {
+        // RFC-0308 Pilar D: Bytes handoff — no per-hit payload copy.
         match self
             .db
-            .get_cf(&self.cf_data, key.as_bytes())
+            .get_cf_bytes(&self.cf_data, key.as_bytes())
             .map_err(map_pedradb)?
         {
             Some(raw) => Ok(Some(decode_entry(key, &raw)?)),
@@ -236,13 +237,25 @@ impl PedraDbReader {
         }
     }
 
-    /// Batched point lookups via zero-allocation fast path (RFC-0293).
+    /// Batched point lookups (RFC-0308 Pilar A): one sorted probe plan per
+    /// batch — consecutive keys keep the run table's bloom/index hot.
     pub fn multi_get<'k>(
         &self,
         keys: impl IntoIterator<Item = &'k str>,
     ) -> Result<Vec<Option<KvEntry>>, SnapshotError> {
-        keys.into_iter()
-            .map(|k| self.get(k))
+        let keys: Vec<&str> = keys.into_iter().collect();
+        let pairs: Vec<(&rocksdb_compat::ColumnFamily, &str)> =
+            keys.iter().map(|k| (&self.cf_data, *k)).collect();
+        let raws = self
+            .db
+            .multi_get_cf_bytes(pairs)
+            .map_err(map_pedradb)?;
+        keys.iter()
+            .zip(raws)
+            .map(|(k, r)| match r {
+                Some(raw) => Ok(Some(decode_entry(k, &raw)?)),
+                None => Ok(None),
+            })
             .collect()
     }
 

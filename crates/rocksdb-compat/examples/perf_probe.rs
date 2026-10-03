@@ -301,6 +301,46 @@ fn main() {
         miss_wall
     );
 
+    // RFC-0308 Pilar E: cold-reopen attribution — first 100 gets after a
+    // fresh open, with part-loads/tables/blocks deltas (PEDRA_PROBE_COLD=1).
+    if std::env::var_os("PEDRA_PROBE_COLD").is_some() {
+        drop(db);
+        let mut opts2 = Options::new();
+        opts2.create_if_missing(true);
+        let mut data_opts2 = Options::default();
+        data_opts2.set_write_buffer_size(256 << 20);
+        let db2 = DB::open_cf_descriptors(
+            &opts2,
+            &dir,
+            [
+                ColumnFamilyDescriptor::new("data", data_opts2),
+                ColumnFamilyDescriptor::new("meta", Options::default()),
+            ],
+        )
+        .unwrap();
+        let cold0 = pedradb_core::bloom::filter_part_load_count();
+        let ct0 = db2.lookup_tables_probed();
+        let cb0 = rocksdb_compat::probe_counters().blocks_decoded;
+        let t0 = std::time::Instant::now();
+        let mut hit_n = 0usize;
+        for p in 0..100u64 {
+            let k = key((p * 7_919_927) % n);
+            if db2.get_named("data", &k).unwrap().is_some() {
+                hit_n += 1;
+            }
+        }
+        let cold_us = t0.elapsed().as_secs_f64() / 100.0 * 1e6;
+        println!(
+            "  cold-100   : {:.2} us/get | hits {hit_n}/100 | part-loads/get {:.3} | tables/get {:.3} | blocks/get {:.3}",
+            cold_us,
+            (pedradb_core::bloom::filter_part_load_count() - cold0) as f64 / 100.0,
+            (db2.lookup_tables_probed() - ct0) as f64 / 100.0,
+            (rocksdb_compat::probe_counters().blocks_decoded - cb0) as f64 / 100.0,
+        );
+        let _ = db2;
+        let _ = std::fs::remove_dir_all(&dir);
+        return;
+    }
     drop(db);
     let _ = std::fs::remove_dir_all(&dir);
     let _ = Arc::new(0u8); // silence unused-import noise in some toolchains

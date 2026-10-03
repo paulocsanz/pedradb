@@ -118,6 +118,28 @@ impl BulkRun {
     }
 
     #[must_use]
+    /// RFC-0307 P0: point lookup that also reports the winning entry's
+    /// sequence — the caller must compare range tombstones against the
+    /// ENTRY's seq, not a placeholder (a tomb older than the value must
+    /// not hide it).
+    pub(crate) fn lookup_with_seq(
+        &self,
+        key: &[u8],
+        snapshot: SequenceNumber,
+    ) -> Option<(SequenceNumber, Lookup)> {
+        let Ok(i) = self.keys.binary_search_by(|k| k.as_ref().cmp(key)) else {
+            return None;
+        };
+        if self.seqs[i] > snapshot {
+            return None;
+        }
+        match self.kinds.get(i).copied().unwrap_or(ValueType::Value) {
+            ValueType::Value => Some((self.seqs[i], Lookup::Found(self.vals[i].clone()))),
+            ValueType::Deletion => Some((self.seqs[i], Lookup::Deleted)),
+            _ => None,
+        }
+    }
+
     pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
         let Ok(i) = self.keys.binary_search_by(|k| k.as_ref().cmp(key)) else {
             return Lookup::NotFound;

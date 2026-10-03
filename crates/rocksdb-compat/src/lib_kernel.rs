@@ -1946,11 +1946,6 @@ impl<E: PedraEnv> Snapshot<'_, E> {
     pub fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         self.db.get_at(self.snap, DEFAULT_CF, key)
     }
-
-    /// Point read on a CF pinned at the snapshot sequence.
-    ///
-    /// # Errors
-    /// Unknown CF or Pedra errors.
     pub fn get_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         self.db.get_at(self.snap, &cf.name, key)
     }
@@ -2688,6 +2683,17 @@ impl<E: PedraEnv> DB<E> {
     }
 
     /// RFC-0306 stale-read hunt: engine encoding of a user key.
+    /// RFC-0308 stale-read hunt: (visible, last) sequence numbers.
+    pub fn debug_seqs(&self) -> (u64, u64) {
+        (self.inner.visible_sequence(), self.inner.last_sequence())
+    }
+
+    /// RFC-0308 stale-read hunt: point-get branch counters.
+    pub fn debug_point_branches(&self) -> [u64; 3] {
+        self.inner.point_get_branch_counters()
+    }
+
+    /// RFC-0306 stale-read hunt: engine encoding of a user key.
     pub fn debug_encode(&self, cf: &str, key: &[u8]) -> Vec<u8> {
         self.codec.encode(cf, key).into()
     }
@@ -2888,6 +2894,13 @@ impl<E: PedraEnv> DB<E> {
     ///
     /// # Errors
     /// Pedra read errors.
+    /// RFC-0308 Pilar D: named-CF get returning `Bytes` (refcount handoff,
+    /// no `.to_vec()` per get — the Vec API copies the payload on every
+    /// hit). Same path and semantics as `get_cf`.
+    pub fn get_cf_bytes(&self, cf: &ColumnFamily, key: &[u8]) -> Result<Option<Bytes>> {
+        self.get_cached_bytes(&cf.name, key)
+    }
+
     pub fn get_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         self.get_cached(&cf.name, key)
     }
@@ -2904,6 +2917,45 @@ impl<E: PedraEnv> DB<E> {
     }
 
     /// TLS-warmed point get on a CF name already known valid.
+    /// RFC-0308 Pilar D: `get_cached` without the terminal value copy —
+    /// hits hand the cached `Bytes` straight through.
+    fn get_cached_bytes(&self, cf: &str, key: &[u8]) -> Result<Option<Bytes>> {
+        let effective = cf_encode_effective(cf, self.codec.default_raw);
+        thread_local! {
+            static ENC: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+        }
+        ENC.with(|cell| -> Result<Option<Bytes>> {
+            let mut buf = cell.borrow_mut();
+            buf.clear();
+            if !pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
+                buf.extend_from_slice(effective.as_bytes());
+                buf.push(0);
+            }
+            buf.extend_from_slice(key);
+            let enc: &[u8] = &buf;
+            if self.fast_encoded_miss(enc) {
+                drop(buf);
+                self.inner.note_class_point(false);
+                return Ok(None);
+            }
+            let epoch = self.cache_epoch_base + self.inner.point_tls_epoch();
+            let gen = self.inner.key_tls_gen(enc);
+            if let Some(hit) = LAST_CF.with(|slot| slot.borrow().get(epoch, gen, cf, key)) {
+                drop(buf);
+                self.inner.note_class_point(hit.is_some());
+                return Ok(hit);
+            }
+            let got = self.inner.get(enc);
+            drop(buf);
+            if got.is_some() {
+                LAST_CF.with(|slot| {
+                    slot.borrow_mut().store(epoch, gen, cf, key, got.clone())
+                });
+            }
+            Ok(got)
+        })
+    }
+
     fn get_cached(&self, cf: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         let key = key.as_ref();
         // Fast-path bypass is delegated to self.inner.get to ensure memtables are checked first
@@ -4520,6 +4572,44 @@ impl<E: PedraEnv> DB<E> {
         key: impl AsRef<[u8]>,
     ) -> Result<Option<DBPinnableSlice<'_>>> {
         Ok(self.get_cf(cf, key)?.map(DBPinnableSlice::from_vec))
+    }
+
+    /// RFC-0308 Pilar A: batched named-CF point reads with a sorted probe
+    /// plan. One visible-sequence read for the whole batch; keys execute
+    /// in ENCODED order so consecutive keys usually land in the same run
+    /// table (its bloom partition and index stay hot between probes — the
+    /// locality neither the per-key loop nor Rocks' MultiGet has), with
+    /// stable indices restoring the caller's order. Results are `Bytes`
+    /// (Pilar D: no per-hit payload copy).
+    pub fn multi_get_cf_bytes<'a, K, I>(&self, keys: I) -> Vec<Result<Option<Bytes>>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = (&'a ColumnFamily, K)>,
+    {
+        let pairs: Vec<(&ColumnFamily, K)> = keys.into_iter().collect();
+        let n = pairs.len();
+        let mut out: Vec<Result<Option<Bytes>>> = Vec::with_capacity(n);
+        if pedradb_core::write_admission_kernel::batch_is_empty(n as u64) {
+            return out;
+        }
+        // Encode every key once, remember its position.
+        let mut plan: Vec<(usize, Vec<u8>)> = Vec::with_capacity(n);
+        for (i, (cf, k)) in pairs.iter().enumerate() {
+            let mut enc = Vec::with_capacity(cf.name.len() + 1 + k.as_ref().len());
+            enc.extend_from_slice(cf.name.as_bytes());
+            enc.push(0);
+            enc.extend_from_slice(k.as_ref());
+            plan.push((i, enc));
+        }
+        plan.sort_by(|a, b| a.1.cmp(&b.1));
+        let mut results: Vec<Option<Option<Bytes>>> = vec![None; n];
+        for (i, enc) in &plan {
+            results[*i] = Some(self.inner.get(enc));
+        }
+        for r in results.into_iter() {
+            out.push(Ok(r.unwrap_or(None)));
+        }
+        out
     }
 
     /// rust-rocksdb `multi_get`.

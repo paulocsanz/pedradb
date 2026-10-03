@@ -1401,6 +1401,11 @@ struct SstRun {
     /// the key, and prefix < whole in bytewise order — same verdict in
     /// both compare forms). Longer `lo`s keep `None` and the chase path.
     disjoint_los_flat: Option<Vec<Bound32>>,
+    /// RFC-0307 P1: the matching HI slots — `LevelRunStream` bisects the
+    /// FIRST candidate on this contiguous array instead of chasing
+    /// `ssts[fi].largest_user_key()` per step (the scan twin of the flat-LO
+    /// bisection).
+    disjoint_his_flat: Option<Vec<Bound32>>,
     has_range_tombstones: bool,
 }
 
@@ -1433,6 +1438,23 @@ impl Bound32 {
         // proper prefix sorts below the whole key.
         lo <= k
     }
+
+    /// HI-slot compare for the scan's first-candidate bisection. `or_equal`
+    /// selects `hi <= key` (Excluded start) vs `hi < key` (Included start).
+    /// The strict form errs toward KEEPING one extra file when a 31-byte
+    /// prefix ties (a stored `hi` that is a prefix of `start` sorts strictly
+    /// below the whole key but compares equal here) — the per-table bounds
+    /// check in the probe stays as the fail-safe, so recall is preserved.
+    #[inline]
+    fn lt_key(&self, key: &[u8], or_equal: bool) -> bool {
+        let hi = &self.bytes[..self.len as usize];
+        let k = &key[..key.len().min(31)];
+        if or_equal {
+            hi <= k
+        } else {
+            hi < k
+        }
+    }
 }
 
 /// Contiguous `lo` slots parallel to `by_lo`, `None` when any `lo` > 31 B.
@@ -1441,6 +1463,17 @@ fn flat_los(ssts: &[SstTable], by_lo: &[usize]) -> Option<Vec<Bound32>> {
     for &i in by_lo {
         let lo = ssts.get(i)?.smallest_user_key()?;
         out.push(Bound32::of(lo)?);
+    }
+    Some(out)
+}
+
+/// Contiguous `hi` slots parallel to `by_lo` (same exactness contract:
+/// a stored `hi` <= 31 B compares exactly against any key length).
+fn flat_his(ssts: &[SstTable], by_lo: &[usize]) -> Option<Vec<Bound32>> {
+    let mut out = Vec::with_capacity(by_lo.len());
+    for &i in by_lo {
+        let hi = ssts.get(i)?.largest_user_key()?;
+        out.push(Bound32::of(hi)?);
     }
     Some(out)
 }
@@ -1515,23 +1548,35 @@ impl<'a, E: Env> LevelRunStream<'a, E> {
     fn new(
         db: &'a Db<E>,
         files_by_lo: &'a [usize],
+        flat_his_arr: Option<&'a [Bound32]>,
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
         snapshot: SequenceNumber,
         resolve_values: bool,
     ) -> Self {
-        let next_file = match start {
-            Bound::Unbounded => 0,
-            Bound::Included(s) => files_by_lo.partition_point(|&fi| {
-                db.ssts[fi]
-                    .largest_user_key()
-                    .is_some_and(|hi| hi.as_ref() < s)
-            }),
-            Bound::Excluded(s) => files_by_lo.partition_point(|&fi| {
-                db.ssts[fi]
-                    .largest_user_key()
-                    .is_some_and(|hi| hi.as_ref() <= s)
-            }),
+        // RFC-0307 P1: contiguous HI slots first (same exactness contract
+        // as the point path; the strict form errs toward keeping one extra
+        // file — the per-table bounds check stays as the fail-safe).
+        let next_file = if let Some(his) = flat_his_arr {
+            match start {
+                Bound::Unbounded => 0,
+                Bound::Included(s) => his.partition_point(|hi| hi.lt_key(s, false)),
+                Bound::Excluded(s) => his.partition_point(|hi| hi.lt_key(s, true)),
+            }
+        } else {
+            match start {
+                Bound::Unbounded => 0,
+                Bound::Included(s) => files_by_lo.partition_point(|&fi| {
+                    db.ssts[fi]
+                        .largest_user_key()
+                        .is_some_and(|hi| hi.as_ref() < s)
+                }),
+                Bound::Excluded(s) => files_by_lo.partition_point(|&fi| {
+                    db.ssts[fi]
+                        .largest_user_key()
+                        .is_some_and(|hi| hi.as_ref() <= s)
+                }),
+            }
         };
         Self {
             db,
@@ -2378,8 +2423,13 @@ impl<E: Env> Db<E> {
 
     pub(crate) fn note_dirty_points(&self, ops: &[WriteOp]) {
         if ops.len() >= 32 || ops.iter().any(|op| op.kind == ValueType::RangeDeletion) {
-            // Fat apply / range: gen-bump at publish. Do not clone 64 keys
-            // under the write lock just to discard them (RFC-0041 apply_mc4).
+            // Fat apply / range: wholesale invalidation. RFC-0307 P0: clear
+            // the point cache HERE, not at the next publish — the deferred
+            // `point_cache_reset` flag left a window where a concurrent get
+            // served an answer invalidated by this very batch (range deletes
+            // change visibility of keys the batch never touched by name).
+            // `clear` is a gen-bump (O(1)); no key cloning either way.
+            self.point_cache.clear();
             self.point_cache_reset.store(true, Ordering::Relaxed);
             self.dirty_points.lock().clear();
             return;
@@ -4613,6 +4663,79 @@ impl<E: Env> Db<E> {
     /// sorted (level asc, index desc), so levels come out contiguous and
     /// newest-first inside each run — the linear fallback inside `lookup`
     /// iterates exactly the flat order.
+    /// RFC-0308 Pilar B: merge consecutive same-level, concat-disjoint,
+    /// tombstone-free runs. Newest-first ordering inside each run keeps the
+    /// level's lookup order; concatenating by_lo arrays of two disjoint
+    /// sorted runs preserves sortedness, and `disjoint_sorted_by_lo` is
+    /// re-derived as the oracle (merge refuses anything not provably
+    /// disjoint by bounds).
+    fn merge_concat_disjoint_runs(
+        mut runs: Vec<SstRun>,
+        ssts: &[SstTable],
+    ) -> Vec<SstRun> {
+        let mut i = 0;
+        while i + 1 < runs.len() {
+            let (left, right) = runs.split_at_mut(i + 1);
+            let a = &mut left[i];
+            let b = &mut right[0];
+            let mergeable = a.level == b.level
+                && a.disjoint_by_lo.is_some()
+                && b.disjoint_by_lo.is_some()
+                && !a.has_range_tombstones
+                && !b.has_range_tombstones
+                && a.disjoint_los_flat.is_some()
+                && b.disjoint_los_flat.is_some()
+                && {
+                    // last(a).hi < first(b).lo, both via full bounds.
+                    let a_hi = a
+                        .disjoint_by_lo
+                        .as_ref()
+                        .and_then(|by| by.last())
+                        .and_then(|&ti| ssts.get(ti))
+                        .and_then(|t| t.largest_user_key().map(|b| Bytes::copy_from_slice(b)));
+                    let b_lo = b
+                        .disjoint_by_lo
+                        .as_ref()
+                        .and_then(|by| by.first())
+                        .and_then(|&ti| ssts.get(ti))
+                        .and_then(|t| t.smallest_user_key().map(|b| Bytes::copy_from_slice(b)));
+                    match (a_hi, b_lo) {
+                        (Some(hi), Some(lo)) => hi.as_ref() < lo.as_ref(),
+                        _ => false,
+                    }
+                };
+            if !mergeable {
+                i += 1;
+                continue;
+            }
+            // Concat newest-first order + by_lo + flat arrays.
+            let mut merged_by_lo: Vec<usize> = a
+                .disjoint_by_lo
+                .clone()
+                .unwrap_or_default();
+            merged_by_lo.extend_from_slice(b.disjoint_by_lo.as_deref().unwrap_or(&[]));
+            let mut merged_los = a.disjoint_los_flat.clone().unwrap_or_default();
+            merged_los.extend_from_slice(&b.disjoint_los_flat.clone().unwrap_or_default());
+            let mut merged_his = a.disjoint_his_flat.clone().unwrap_or_default();
+            merged_his.extend_from_slice(&b.disjoint_his_flat.clone().unwrap_or_default());
+            let mut merged_tables = std::mem::take(&mut a.tables_newest_first);
+            merged_tables.append(&mut b.tables_newest_first);
+            let level = a.level;
+            runs.remove(i + 1);
+            let merged = SstRun {
+                level,
+                tables_newest_first: merged_tables,
+                disjoint_by_lo: Some(merged_by_lo),
+                disjoint_los_flat: Some(merged_los),
+                disjoint_his_flat: Some(merged_his),
+                has_range_tombstones: false,
+            };
+            runs[i] = merged;
+            // Stay at i: the merged run may chain with the next one too.
+        }
+        runs
+    }
+
     fn rebuild_sst_runs(&mut self) {
         let mut runs: Vec<SstRun> = Vec::new();
         for &sst_i in &self.sst_order_newest {
@@ -4624,6 +4747,7 @@ impl<E: Env> Db<E> {
                     tables_newest_first: vec![sst_i],
                     disjoint_by_lo: None,
                     disjoint_los_flat: None,
+                    disjoint_his_flat: None,
                     has_range_tombstones: false,
                 }),
             }
@@ -4635,11 +4759,23 @@ impl<E: Env> Db<E> {
                 .disjoint_by_lo
                 .as_ref()
                 .and_then(|by_lo| flat_los(&self.ssts, by_lo));
+            run.disjoint_his_flat = run
+                .disjoint_by_lo
+                .as_ref()
+                .and_then(|by_lo| flat_his(&self.ssts, by_lo));
             run.has_range_tombstones = run
                 .tables_newest_first
                 .iter()
                 .any(|&i| self.ssts[i].has_range_tombstones());
         }
+        // RFC-0308 Pilar B: collapse consecutive same-level runs whose key
+        // ranges are concat-disjoint with no range tombstones on either
+        // side — compactions leave such splits, and every extra run costs
+        // one more stream + walk per scan/get. A tombstone carrier never
+        // merges (its span can reach past the table bounds), and the
+        // pairwise-disjoint oracle below stays the fail-safe: a merged run
+        // re-derives by_lo/flat arrays from scratch.
+        runs = Self::merge_concat_disjoint_runs(runs, &self.ssts);
         self.sst_runs = runs;
         self.refresh_hot_filter_pins();
     }
@@ -4694,16 +4830,23 @@ impl<E: Env> Db<E> {
                 let new_hi = self.ssts[new_idx].largest_user_key();
                 if let (Some(l_hi), Some(n_lo), Some(_)) = (last_hi, new_lo, new_hi) {
                     if n_lo > l_hi {
-                        match Bound32::of(n_lo) {
-                            Some(slot) => {
+                        match (
+                            Bound32::of(n_lo),
+                            Bound32::of(self.ssts[new_idx].largest_user_key().unwrap_or(&[])),
+                        ) {
+                            (Some(lo_slot), Some(hi_slot)) => {
                                 by_lo.push(new_idx);
                                 if let Some(flat) = run.disjoint_los_flat.as_mut() {
-                                    flat.push(slot);
+                                    flat.push(lo_slot);
+                                }
+                                if let Some(flat) = run.disjoint_his_flat.as_mut() {
+                                    flat.push(hi_slot);
                                 }
                             }
-                            None => {
+                            _ => {
                                 by_lo.push(new_idx);
                                 run.disjoint_los_flat = None;
+                                run.disjoint_his_flat = None;
                             }
                         }
                     } else {
@@ -4713,16 +4856,25 @@ impl<E: Env> Db<E> {
                             .disjoint_by_lo
                             .as_ref()
                             .and_then(|by_lo| flat_los(&self.ssts, by_lo));
+                        run.disjoint_his_flat = run
+                            .disjoint_by_lo
+                            .as_ref()
+                            .and_then(|by_lo| flat_his(&self.ssts, by_lo));
                     }
                 } else {
                     run.disjoint_by_lo = None;
                     run.disjoint_los_flat = None;
+                    run.disjoint_his_flat = None;
                 }
             } else if run.tables_newest_first.len() == 1 {
                 run.disjoint_by_lo = Some(vec![new_idx]);
-                run.disjoint_los_flat = flat_los(&self.ssts, run.disjoint_by_lo.as_deref().unwrap_or(&[]));
+                run.disjoint_los_flat =
+                    flat_los(&self.ssts, run.disjoint_by_lo.as_deref().unwrap_or(&[]));
+                run.disjoint_his_flat =
+                    flat_his(&self.ssts, run.disjoint_by_lo.as_deref().unwrap_or(&[]));
             } else {
                 run.disjoint_los_flat = None;
+                run.disjoint_his_flat = None;
             }
         } else {
             self.rebuild_sst_runs();
@@ -5339,6 +5491,7 @@ impl<E: Env> Db<E> {
                 streams.push(Box::new(LevelRunStream::new(
                     self,
                     by_lo.as_slice(),
+                    run.disjoint_his_flat.as_deref(),
                     start,
                     end,
                     snapshot,
@@ -10178,10 +10331,19 @@ impl<E: Env> Db<E> {
 
         let fam = self.bulk_family_of_key(key);
         let check_run = |run: &crate::bulk_run::BulkRun| -> Option<Lookup> {
-            match run.lookup(key, snapshot) {
+            // RFC-0307 P0: the range-tombstone verdict uses the entry's OWN
+            // sequence. The previous `point_seq = 0` placeholder let ANY
+            // covering tombstone hide a value NEWER than it while the key
+            // lived in a latched/parked bulk run — a put that revived a
+            // range-deleted key read back as None until the run settled
+            // into an SST (where seqs compare correctly). Flaky in the
+            // differential oracle because the latch only engages on an
+            // ascending-batch streak.
+            let (seq, look) = run.lookup_with_seq(key, snapshot)?;
+            match look {
                 Lookup::NotFound => None,
                 Lookup::Found(v) => {
-                    if range_deleted(key, 0, &range_tombs) {
+                    if range_deleted(key, seq, &range_tombs) {
                         Some(Lookup::Deleted)
                     } else {
                         Some(Lookup::Found(v))
