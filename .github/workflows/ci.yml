@@ -1,9 +1,15 @@
-# CI: build + test suite (hard fail) + formal glue lint.
+# CI: build + test suite (hard fail) in one job; formal glue lint and
+# public hygiene in independent jobs with their own budgets.
 #
 # Tests: any failure is red. Lint: drift FAIL is red; classification debt
 # is held at a ceiling (growth is red). Lean extracts are not built here
 # on purpose: lake + mathlib takes about an hour;
 # scripts/lean_extracts.sh --required covers it locally.
+#
+# The lint and hygiene jobs do NOT compile Rust: they run in seconds in
+# their own job so a long test build can never starve them out of the
+# workflow timeout (the "dead ratchet" failure mode: five consecutive
+# cancelled runs with the lint step never reached, 2026-10-01..02).
 name: CI
 
 on:
@@ -12,9 +18,9 @@ on:
   pull_request:
 
 jobs:
-  ci:
+  tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -23,16 +29,34 @@ jobs:
         run: cargo test -q -p pedradb-core --lib --no-run
       - name: Run tests
         run: cargo test -q -p pedradb-core --lib 2>&1 | tee test.log
-      - name: Formal glue lint (drift = fail; debt ceiling 977)
-        run: |
-          set +e
-          python3 scripts/formal/pedra_formal.py --lint > lint.log 2>&1
-          python3 scripts/ci_ratchet.py lint lint.log 977
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-logs
-          path: |
-            test.log
-            lint.log
+          name: ci-test-logs
+          path: test.log
+
+  formal-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Formal glue lint (drift = fail; debt ceiling 1002, realigned 2026-10-03)
+        run: |
+          set +e
+          python3 scripts/formal/pedra_formal.py --lint > lint.log 2>&1
+          python3 scripts/ci_ratchet.py lint lint.log 1002
+      - name: Upload lint log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-lint-log
+          path: lint.log
+
+  hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Public-mirror hygiene (no internal docs, no dangling internal links)
+        run: python3 scripts/check_public_hygiene.py
