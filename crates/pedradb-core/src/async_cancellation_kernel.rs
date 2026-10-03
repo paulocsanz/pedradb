@@ -13,6 +13,35 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
+/// Errors occurring during async cancellation or slot management.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancellationError {
+    /// Invalid raw state byte encountered.
+    InvalidStateValue { raw: u8 },
+    /// Slot identifier cannot be zero.
+    ZeroSlotId,
+    /// Payload cannot be empty.
+    EmptyPayload,
+    /// No active slots could be committed in batch.
+    NoActiveSlotsCommitted,
+    /// No waiting follower candidate found for leader handover.
+    NoEligibleLeaderCandidate,
+}
+
+impl std::fmt::Display for CancellationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidStateValue { raw } => write!(f, "Invalid commit slot state value: {raw}"),
+            Self::ZeroSlotId => write!(f, "Slot ID cannot be zero"),
+            Self::EmptyPayload => write!(f, "Commit slot payload cannot be empty"),
+            Self::NoActiveSlotsCommitted => write!(f, "No active slots were available to commit in batch"),
+            Self::NoEligibleLeaderCandidate => write!(f, "No eligible waiting follower candidate for leader handover"),
+        }
+    }
+}
+
+impl std::error::Error for CancellationError {}
+
 /// Operational lifecycle state of a participant slot in a group commit batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -28,14 +57,19 @@ pub enum CommitSlotState {
 }
 
 impl CommitSlotState {
-    fn from_u8(val: u8) -> Self {
+    /// Safe parsing from raw byte.
+    pub fn try_from_u8(val: u8) -> Result<Self, CancellationError> {
         match val {
-            0 => Self::Waiting,
-            1 => Self::Cancelled,
-            2 => Self::Committed,
-            3 => Self::ElectedLeader,
-            _ => unreachable!(),
+            0 => Ok(Self::Waiting),
+            1 => Ok(Self::Cancelled),
+            2 => Ok(Self::Committed),
+            3 => Ok(Self::ElectedLeader),
+            _ => Err(CancellationError::InvalidStateValue { raw: val }),
         }
+    }
+
+    fn from_u8(val: u8) -> Self {
+        Self::try_from_u8(val).unwrap_or(Self::Cancelled)
     }
 }
 
@@ -50,6 +84,21 @@ pub struct CommitSlot {
 }
 
 impl CommitSlot {
+    /// Creates a new slot with fail-closed bounds checking.
+    pub fn try_new(slot_id: u64, payload: Vec<u8>) -> Result<Self, CancellationError> {
+        if slot_id == 0 {
+            return Err(CancellationError::ZeroSlotId);
+        }
+        if payload.is_empty() {
+            return Err(CancellationError::EmptyPayload);
+        }
+        Ok(Self {
+            slot_id,
+            payload,
+            state: Arc::new(AtomicU8::new(CommitSlotState::Waiting as u8)),
+        })
+    }
+
     /// Creates a new slot in `Waiting` state.
     pub fn new(slot_id: u64, payload: Vec<u8>) -> Self {
         Self {
@@ -107,6 +156,17 @@ impl CommitSlot {
 pub struct GroupCommitReconciler;
 
 impl GroupCommitReconciler {
+    /// Assembles batch payload for WAL sync with fail-closed validation.
+    pub fn try_assemble_active_batch<'a>(
+        slots: &'a [CommitSlot],
+    ) -> Result<(Vec<&'a [u8]>, Vec<u64>), CancellationError> {
+        let (payloads, ids) = Self::assemble_active_batch(slots);
+        if ids.is_empty() {
+            return Err(CancellationError::NoActiveSlotsCommitted);
+        }
+        Ok((payloads, ids))
+    }
+
     /// Assembles batch payload for WAL sync, filtering out cancelled slots.
     pub fn assemble_active_batch<'a>(
         slots: &'a [CommitSlot],
@@ -124,6 +184,13 @@ impl GroupCommitReconciler {
         (active_payloads, committed_ids)
     }
 
+    /// Finds the first waiting follower and transfers leadership with explicit error.
+    pub fn try_handover_leadership<'a>(
+        followers: &'a [CommitSlot],
+    ) -> Result<&'a CommitSlot, CancellationError> {
+        Self::handover_leadership(followers).ok_or(CancellationError::NoEligibleLeaderCandidate)
+    }
+
     /// When current leader aborts, finds the first waiting follower and transfers leadership.
     pub fn handover_leadership<'a>(
         followers: &'a [CommitSlot],
@@ -134,5 +201,31 @@ impl GroupCommitReconciler {
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_async_cancellation_fail_closed_red_to_green() {
+        assert_eq!(CommitSlotState::try_from_u8(99), Err(CancellationError::InvalidStateValue { raw: 99 }));
+        assert_eq!(CommitSlot::try_new(0, b"data".to_vec()).err(), Some(CancellationError::ZeroSlotId));
+        assert_eq!(CommitSlot::try_new(1, vec![]).err(), Some(CancellationError::EmptyPayload));
+
+        let slot1 = CommitSlot::try_new(1, b"d1".to_vec()).expect("valid");
+        assert!(slot1.try_cancel());
+        let slots = vec![slot1];
+        assert_eq!(
+            GroupCommitReconciler::try_assemble_active_batch(&slots),
+            Err(CancellationError::NoActiveSlotsCommitted)
+        );
+
+        let followers: Vec<CommitSlot> = vec![];
+        assert_eq!(
+            GroupCommitReconciler::try_handover_leadership(&followers).err(),
+            Some(CancellationError::NoEligibleLeaderCandidate)
+        );
     }
 }

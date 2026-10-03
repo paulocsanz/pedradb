@@ -31,7 +31,52 @@ pub enum DeltaDecodingViolation {
         /// Chave decodificada.
         decoded: Vec<u8>,
     },
+    /// O bloco contém um índice de restart point inválido que ultrapassa o total de entradas.
+    CorruptedRestartPointIndex {
+        restart_idx: usize,
+        entry_idx: usize,
+        total_entries: usize,
+    },
+    /// A sequência decodificada não obedece à ordem lexicográfica estritamente crescente.
+    UnsortedKeySequence {
+        prev_key: Vec<u8>,
+        curr_key: Vec<u8>,
+    },
+    /// O intervalo de restart points não pode ser zero.
+    ZeroRestartInterval,
+    /// O bloco não pode ser vazio.
+    EmptyBlock,
 }
+
+impl std::fmt::Display for DeltaDecodingViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SharedLengthExceedsPreviousKey { record_idx, shared_len, prev_len } => {
+                write!(f, "Shared length {shared_len} exceeds previous key len {prev_len} at record {record_idx}")
+            }
+            Self::RestartPointNonMonotonic { restart_idx, .. } => {
+                write!(f, "Non-monotonic restart point at index {restart_idx}")
+            }
+            Self::BijectiveInversionFailed { .. } => {
+                write!(f, "Bijective inversion failed")
+            }
+            Self::CorruptedRestartPointIndex { restart_idx, entry_idx, total_entries } => {
+                write!(f, "Corrupted restart point {restart_idx} index {entry_idx} >= total {total_entries}")
+            }
+            Self::UnsortedKeySequence { .. } => {
+                write!(f, "Unsorted key sequence")
+            }
+            Self::ZeroRestartInterval => {
+                write!(f, "Restart interval cannot be zero")
+            }
+            Self::EmptyBlock => {
+                write!(f, "Block cannot be empty")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DeltaDecodingViolation {}
 
 /// Registro codificado com compressão delta de prefixo.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +90,7 @@ pub struct DeltaEncodedEntry {
 }
 
 /// Bloco de dados SST com codificação delta e índice de restart points.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeltaBlock {
     /// Entradas codificadas sequencialmente.
     entries: Vec<DeltaEncodedEntry>,
@@ -54,6 +99,36 @@ pub struct DeltaBlock {
 }
 
 impl DeltaBlock {
+    /// Constrói um bloco a partir de suas partes estruturais para auditoria e desserialização.
+    pub fn from_raw_parts(entries: Vec<DeltaEncodedEntry>, restart_points: Vec<usize>) -> Self {
+        Self {
+            entries,
+            restart_points,
+        }
+    }
+
+    /// Constrói um bloco com delta encoding validando intervalo, não-vacuidade e ordenação estrita.
+    pub fn try_encode(
+        keys_and_values: &[(Vec<u8>, Vec<u8>)],
+        restart_interval: usize,
+    ) -> Result<Self, DeltaDecodingViolation> {
+        if restart_interval == 0 {
+            return Err(DeltaDecodingViolation::ZeroRestartInterval);
+        }
+        if keys_and_values.is_empty() {
+            return Err(DeltaDecodingViolation::EmptyBlock);
+        }
+        for i in 1..keys_and_values.len() {
+            if keys_and_values[i - 1].0 >= keys_and_values[i].0 {
+                return Err(DeltaDecodingViolation::UnsortedKeySequence {
+                    prev_key: keys_and_values[i - 1].0.clone(),
+                    curr_key: keys_and_values[i].0.clone(),
+                });
+            }
+        }
+        Ok(Self::encode(keys_and_values, restart_interval))
+    }
+
     /// Constrói um bloco com delta encoding e restart points a cada `restart_interval` chaves.
     pub fn encode(keys_and_values: &[(Vec<u8>, Vec<u8>)], restart_interval: usize) -> Self {
         let interval = restart_interval.max(1);
@@ -93,10 +168,11 @@ impl DeltaBlock {
         }
     }
 
-    /// Decodifica todas as chaves do bloco do início ao fim e valida a bijeção.
+    /// Decodifica todas as chaves do bloco do início ao fim e valida a bijeção e a ordenação estrita.
     pub fn decode_all(&self) -> Result<Vec<(Vec<u8>, Vec<u8>)>, DeltaDecodingViolation> {
         let mut result = Vec::with_capacity(self.entries.len());
         let mut current_key = Vec::new();
+        let mut prev_key: Option<Vec<u8>> = None;
 
         for (idx, entry) in self.entries.iter().enumerate() {
             if entry.shared_len > current_key.len() {
@@ -109,6 +185,16 @@ impl DeltaBlock {
 
             current_key.truncate(entry.shared_len);
             current_key.extend_from_slice(&entry.unshared_suffix);
+
+            if let Some(prev) = &prev_key {
+                if prev.as_slice() >= current_key.as_slice() {
+                    return Err(DeltaDecodingViolation::UnsortedKeySequence {
+                        prev_key: prev.clone(),
+                        curr_key: current_key.clone(),
+                    });
+                }
+            }
+            prev_key = Some(current_key.clone());
 
             result.push((current_key.clone(), entry.value.clone()));
         }
@@ -123,9 +209,24 @@ impl DeltaBlock {
             return Ok(None);
         }
 
-        // 1. Decodifica as chaves base dos restart points
+        if self.restart_points.is_empty() {
+            return Err(DeltaDecodingViolation::CorruptedRestartPointIndex {
+                restart_idx: 0,
+                entry_idx: 0,
+                total_entries: self.entries.len(),
+            });
+        }
+
+        // 1. Decodifica as chaves base dos restart points com checagem de limites
         let mut restart_keys = Vec::with_capacity(self.restart_points.len());
-        for &r_idx in &self.restart_points {
+        for (r_pos, &r_idx) in self.restart_points.iter().enumerate() {
+            if r_idx >= self.entries.len() {
+                return Err(DeltaDecodingViolation::CorruptedRestartPointIndex {
+                    restart_idx: r_pos,
+                    entry_idx: r_idx,
+                    total_entries: self.entries.len(),
+                });
+            }
             let entry = &self.entries[r_idx];
             if entry.shared_len != 0 {
                 return Err(DeltaDecodingViolation::SharedLengthExceedsPreviousKey {
@@ -193,5 +294,50 @@ impl DeltaBlock {
         }
 
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_delta_block_try_encode_bounds() {
+        let kvs = vec![
+            (b"apple".to_vec(), b"1".to_vec()),
+            (b"apply".to_vec(), b"2".to_vec()),
+        ];
+
+        assert_eq!(
+            DeltaBlock::try_encode(&kvs, 0),
+            Err(DeltaDecodingViolation::ZeroRestartInterval)
+        );
+
+        assert_eq!(
+            DeltaBlock::try_encode(&[], 2),
+            Err(DeltaDecodingViolation::EmptyBlock)
+        );
+
+        let unsorted = vec![
+            (b"beta".to_vec(), b"1".to_vec()),
+            (b"alpha".to_vec(), b"2".to_vec()),
+        ];
+        assert!(matches!(
+            DeltaBlock::try_encode(&unsorted, 2),
+            Err(DeltaDecodingViolation::UnsortedKeySequence { .. })
+        ));
+
+        let block = DeltaBlock::try_encode(&kvs, 2).expect("valid block");
+        let decoded = block.decode_all().expect("valid decode");
+        assert_eq!(decoded, kvs);
+    }
+
+    #[test]
+    fn test_delta_violation_display() {
+        let err = DeltaDecodingViolation::ZeroRestartInterval;
+        assert_eq!(format!("{err}"), "Restart interval cannot be zero");
+
+        let err2 = DeltaDecodingViolation::EmptyBlock;
+        assert_eq!(format!("{err2}"), "Block cannot be empty");
     }
 }

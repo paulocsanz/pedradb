@@ -160,6 +160,13 @@ impl<F: EnvFile> PwriteJob<F> {
 
 impl<F: EnvFile> Drop for PwriteJob<F> {
     fn drop(&mut self) {
+        if !self.done {
+            // Contract F182 (RFC-0330): never trust an offset without bytes.
+            // If the job is dropped before run() is called (task cancellation, pool drop, panic),
+            // write the pre-formatted, checksummed buffer to the reserved ticket offset so the
+            // log never contains an uninitialized gap that triggers recovery fail-stop.
+            let _ = self.file.write_wal_at_shared(&self.buf, self.ticket);
+        }
         self.drop_inflight();
     }
 }
@@ -369,10 +376,12 @@ impl<F: EnvFile> Wal<F> {
             // write under the lock at the ticket.
             self.reserve_space(frame.len() as u64);
             let ticket = self.writer.reserve_pending(frame.len() as u64);
+            let len = frame.len() as u64;
             if let Err(e) = self.writer.write_all_at(&frame, ticket) {
                 self.writer.restore_frame(frame);
                 return Err(e);
             }
+            self.writer.commit_pwrite(ticket, len);
             frame.clear();
             self.writer.restore_frame(frame);
             return Ok(None);
@@ -441,9 +450,10 @@ impl<F: EnvFile> Wal<F> {
     pub fn finish_pwrite(&mut self, ticket: u64, len: u64) {
         if !crate::write_admission_kernel::batch_is_empty(len) {
             self.writer.commit_pwrite(ticket, len);
-        } else {
-            self.writer.abort_pwrite();
         }
+        // len == 0 is the cancel/failed-run signal: a no-op. Resetting the
+        // reservation frontier here (the old `abort_pwrite`) overlapped
+        // in-flight tickets — the F-CAMP-4 torn-record class.
     }
 
     fn wait_inflight(&self) {
@@ -457,7 +467,7 @@ impl<F: EnvFile> Wal<F> {
     /// reservation) the segment appends plain and the frontier stays put —
     /// the next write just retries.
     fn reserve_space(&mut self, upcoming: u64) {
-        let pos = self.writer.position();
+        let pos = self.writer.reservation_frontier();
         // Bytes below `pos` are written (allocated); anchor the frontier
         // there so a recovered segment never over-reserves.
         self.prealloc_to = self.prealloc_to.max(pos);
@@ -511,7 +521,11 @@ impl<F: EnvFile> Wal<F> {
         self.wait_inflight();
         self.write_pending_frame()?;
         self.writer.flush()?;
-        self.writer.sync_data_sink(self.full_fsync)?;
+        crate::mutate_switch!(
+            crate::mutation_switch_kernel::MUTANT_BYPASS_WAL_SYNC,
+            self.writer.sync_data_sink(self.full_fsync)?,
+            ()
+        );
         Ok(())
     }
 
@@ -621,7 +635,10 @@ impl<F: EnvFile> Wal<F> {
     }
 
     /// Logical bytes written to the current segment (framed payload size;
-    /// preallocated space beyond EOF does not count).
+    /// preallocated space beyond EOF does not count). This is the contiguous
+    /// DRAINED watermark: it never moves at reserve time and never exceeds
+    /// what a reader can observe on the sink (F-CAMP-4 keeps every span
+    /// exclusive; the reservation frontier is private to the allocator).
     #[must_use]
     pub fn position(&self) -> u64 {
         self.writer.position()
@@ -1086,7 +1103,7 @@ mod probe_tests {
             "Shared WAL sink is mmap (write_wal_at_shared), not generic pwrite"
         );
         let run = wal
-            .split("pub(crate) fn run(self)")
+            .split("pub fn run(self)")
             .nth(1)
             .expect("PwriteJob::run")
             .split("impl Wal")

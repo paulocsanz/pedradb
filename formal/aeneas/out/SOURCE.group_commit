@@ -1,4 +1,4 @@
 path=crates/pedradb-core/src/group_commit_kernel.rs
-sha256=d07f80f3688781af37aeaa1b60712addc252a683f924cb2ad29872113f66cc05
+sha256=5561c595d4e592b3ca7b2945493655af89d9c484e5ba3e6ee961917ba06e4483
 aeneas=f5a4c58-dirty
 charon=0.1.232

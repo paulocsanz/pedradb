@@ -21,7 +21,49 @@ pub enum AsymmetricQuorumError {
     AsymmetricLinkDetected { from_node: u64, to_node: u64 },
     /// Split brain vulnerability detected (multiple disjoint majorities possible).
     SplitBrainRisk { cluster_size: usize, active_group: usize },
+    /// Cluster node set cannot be empty.
+    EmptyCluster,
+    /// Local node ID is not a member of the cluster.
+    LocalNodeNotInCluster { node_id: u64 },
+    /// Self-directed link is disallowed in directional matrix.
+    SelfLinkDisallowed { node_id: u64 },
+    /// Node is not part of the configured cluster topology.
+    UnknownClusterNode { node_id: u64 },
 }
+
+impl std::fmt::Display for AsymmetricQuorumError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MajorityNotReached { valid_votes, required } => write!(
+                f,
+                "Majority quorum not reached: valid votes {valid_votes} < required {required}"
+            ),
+            Self::AsymmetricLinkDetected { from_node, to_node } => write!(
+                f,
+                "Asymmetric directed link detected between {from_node} and {to_node}"
+            ),
+            Self::SplitBrainRisk { cluster_size, active_group } => write!(
+                f,
+                "Split brain risk: cluster size {cluster_size}, active group {active_group}"
+            ),
+            Self::EmptyCluster => write!(f, "Cluster node set cannot be empty"),
+            Self::LocalNodeNotInCluster { node_id } => write!(
+                f,
+                "Local node {node_id} is not a member of the configured cluster"
+            ),
+            Self::SelfLinkDisallowed { node_id } => write!(
+                f,
+                "Self-directed link observation disallowed for node {node_id}"
+            ),
+            Self::UnknownClusterNode { node_id } => write!(
+                f,
+                "Node {node_id} is not part of the configured cluster topology"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AsymmetricQuorumError {}
 
 /// Link health state between two nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +84,7 @@ impl DirectedLinkState {
 }
 
 /// Mesh topology coordinator for strict quorum evaluation.
+#[derive(Debug, PartialEq, Eq)]
 pub struct AsymmetricQuorumGuard {
     local_node_id: u64,
     cluster_nodes: BTreeSet<u64>,
@@ -49,13 +92,52 @@ pub struct AsymmetricQuorumGuard {
 }
 
 impl AsymmetricQuorumGuard {
+    /// Creates a quorum guard with strict bounds validation.
+    pub fn try_new(local_node_id: u64, nodes: impl IntoIterator<Item = u64>) -> Result<Self, AsymmetricQuorumError> {
+        let cluster_nodes: BTreeSet<u64> = nodes.into_iter().collect();
+        if cluster_nodes.is_empty() {
+            return Err(AsymmetricQuorumError::EmptyCluster);
+        }
+        if !cluster_nodes.contains(&local_node_id) {
+            return Err(AsymmetricQuorumError::LocalNodeNotInCluster { node_id: local_node_id });
+        }
+        Ok(Self {
+            local_node_id,
+            cluster_nodes,
+            link_matrix: BTreeMap::new(),
+        })
+    }
+
     /// Creates a quorum guard for a known cluster topology.
     pub fn new(local_node_id: u64, nodes: impl IntoIterator<Item = u64>) -> Self {
+        let mut cluster_nodes: BTreeSet<u64> = nodes.into_iter().collect();
+        cluster_nodes.insert(local_node_id);
         Self {
             local_node_id,
-            cluster_nodes: nodes.into_iter().collect(),
+            cluster_nodes,
             link_matrix: BTreeMap::new(),
         }
+    }
+
+    /// Records connectivity observation between two nodes with membership check.
+    pub fn try_record_directed_link(
+        &mut self,
+        from: u64,
+        to: u64,
+        can_send: bool,
+        rtt_ms: u32,
+    ) -> Result<(), AsymmetricQuorumError> {
+        if from == to {
+            return Err(AsymmetricQuorumError::SelfLinkDisallowed { node_id: from });
+        }
+        if !self.cluster_nodes.contains(&from) {
+            return Err(AsymmetricQuorumError::UnknownClusterNode { node_id: from });
+        }
+        if !self.cluster_nodes.contains(&to) {
+            return Err(AsymmetricQuorumError::UnknownClusterNode { node_id: to });
+        }
+        self.record_directed_link(from, to, can_send, rtt_ms);
+        Ok(())
     }
 
     /// Records connectivity observation between two nodes.
@@ -86,8 +168,8 @@ impl AsymmetricQuorumGuard {
 
         let mut validated_voters = BTreeSet::new();
 
-        // Local node always self-connected
-        if voters.contains(&self.local_node_id) {
+        // Local node always self-connected if it is a cluster member
+        if self.cluster_nodes.contains(&self.local_node_id) && voters.contains(&self.local_node_id) {
             validated_voters.insert(self.local_node_id);
         }
 
@@ -134,5 +216,32 @@ impl AsymmetricQuorumGuard {
     /// Cluster node count.
     pub fn cluster_size(&self) -> usize {
         self.cluster_nodes.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_asymmetric_quorum_fail_closed_red_to_green() {
+        assert_eq!(
+            AsymmetricQuorumGuard::try_new(1, vec![]),
+            Err(AsymmetricQuorumError::EmptyCluster)
+        );
+        assert_eq!(
+            AsymmetricQuorumGuard::try_new(99, vec![1, 2, 3]),
+            Err(AsymmetricQuorumError::LocalNodeNotInCluster { node_id: 99 })
+        );
+
+        let mut guard = AsymmetricQuorumGuard::try_new(1, vec![1, 2, 3]).expect("valid guard");
+        assert_eq!(
+            guard.try_record_directed_link(1, 1, true, 5),
+            Err(AsymmetricQuorumError::SelfLinkDisallowed { node_id: 1 })
+        );
+        assert_eq!(
+            guard.try_record_directed_link(1, 42, true, 5),
+            Err(AsymmetricQuorumError::UnknownClusterNode { node_id: 42 })
+        );
     }
 }

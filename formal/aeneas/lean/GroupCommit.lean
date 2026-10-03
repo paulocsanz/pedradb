@@ -1081,8 +1081,8 @@ theorem lock_alphabet_linearizes_n2_eq_steps :
         (do
           let b0 ← lock_alphabet_step false false a0
           if b0 then
-            lock_alphabet_step (a0 = LOCK_ACT_ACQUIRE_WRITE)
-              (a0 = LOCK_ACT_SUBMIT) a1
+            lock_alphabet_step (a0 == LOCK_ACT_ACQUIRE_WRITE)
+              (a0 == LOCK_ACT_SUBMIT) a1
           else ok false) := by
   intro a0 a1
   unfold lock_alphabet_linearizes_n2

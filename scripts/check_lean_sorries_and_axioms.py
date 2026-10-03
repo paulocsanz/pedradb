@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-RFC-0260 P0 / RFC-0299: Gate de Integridade Estrita de Lean 4 (Sorries & Axioms Ratchet).
+RFC-0260 P0 — Gate de Integridade Estrita de Lean 4 (Sorries & Axioms Ratchet).
 
 1. Varre recursivamente TODOS os arquivos em formal/aeneas/lean/*.lean.
-2. Falha imediatamente (código 1) se houver qualquer `sorry`, `admit` ou `give_up` ativo (fora de comentários).
+2. Falha imediatamente (código 1) se houver qualquer `sorry` ativo (fora de comentários).
 3. Cataloga todas as declarações de `axiom` e confere contra o teto máximo permitido
-   em scripts/ratchet/lean_axioms_ceiling.json (max_axioms: 0). Novos axiomas falham o gate.
+   em scripts/ratchet/lean_axioms_ceiling.json. Novos axiomas falham o gate.
 """
 
 import glob
@@ -22,7 +22,7 @@ def audit():
     lean_files = sorted(glob.glob(os.path.join(LEAN_DIR, "*.lean")))
 
     if not lean_files:
-        print(f"FAIL  Nenhum arquivo Lean encontrado em {LEAN_DIR}", file=sys.stderr)
+        print(f"FAIL  Nenhum arquivo Lean encontrado sob {LEAN_DIR}", file=sys.stderr)
         sys.exit(1)
 
     sorries = []
@@ -30,7 +30,7 @@ def audit():
     theorems = 0
 
     for fpath in lean_files:
-        fname = os.path.basename(fpath)
+        rel_name = os.path.relpath(fpath, ROOT)
         with open(fpath, "r", encoding="utf-8", errors="replace") as fp:
             lines = fp.readlines()
 
@@ -49,7 +49,7 @@ def audit():
 
             # Checar sorry, admit, give_up fora de comentários
             if re.search(r"\b(sorry|admit|give_up)\b", line):
-                sorries.append((fname, idx, stripped))
+                sorries.append((rel_name, idx, stripped))
 
             # Checar axiomas (suporta nome na mesma linha ou na linha seguinte)
             if re.match(r"^\s*axiom\b", line):
@@ -60,7 +60,7 @@ def audit():
                     next_line = lines[idx].strip() if idx < len(lines) else ""
                     m2 = re.match(r"^([^\s:]+)", next_line)
                     ax_name = m2.group(1) if m2 else "multiline_axiom"
-                axioms.append((fname, idx, ax_name))
+                axioms.append((rel_name, idx, ax_name))
 
             if stripped.startswith("theorem "):
                 theorems += 1

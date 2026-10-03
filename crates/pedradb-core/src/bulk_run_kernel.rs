@@ -133,6 +133,23 @@ impl BulkRun {
     }
 
     #[must_use]
+    pub(crate) fn has_write_after(&self, key: &[u8], snapshot: SequenceNumber) -> bool {
+        if self.is_sorted {
+            let Ok(i) = self.keys.binary_search_by(|k| k.as_ref().cmp(key)) else {
+                return false;
+            };
+            self.seqs[i] > snapshot
+        } else {
+            for (k, &seq) in self.keys.iter().zip(self.seqs.iter()) {
+                if k.as_ref() == key && seq > snapshot {
+                    return true;
+                }
+            }
+            false
+        }
+    }
+
+    #[must_use]
     pub(crate) fn keys(&self) -> &[Bytes] {
         &self.keys
     }

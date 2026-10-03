@@ -37,6 +37,22 @@ pub enum PrefixDeltaViolation {
     OrderInversionDetected,
     /// Block trailer does not contain valid restart array count.
     CorruptTrailer,
+    /// Restart interval must be at least 1.
+    InvalidRestartInterval,
+    /// Declared restart points count does not match the actual number of restart points.
+    RestartCountMismatch {
+        /// Expected restart count computed from entry positions.
+        expected: usize,
+        /// Found restart count declared in block trailer.
+        found: usize,
+    },
+    /// Restart point offsets are not strictly monotonically increasing.
+    NonMonotonicRestartOffsets {
+        /// Preceding offset.
+        prev: usize,
+        /// Current non-strictly-greater offset.
+        current: usize,
+    },
 }
 
 /// A key-value record stored inside an SST data block.
@@ -55,6 +71,7 @@ impl PrefixDeltaBlock {
     /// Encodes a list of strictly sorted KV entries into a delta-compressed block.
     #[must_use]
     pub fn encode_block(entries: &[BlockKvEntry], restart_interval: usize) -> Vec<u8> {
+        let restart_interval = restart_interval.max(1);
         let mut out = Vec::new();
         let mut restart_offsets = Vec::new();
         let mut prev_key: Vec<u8> = Vec::new();
@@ -106,6 +123,9 @@ impl PrefixDeltaBlock {
         block: &[u8],
         restart_interval: usize,
     ) -> Result<Vec<BlockKvEntry>, PrefixDeltaViolation> {
+        if restart_interval == 0 {
+            return Err(PrefixDeltaViolation::InvalidRestartInterval);
+        }
         if block.len() < 4 {
             return Err(PrefixDeltaViolation::CorruptTrailer);
         }
@@ -123,6 +143,7 @@ impl PrefixDeltaBlock {
 
         let restart_start = block.len() - 4 - restart_array_bytes;
         let mut restarts = Vec::with_capacity(num_restarts.min(block.len() / 4));
+        let mut prev_offset: Option<usize> = None;
         for i in 0..num_restarts {
             let offset_start = restart_start
                 .checked_add(i.checked_mul(4).ok_or(PrefixDeltaViolation::CorruptTrailer)?)
@@ -143,6 +164,15 @@ impl PrefixDeltaBlock {
                     block_len: block.len(),
                 });
             }
+            if let Some(prev) = prev_offset {
+                if offset <= prev {
+                    return Err(PrefixDeltaViolation::NonMonotonicRestartOffsets {
+                        prev,
+                        current: offset,
+                    });
+                }
+            }
+            prev_offset = Some(offset);
             restarts.push(offset);
         }
 
@@ -151,18 +181,20 @@ impl PrefixDeltaBlock {
         let mut cur = crate::codec::SafeCursor::new(&block[..restart_start]);
         let mut prev_key: Vec<u8> = Vec::new();
         let mut entry_idx = 0;
+        let mut validated_restarts = 0;
 
         while !cur.is_empty() {
             let pos = cur.position();
             let is_restart = entry_idx % restart_interval == 0;
             if is_restart {
                 let restart_idx = entry_idx / restart_interval;
-                if restart_idx < restarts.len() && restarts[restart_idx] != pos {
+                if restart_idx >= restarts.len() || restarts[restart_idx] != pos {
                     return Err(PrefixDeltaViolation::InvalidRestartOffset {
                         offset: pos,
                         block_len: block.len(),
                     });
                 }
+                validated_restarts += 1;
             }
 
             let shared_len = cur
@@ -208,6 +240,13 @@ impl PrefixDeltaBlock {
             prev_key = key.clone();
             entries.push(BlockKvEntry { key, val });
             entry_idx += 1;
+        }
+
+        if validated_restarts != restarts.len() {
+            return Err(PrefixDeltaViolation::RestartCountMismatch {
+                expected: validated_restarts,
+                found: restarts.len(),
+            });
         }
 
         Ok(entries)

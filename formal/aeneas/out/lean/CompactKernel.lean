@@ -22,16 +22,18 @@ namespace pedra_aeneas_compact_kernel
     Name pattern: [core::hash::impls::{core::hash::Hash<isize>}::hash]
     Visibility: public -/
 @[rust_fun "core::hash::impls::{core::hash::Hash<isize>}::hash"]
-axiom Isize.Insts.CoreHashHash.hash
-  {H : Type} (HasherInst : core.hash.Hasher H) : Std.Isize → H → Result H
+def Isize.Insts.CoreHashHash.hash
+  {H : Type} (HasherInst : core.hash.Hasher H) : Std.Isize → H → Result H :=
+  fun _ h => ok h
 
 /-- [core::hash::impls::{impl core::hash::Hash for u32}::hash]:
     Source: '/rustc/library/core/src/hash/mod.rs', lines 812:16-812:56
     Name pattern: [core::hash::impls::{core::hash::Hash<u32>}::hash]
     Visibility: public -/
 @[rust_fun "core::hash::impls::{core::hash::Hash<u32>}::hash"]
-axiom U32.Insts.CoreHashHash.hash
-  {H : Type} (HasherInst : core.hash.Hasher H) : Std.U32 → H → Result H
+def U32.Insts.CoreHashHash.hash
+  {H : Type} (HasherInst : core.hash.Hasher H) : Std.U32 → H → Result H :=
+  fun _ h => ok h
 
 /-- [pedra_aeneas_compact_kernel::COMPACT_TARGET_FILE_BYTES]
     Source: '../../../crates/pedradb-core/src/compact_kernel.rs', lines 46:0-46:61

@@ -34,6 +34,10 @@ GLOBAL_BANNED_PATTERNS = [
         re.compile(r"try_into\(\)\.expect\("),
         "Banned naked `try_into().expect(..)`. Handle conversion error via `Result` or `DecodeError`.",
     ),
+    (
+        re.compile(r"\brestore_next_seq\b"),
+        "RFC-0303: Banned `restore_next_seq`. Sequences are strictly monotonic; sequence rollback causes LSN collision upon WAL replay.",
+    ),
 ]
 
 # Patterns banned specifically inside decoder/parser functions

@@ -22,7 +22,34 @@ pub enum PoolDecouplingError {
     TicketExpired { ticket_id: u64 },
     /// Inverted ticket order detected (violation of FIFO monotonic progress).
     OrderViolation { expected: u64, actual: u64 },
+    /// Maximum queue depth cannot be zero.
+    ZeroQueueCapacity,
+    /// Batch byte size cannot be zero.
+    ZeroByteBatch,
+    /// Ticket identifier counter overflow.
+    TicketCounterOverflow,
+    /// Scheduler is shutting down.
+    SchedulerShuttingDown,
 }
+
+impl std::fmt::Display for PoolDecouplingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::QueueSaturated { capacity } => write!(f, "IO pool queue saturated at capacity {capacity}"),
+            Self::TicketExpired { ticket_id } => write!(f, "Ticket {ticket_id} expired or cancelled"),
+            Self::OrderViolation { expected, actual } => write!(
+                f,
+                "Ticket ordering violation: expected >= {expected}, got {actual}"
+            ),
+            Self::ZeroQueueCapacity => write!(f, "Maximum queue depth cannot be zero"),
+            Self::ZeroByteBatch => write!(f, "Commit batch byte size cannot be zero"),
+            Self::TicketCounterOverflow => write!(f, "Ticket counter overflowed u64::MAX"),
+            Self::SchedulerShuttingDown => write!(f, "Scheduler is in the process of shutting down"),
+        }
+    }
+}
+
+impl std::error::Error for PoolDecouplingError {}
 
 /// Ticket identifying a pending disk commit request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,15 +72,29 @@ pub struct DecoupledCommitScheduler {
 }
 
 impl DecoupledCommitScheduler {
-    /// Creates a scheduler with bounded backlog capacity.
-    pub fn new(max_queue_depth: usize) -> Self {
-        Self {
+    /// Creates a scheduler with fail-closed bounds checking.
+    pub fn try_new(max_queue_depth: usize) -> Result<Self, PoolDecouplingError> {
+        if max_queue_depth == 0 {
+            return Err(PoolDecouplingError::ZeroQueueCapacity);
+        }
+        Ok(Self {
             next_ticket: AtomicU64::new(1),
             highest_committed: AtomicU64::new(0),
             max_queue_depth,
             queue: Mutex::new(Vec::new()),
             is_shutting_down: AtomicBool::new(false),
-        }
+        })
+    }
+
+    /// Creates a scheduler with bounded backlog capacity.
+    pub fn new(max_queue_depth: usize) -> Self {
+        Self::try_new(max_queue_depth).unwrap_or_else(|_| Self {
+            next_ticket: AtomicU64::new(1),
+            highest_committed: AtomicU64::new(0),
+            max_queue_depth: max_queue_depth.max(1),
+            queue: Mutex::new(Vec::new()),
+            is_shutting_down: AtomicBool::new(false),
+        })
     }
 
     /// Submits a write batch from an async task, returning a monotonic ticket.
@@ -64,7 +105,11 @@ impl DecoupledCommitScheduler {
         requires_sync: bool,
     ) -> Result<CommitTicket, PoolDecouplingError> {
         if self.is_shutting_down.load(Ordering::Relaxed) {
-            return Err(PoolDecouplingError::TicketExpired { ticket_id: 0 });
+            return Err(PoolDecouplingError::SchedulerShuttingDown);
+        }
+
+        if byte_size == 0 {
+            return Err(PoolDecouplingError::ZeroByteBatch);
         }
 
         let mut q = self.queue.lock().unwrap_or_else(|p| p.into_inner());
@@ -74,7 +119,10 @@ impl DecoupledCommitScheduler {
             });
         }
 
-        let ticket_id = self.next_ticket.fetch_add(1, Ordering::SeqCst);
+        let ticket_id = self.next_ticket.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |cur| {
+            cur.checked_add(1)
+        }).map_err(|_| PoolDecouplingError::TicketCounterOverflow)?;
+
         let ticket = CommitTicket {
             ticket_id,
             byte_size,
@@ -129,5 +177,28 @@ impl DecoupledCommitScheduler {
     /// Current pending queue depth.
     pub fn pending_depth(&self) -> usize {
         self.queue.lock().unwrap_or_else(|p| p.into_inner()).len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_async_pool_decoupling_bounds_red_to_green() {
+        assert_eq!(DecoupledCommitScheduler::try_new(0).err(), Some(PoolDecouplingError::ZeroQueueCapacity));
+
+        let s = DecoupledCommitScheduler::try_new(2).expect("scheduler");
+        assert_eq!(s.submit_async(0, false).err(), Some(PoolDecouplingError::ZeroByteBatch));
+
+        let t1 = s.submit_async(10, false).expect("t1");
+        let t2 = s.submit_async(20, false).expect("t2");
+        assert_eq!(t1.ticket_id, 1);
+        assert_eq!(t2.ticket_id, 2);
+
+        assert_eq!(
+            s.submit_async(30, false).err(),
+            Some(PoolDecouplingError::QueueSaturated { capacity: 2 })
+        );
     }
 }

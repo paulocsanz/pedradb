@@ -32,6 +32,7 @@
 
 mod failing;
 mod failing_arc;
+pub mod mutation_switch;
 mod recording;
 
 #[cfg(test)]
@@ -39,9 +40,11 @@ mod three_teeth_plants;
 
 pub use failing::{FailingEnv, FaultKind, OpClass};
 pub use failing_arc::FailingEnvArc;
+pub use mutation_switch::{is_mutant_active, reset_mutant, set_active_mutant, MutantGuard};
 /// EXPLODE recover injection (byte-level `choose` on the WAL image).
 pub use pedradb_core::wal::recover_choose::RecoverChoice;
 pub use recording::{RecordingEnv, SyncPolicy};
+
 
 // DST / non-determinism primitives (implemented in core; sim is the usual import path).
 pub use pedradb_core::{

@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use pedradb_core::block_cache_disambiguation_kernel::{
-    CacheCollisionOracle, DisambiguatedCacheKey,
+    CacheCollisionOracle, CacheDisambiguationError, DisambiguatedCacheKey,
 };
 use pedradb_core::file_identity_superblock_kernel::{
     FileSuperblock, SuperblockError, SUPERBLOCK_SIZE,
@@ -22,7 +22,8 @@ use pedradb_core::memtable_flush_bisimulation_kernel::{
     ConcreteMemTable, FlushBisimulationViolation, MemTableEntry,
 };
 use pedradb_core::mmap_quiescence_barrier_kernel::{
-    MmapQuiescenceCoordinator, MmapRegionControl, RegionState,
+    MmapQuiescenceCoordinator, MmapQuiescenceViolation, MmapRegionControl, RegionState,
+    MAX_ACTIVE_READERS,
 };
 
 #[test]
@@ -160,6 +161,47 @@ fn test_pilar3_superblock_identity_and_anti_inode_reuse() {
 }
 
 #[test]
+fn test_superblock_zero_guards_and_reserved_bytes_red() {
+    let uuid_a = [0x42u8; 16];
+    let file_num = 105;
+    let epoch = 2026_09_25;
+
+    // 1. try_new rejects zero file number
+    let err_num = FileSuperblock::try_new(uuid_a, 0, epoch);
+    assert_eq!(err_num, Err(SuperblockError::ZeroFileNumber));
+
+    // 2. try_new rejects nil UUID
+    let err_uuid = FileSuperblock::try_new([0u8; 16], file_num, epoch);
+    assert_eq!(err_uuid, Err(SuperblockError::NilUuid));
+
+    // 3. try_new rejects zero epoch
+    let err_epoch = FileSuperblock::try_new(uuid_a, file_num, 0);
+    assert_eq!(err_epoch, Err(SuperblockError::ZeroEpoch));
+
+    // 4. decode rejects non-zero reserved bytes
+    let valid_sb = FileSuperblock::new(uuid_a, file_num, epoch);
+    let mut raw = valid_sb.encode();
+    // Tamper with reserved bytes (40..60), then recompute CRC so CRC passes but reserved check fails
+    raw[45] = 0xAA;
+    let new_crc = FileSuperblock::compute_crc(&raw[0..60]);
+    raw[60..64].copy_from_slice(&new_crc.to_be_bytes());
+    let err_res = FileSuperblock::decode(&raw);
+    assert_eq!(err_res, Err(SuperblockError::ReservedBytesNonZero));
+
+    // 5. decode rejects zero file number even with valid CRC
+    let mut raw_zero_num = [0u8; 64];
+    raw_zero_num[0..8].copy_from_slice(&pedradb_core::file_identity_superblock_kernel::SST_SUPERBLOCK_MAGIC);
+    raw_zero_num[8..24].copy_from_slice(&uuid_a);
+    // file_number at 24..32 remains 0
+    raw_zero_num[32..40].copy_from_slice(&epoch.to_be_bytes());
+    let crc = FileSuperblock::compute_crc(&raw_zero_num[0..60]);
+    raw_zero_num[60..64].copy_from_slice(&crc.to_be_bytes());
+    let err_dec_zero = FileSuperblock::decode(&raw_zero_num);
+    assert_eq!(err_dec_zero, Err(SuperblockError::ZeroFileNumber));
+}
+
+
+#[test]
 fn test_pilar4_mmap_quiescence_barrier_anti_sigbus() {
     let control = Arc::new(MmapRegionControl::new(55));
     assert_eq!(control.state(), RegionState::Active);
@@ -192,6 +234,18 @@ fn test_pilar4_mmap_quiescence_barrier_anti_sigbus() {
 
     // 6. Safe to physically unmap without SIGBUS hazard
     assert!(MmapQuiescenceCoordinator::verify_unmap_safety(&control).is_ok());
+
+    // 7. Physical unmap executed: mark region as Unmapped
+    assert!(MmapQuiescenceCoordinator::mark_unmapped(&control).is_ok());
+    assert_eq!(control.state(), RegionState::Unmapped);
+
+    // 8. Invariant: Double unmap must be rejected
+    assert!(MmapQuiescenceCoordinator::mark_unmapped(&control).is_err());
+    assert!(MmapQuiescenceCoordinator::verify_unmap_safety(&control).is_err());
+
+    // 9. Invariant: Reader acquiring lease on unmapped region must be rejected without mutating active_readers
+    assert!(MmapQuiescenceCoordinator::acquire_lease(&control).is_none());
+    assert_eq!(control.reader_count(), 0);
 }
 
 #[test]
@@ -219,3 +273,128 @@ fn test_pilar5_block_cache_key_disambiguation_collision_free() {
     let key3 = DisambiguatedCacheKey::new(uuid_incarnation_1, offset, 2);
     assert_ne!(key1, key3);
 }
+
+#[test]
+fn test_mmap_quiescence_hardening_red() {
+    use std::error::Error;
+
+    // 1. try_new rejects zero file number
+    assert_eq!(
+        MmapRegionControl::try_new(0).err(),
+        Some(MmapQuiescenceViolation::InvalidFileNumber)
+    );
+
+    let control = Arc::new(MmapRegionControl::try_new(42).expect("valid file number"));
+    assert_eq!(control.file_number, 42);
+
+    // 2. verify_unmap_safety rejects unmap before protocol is initiated
+    assert_eq!(
+        MmapQuiescenceCoordinator::verify_unmap_safety(&control).err(),
+        Some(MmapQuiescenceViolation::ProtocolNotInitiated)
+    );
+
+    // 3. Acquire lease via try_acquire_lease
+    let lease = MmapQuiescenceCoordinator::try_acquire_lease(&control).expect("acquire lease");
+    assert_eq!(control.reader_count(), 1);
+
+    // 4. Compaction requests unmap
+    let state = MmapQuiescenceCoordinator::request_unmap(&control);
+    assert_eq!(state, RegionState::PendingUnmap);
+
+    // 5. Unmap safety rejects while readers active (SIGBUS hazard)
+    assert_eq!(
+        MmapQuiescenceCoordinator::verify_unmap_safety(&control).err(),
+        Some(MmapQuiescenceViolation::ActiveReadersSigbusHazard { active_readers: 1 })
+    );
+
+    // 6. try_acquire_lease fails closed when pending unmap
+    assert_eq!(
+        MmapQuiescenceCoordinator::try_acquire_lease(&control).err(),
+        Some(MmapQuiescenceViolation::RegionPendingUnmap)
+    );
+
+    // 7. Drain reader
+    drop(lease);
+    assert_eq!(control.reader_count(), 0);
+    assert_eq!(control.state(), RegionState::QuiescedSafeToUnmap);
+
+    // 8. Safe to unmap and mark unmapped
+    assert!(MmapQuiescenceCoordinator::verify_unmap_safety(&control).is_ok());
+    assert!(MmapQuiescenceCoordinator::mark_unmapped(&control).is_ok());
+    assert_eq!(control.state(), RegionState::Unmapped);
+
+    // 9. Double unmap hazard
+    assert_eq!(
+        MmapQuiescenceCoordinator::mark_unmapped(&control).err(),
+        Some(MmapQuiescenceViolation::DoubleUnmapHazard)
+    );
+    assert_eq!(
+        MmapQuiescenceCoordinator::verify_unmap_safety(&control).err(),
+        Some(MmapQuiescenceViolation::DoubleUnmapHazard)
+    );
+
+    // 10. try_acquire_lease fails closed when unmapped
+    assert_eq!(
+        MmapQuiescenceCoordinator::try_acquire_lease(&control).err(),
+        Some(MmapQuiescenceViolation::RegionUnmapped)
+    );
+
+    // 11. Error trait and Display implementation
+    let err = MmapQuiescenceViolation::ReaderLimitExceeded {
+        current: MAX_ACTIVE_READERS,
+        max: MAX_ACTIVE_READERS,
+    };
+    let display_str = format!("{err}");
+    assert!(display_str.contains("overflow hazard"));
+    assert!(err.source().is_none());
+}
+
+#[test]
+fn test_disambiguated_cache_key_hardening_red() {
+    use std::error::Error;
+
+    // 1. try_new rejects nil UUID
+    assert_eq!(
+        DisambiguatedCacheKey::try_new([0u8; 16], 4096, 1).err(),
+        Some(CacheDisambiguationError::NilTableUuid)
+    );
+
+    // 2. try_new rejects zero generation epoch
+    assert_eq!(
+        DisambiguatedCacheKey::try_new([0xAA; 16], 4096, 0).err(),
+        Some(CacheDisambiguationError::ZeroGenerationEpoch)
+    );
+
+    // 3. Valid try_new succeeds
+    let key = DisambiguatedCacheKey::try_new([0xAA; 16], 4096, 42).expect("valid key");
+    assert_eq!(key.block_offset, 4096);
+    assert_eq!(key.generation_epoch, 42);
+
+    // 4. try_from_slice rejects invalid length
+    assert_eq!(
+        DisambiguatedCacheKey::try_from_slice(&[0u8; 16]).err(),
+        Some(CacheDisambiguationError::InvalidByteLength {
+            actual: 16,
+            expected: 32
+        })
+    );
+
+    // 5. try_from_slice roundtrips valid bytes
+    let raw = key.to_bytes();
+    let decoded = DisambiguatedCacheKey::try_from_slice(&raw).expect("valid slice");
+    assert_eq!(decoded, key);
+
+    // 6. verify_disjoint_incarnations rejects cross-incarnation byte collisions
+    let mut colliding_key2 = key;
+    colliding_key2.generation_epoch = 43; // different incarnation
+    // if somehow an oracle checks identical bytes or collision:
+    assert!(CacheCollisionOracle::verify_disjoint_incarnations(&key, &colliding_key2).is_ok());
+
+    // 7. Error trait and Display implementation
+    let err = CacheDisambiguationError::NilTableUuid;
+    let display_str = format!("{err}");
+    assert!(display_str.contains("Nil table UUID"));
+    assert!(err.source().is_none());
+}
+
+

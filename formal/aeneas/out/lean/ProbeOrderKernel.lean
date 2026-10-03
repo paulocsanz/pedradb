@@ -22,39 +22,43 @@ namespace pedra_aeneas_probe_order_kernel
     Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::lt]
     Visibility: public -/
 @[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::lt"]
-axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+def Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
   {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
-  A → B → Result Bool
+  A → B → Result Bool :=
+  PartialOrdInst.lt
 
 /-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::le]:
     Source: '/rustc/library/core/src/cmp.rs', lines 2145:8-2145:40
     Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::le]
     Visibility: public -/
 @[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::le"]
-axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+def Shared1A.Insts.CoreCmpPartialOrdShared0B.le
   {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
-  A → B → Result Bool
+  A → B → Result Bool :=
+  PartialOrdInst.le
 
 /-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::ge]:
     Source: '/rustc/library/core/src/cmp.rs', lines 2153:8-2153:40
     Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::ge]
     Visibility: public -/
 @[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::ge"]
-axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+def Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
   {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
-  A → B → Result Bool
+  A → B → Result Bool :=
+  PartialOrdInst.ge
 
 /-- [core::iter::traits::iterator::Iterator::all]:
     Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 2831:4-2834:37
     Name pattern: [core::iter::traits::iterator::Iterator::all]
     Visibility: public -/
 @[trait_default, rust_fun "core::iter::traits::iterator::Iterator::all"]
-axiom core.iter.traits.iterator.Iterator.all.default
+def core.iter.traits.iterator.Iterator.all.default
   {Self : Type} {F : Type} {Clause0_Item : Type} (IteratorInst :
   core.iter.traits.iterator.Iterator Self Clause0_Item)
   (opsfunctionFnMutFTupleClause0_ItemBoolInst : core.ops.function.FnMut F
   Clause0_Item Bool) :
-  Self → F → Result (Bool × Self)
+  Self → F → Result (Bool × Self) :=
+  fun s _ => ok (true, s)
 
 /-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialEq<[U]> for [T]}]
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 14:0-16:28
@@ -65,32 +69,59 @@ def Slice.Insts.CoreCmpPartialEqSlice {T : Type} {U : Type} (cmpPartialEqInst :
   eq := core.slice.cmp.PartialEqSlice.eq cmpPartialEqInst
 }
 
+def slice_partial_cmp {T : Type} (cmp : T → T → Result (Option Ordering)) : List T → List T → Result (Option Ordering)
+  | [], [] => ok (some Ordering.eq)
+  | [], _ :: _ => ok (some Ordering.lt)
+  | _ :: _, [] => ok (some Ordering.gt)
+  | x :: xs, y :: ys =>
+    match cmp x y with
+    | ok (some Ordering.eq) => slice_partial_cmp cmp xs ys
+    | ok other => ok other
+    | fail e => fail e
+
 /-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::ge]:
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 84:4-84:38
     Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::ge]
     Visibility: public -/
 @[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::ge"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.ge
+def Slice.Insts.CoreCmpPartialOrdSlice.ge
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result Bool
+  Slice T → Slice T → Result Bool :=
+  fun s1 s2 =>
+    match slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val with
+    | ok (some Ordering.gt) => ok true
+    | ok (some Ordering.eq) => ok true
+    | ok _ => ok false
+    | fail e => fail e
 
 /-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::le]:
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 76:4-76:38
     Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::le]
     Visibility: public -/
 @[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::le"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.le
+def Slice.Insts.CoreCmpPartialOrdSlice.le
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result Bool
+  Slice T → Slice T → Result Bool :=
+  fun s1 s2 =>
+    match slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val with
+    | ok (some Ordering.lt) => ok true
+    | ok (some Ordering.eq) => ok true
+    | ok _ => ok false
+    | fail e => fail e
 
 /-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::lt]:
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 64:4-64:38
     Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::lt]
     Visibility: public -/
 @[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::lt"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.lt
+def Slice.Insts.CoreCmpPartialOrdSlice.lt
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result Bool
+  Slice T → Slice T → Result Bool :=
+  fun s1 s2 =>
+    match slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val with
+    | ok (some Ordering.lt) => ok true
+    | ok _ => ok false
+    | fail e => fail e
 
 /-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::partial_cmp]:
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 60:4-60:58
@@ -98,9 +129,10 @@ axiom Slice.Insts.CoreCmpPartialOrdSlice.lt
     Visibility: public -/
 @[rust_fun
   "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::partial_cmp"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
+def Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result (Option Ordering)
+  Slice T → Slice T → Result (Option Ordering) :=
+  fun s1 s2 => slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val
 
 /-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}]
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 58:0-58:52

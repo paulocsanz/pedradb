@@ -31,7 +31,39 @@ pub enum SnapshotLeaseViolation {
         /// ID requested.
         snapshot_id: u64,
     },
+    /// Snapshot ID already exists and cannot be re-allocated.
+    DuplicateSnapshotId(u64),
+    /// Snapshot ID cannot be zero.
+    ZeroSnapshotId,
+    /// Lease duration in epochs cannot be zero.
+    ZeroLeaseEpochs,
+    /// Engine epoch counter overflowed u64::MAX.
+    EpochCounterOverflow,
 }
+
+impl std::fmt::Display for SnapshotLeaseViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SnapshotLeaseExpired {
+                snapshot_id,
+                current_epoch,
+                expired_at_epoch,
+            } => write!(
+                f,
+                "Snapshot {snapshot_id} expired at epoch {expired_at_epoch} (current {current_epoch})"
+            ),
+            Self::UnknownSnapshotId { snapshot_id } => {
+                write!(f, "Snapshot ID {snapshot_id} not found in lease manager")
+            }
+            Self::DuplicateSnapshotId(id) => write!(f, "Snapshot ID {id} is already actively leased"),
+            Self::ZeroSnapshotId => write!(f, "Snapshot ID cannot be zero"),
+            Self::ZeroLeaseEpochs => write!(f, "Snapshot lease duration in epochs cannot be zero"),
+            Self::EpochCounterOverflow => write!(f, "Snapshot lease epoch counter overflowed u64::MAX"),
+        }
+    }
+}
+
+impl std::error::Error for SnapshotLeaseViolation {}
 
 /// Metadata governing an active snapshot lease.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,13 +111,50 @@ impl SnapshotLeaseManager {
         }
     }
 
-    /// Advances the engine epoch (triggered by compactions, flushes, or wall clock).
+    /// Safely advances the engine epoch, failing closed on overflow.
+    pub fn try_advance_epoch(&mut self) -> Result<u64, SnapshotLeaseViolation> {
+        let next = self
+            .current_epoch
+            .checked_add(1)
+            .ok_or(SnapshotLeaseViolation::EpochCounterOverflow)?;
+        self.current_epoch = next;
+        Ok(next)
+    }
+
+    /// Advances the engine epoch (saturating at `u64::MAX` rather than overflowing).
     pub fn advance_epoch(&mut self) -> u64 {
-        self.current_epoch += 1;
+        self.current_epoch = self.current_epoch.saturating_add(1);
         self.current_epoch
     }
 
-    /// Allocates a new snapshot lease.
+    /// Safely allocates a new snapshot lease, preventing duplicate IDs or zero duration.
+    pub fn try_acquire_snapshot(
+        &mut self,
+        snapshot_id: u64,
+        seq: u64,
+        lease_epochs: u64,
+    ) -> Result<SnapshotLease, SnapshotLeaseViolation> {
+        if snapshot_id == 0 {
+            return Err(SnapshotLeaseViolation::ZeroSnapshotId);
+        }
+        if lease_epochs == 0 {
+            return Err(SnapshotLeaseViolation::ZeroLeaseEpochs);
+        }
+        if self.active_leases.contains_key(&snapshot_id) {
+            return Err(SnapshotLeaseViolation::DuplicateSnapshotId(snapshot_id));
+        }
+
+        let lease = SnapshotLease {
+            snapshot_id,
+            seq,
+            created_epoch: self.current_epoch,
+            lease_epochs,
+        };
+        self.active_leases.insert(snapshot_id, lease);
+        Ok(lease)
+    }
+
+    /// Allocates a new snapshot lease, overwriting if existing (deprecated, use `try_acquire_snapshot`).
     pub fn acquire_snapshot(
         &mut self,
         snapshot_id: u64,
@@ -105,6 +174,15 @@ impl SnapshotLeaseManager {
     /// Releases a snapshot when explicitly closed by the client.
     pub fn release_snapshot(&mut self, snapshot_id: u64) {
         self.active_leases.remove(&snapshot_id);
+    }
+
+    /// Prunes expired snapshot leases to prevent memory bloat.
+    /// Returns the number of pruned leases.
+    pub fn prune_expired_leases(&mut self) -> usize {
+        let initial_count = self.active_leases.len();
+        self.active_leases
+            .retain(|_, lease| lease.is_valid_at(self.current_epoch));
+        initial_count.saturating_sub(self.active_leases.len())
     }
 
     /// Authorizes a read on a snapshot, verifying lease validity.
@@ -139,3 +217,52 @@ impl SnapshotLeaseManager {
             .min()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_zero_snapshot_id_rejected() {
+        let mut manager = SnapshotLeaseManager::new(10);
+        let err = manager.try_acquire_snapshot(0, 100, 5).unwrap_err();
+        assert_eq!(err, SnapshotLeaseViolation::ZeroSnapshotId);
+    }
+
+    #[test]
+    fn test_zero_lease_epochs_rejected() {
+        let mut manager = SnapshotLeaseManager::new(10);
+        let err = manager.try_acquire_snapshot(1, 100, 0).unwrap_err();
+        assert_eq!(err, SnapshotLeaseViolation::ZeroLeaseEpochs);
+    }
+
+    #[test]
+    fn test_duplicate_snapshot_id_rejected() {
+        let mut manager = SnapshotLeaseManager::new(10);
+        assert!(manager.try_acquire_snapshot(42, 100, 5).is_ok());
+        let err = manager.try_acquire_snapshot(42, 200, 10).unwrap_err();
+        assert_eq!(err, SnapshotLeaseViolation::DuplicateSnapshotId(42));
+    }
+
+    #[test]
+    fn test_epoch_counter_overflow_rejected() {
+        let mut manager = SnapshotLeaseManager::new(u64::MAX);
+        let err = manager.try_advance_epoch().unwrap_err();
+        assert_eq!(err, SnapshotLeaseViolation::EpochCounterOverflow);
+        assert_eq!(manager.advance_epoch(), u64::MAX);
+    }
+
+    #[test]
+    fn test_prune_expired_leases() {
+        let mut manager = SnapshotLeaseManager::new(10);
+        manager.try_acquire_snapshot(1, 100, 2).unwrap(); // expires at 12
+        manager.try_acquire_snapshot(2, 200, 10).unwrap(); // expires at 20
+
+        manager.current_epoch = 15;
+        let pruned = manager.prune_expired_leases();
+        assert_eq!(pruned, 1);
+        assert!(!manager.active_leases.contains_key(&1));
+        assert!(manager.active_leases.contains_key(&2));
+    }
+}
+

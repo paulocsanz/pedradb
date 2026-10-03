@@ -65,6 +65,25 @@ pub enum MonotonicityViolation {
         /// Ending level.
         to_level: usize,
     },
+    /// Horizontal advance landed on a node missing a key (None key).
+    MissingNodeKey {
+        /// Level where missing key was observed.
+        level: usize,
+    },
+    /// Search path is empty when a complete search was expected.
+    EmptySearchPath,
+    /// Search path did not reach base level 0.
+    IncompleteDescent {
+        /// Final level where search stopped.
+        final_level: usize,
+    },
+    /// Search step level exceeds maximum supported tower height.
+    LevelExceedsMaxHeight {
+        /// Observed level.
+        level: usize,
+        /// Maximum supported height.
+        max_height: usize,
+    },
 }
 
 impl fmt::Display for MonotonicityViolation {
@@ -82,11 +101,32 @@ impl fmt::Display for MonotonicityViolation {
             Self::IllegalLevelJump { from_level, to_level } => {
                 write!(f, "illegal level jump: {from_level} to {to_level}")
             }
+            Self::MissingNodeKey { level } => {
+                write!(f, "missing node key in horizontal advance at level {level}")
+            }
+            Self::EmptySearchPath => {
+                write!(f, "search path is empty")
+            }
+            Self::IncompleteDescent { final_level } => {
+                write!(f, "incomplete descent: search stopped at level {final_level} without reaching level 0")
+            }
+            Self::LevelExceedsMaxHeight { level, max_height } => {
+                write!(f, "step level {level} exceeds maximum skiplist height {max_height}")
+            }
         }
     }
 }
 
 impl std::error::Error for MonotonicityViolation {}
+
+/// Terminal outcome of a verified complete SkipList search.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathTerminalOutcome {
+    /// Search landed exactly on target key at level 0.
+    ExactMatch { key: Vec<u8> },
+    /// Search landed on immediate predecessor (< target_key) at level 0.
+    Predecessor { key: Option<Vec<u8>> },
+}
 
 /// Verifier of SkipList search path integrity and weak-memory fence validity.
 pub struct SkipListBarrierValidator;
@@ -99,6 +139,24 @@ impl SkipListBarrierValidator {
     ) -> Result<(), MonotonicityViolation> {
         if path.is_empty() {
             return Ok(());
+        }
+
+        for step in path {
+            if step.level >= MAX_SKIPLIST_HEIGHT {
+                return Err(MonotonicityViolation::LevelExceedsMaxHeight {
+                    level: step.level,
+                    max_height: MAX_SKIPLIST_HEIGHT,
+                });
+            }
+
+            if let Some(ref k) = step.node_key {
+                if k.as_slice() > target_key {
+                    return Err(MonotonicityViolation::HorizontalOvershoot {
+                        target_key: target_key.to_vec(),
+                        observed_key: k.clone(),
+                    });
+                }
+            }
         }
 
         for window in path.windows(2) {
@@ -114,8 +172,16 @@ impl SkipListBarrierValidator {
                         });
                     }
 
-                    // curr.node_key must be strictly greater than prev.node_key
-                    let curr_k = curr.node_key.as_ref().expect("horizontal step target must have key");
+                    // curr.node_key must be strictly greater than prev.node_key (safe non-panicking check)
+                    let curr_k = match curr.node_key.as_ref() {
+                        Some(k) => k,
+                        None => {
+                            return Err(MonotonicityViolation::MissingNodeKey {
+                                level: curr.level,
+                            });
+                        }
+                    };
+
                     if let Some(ref prev_k) = prev.node_key {
                         if prev_k >= curr_k {
                             return Err(MonotonicityViolation::HorizontalOrderInversion {
@@ -156,5 +222,40 @@ impl SkipListBarrierValidator {
         }
 
         Ok(())
+    }
+
+    /// Verifies that a search path starts from a valid height, follows monotonicity invariants,
+    /// and successfully reaches base level 0. Returns the terminal key classification.
+    pub fn verify_complete_search(
+        target_key: &[u8],
+        path: &[SearchStep],
+    ) -> Result<PathTerminalOutcome, MonotonicityViolation> {
+        if path.is_empty() {
+            return Err(MonotonicityViolation::EmptySearchPath);
+        }
+
+        Self::verify_path(target_key, path)?;
+
+        let last_step = path.last().expect("path non-empty checked above");
+        if last_step.level != 0 {
+            return Err(MonotonicityViolation::IncompleteDescent {
+                final_level: last_step.level,
+            });
+        }
+
+        match &last_step.node_key {
+            Some(k) if k.as_slice() == target_key => {
+                Ok(PathTerminalOutcome::ExactMatch { key: k.clone() })
+            }
+            Some(k) if k.as_slice() > target_key => {
+                Err(MonotonicityViolation::HorizontalOvershoot {
+                    target_key: target_key.to_vec(),
+                    observed_key: k.clone(),
+                })
+            }
+            other => Ok(PathTerminalOutcome::Predecessor {
+                key: other.clone(),
+            }),
+        }
     }
 }

@@ -17,6 +17,15 @@ pub enum PartitionError {
     InvalidEpsilonPermille(u32),
     /// Samples are not monotonically sorted.
     UnsortedSamples,
+    /// Uma das amostras fornecidas possui peso zero.
+    ZeroWeightSample,
+    /// O plano particionado viola os limites de discrepância epsilon.
+    DiscrepancyViolation {
+        slice_idx: usize,
+        accumulated_bytes: u64,
+        lower_bound: u64,
+        upper_bound: u64,
+    },
 }
 
 impl fmt::Display for PartitionError {
@@ -28,6 +37,16 @@ impl fmt::Display for PartitionError {
                 write!(f, "epsilon_permille {e} must be in range 1..=999")
             }
             Self::UnsortedSamples => write!(f, "samples must be strictly sorted by key"),
+            Self::ZeroWeightSample => write!(f, "sample byte weight must be strictly positive"),
+            Self::DiscrepancyViolation {
+                slice_idx,
+                accumulated_bytes,
+                lower_bound,
+                upper_bound,
+            } => write!(
+                f,
+                "slice {slice_idx} with {accumulated_bytes} bytes violates bounds [{lower_bound}, {upper_bound}]"
+            ),
         }
     }
 }
@@ -103,6 +122,31 @@ impl SstPartitionPlan {
             }
         }
         true
+    }
+
+    /// Busca exata de fatia: verifica se `key >= slice.start_key && key <= slice.end_key`.
+    #[must_use]
+    pub fn find_slice(&self, key: &[u8]) -> Option<usize> {
+        self.slices
+            .iter()
+            .position(|slice| key >= slice.start_key.as_slice() && key <= slice.end_key.as_slice())
+    }
+
+    /// Roteamento contíguo: mapeia uma chave arbitrária para a partição SST correspondente.
+    #[must_use]
+    pub fn route_key(&self, key: &[u8]) -> Option<usize> {
+        if self.slices.is_empty() {
+            return None;
+        }
+        if key <= self.slices[0].end_key.as_slice() {
+            return Some(0);
+        }
+        for (i, window) in self.slices.windows(2).enumerate() {
+            if key >= window[0].start_key.as_slice() && key < window[1].start_key.as_slice() {
+                return Some(i);
+            }
+        }
+        Some(self.slices.len() - 1)
     }
 }
 
@@ -217,4 +261,39 @@ impl TopologicalEntropyTracker {
             total_bytes,
         })
     }
+
+    /// Planeja e valida formalmente que as fatias respeitam os limites de discrepância epsilon e pesos não-nulos.
+    pub fn plan_partitions_verified(
+        samples: &[KeySamplePoint],
+        target_bytes: u64,
+        epsilon_permille: u32,
+    ) -> Result<SstPartitionPlan, PartitionError> {
+        // Valida peso zero
+        for s in samples {
+            if s.byte_weight == 0 {
+                return Err(PartitionError::ZeroWeightSample);
+            }
+        }
+
+        let plan = Self::plan_partitions(samples, target_bytes, epsilon_permille)?;
+
+        // Validação estrita de discrepância em fatias não-terminais
+        let eps = epsilon_permille as u64;
+        let lower_bound = target_bytes.saturating_sub((target_bytes * eps) / 1000);
+        let upper_bound = target_bytes.saturating_add((target_bytes * eps) / 1000);
+
+        for (idx, slice) in plan.slices[..plan.slices.len().saturating_sub(1)].iter().enumerate() {
+            if slice.key_count > 1 && (slice.accumulated_bytes < lower_bound || slice.accumulated_bytes > upper_bound) {
+                return Err(PartitionError::DiscrepancyViolation {
+                    slice_idx: idx,
+                    accumulated_bytes: slice.accumulated_bytes,
+                    lower_bound,
+                    upper_bound,
+                });
+            }
+        }
+
+        Ok(plan)
+    }
 }
+

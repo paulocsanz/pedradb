@@ -5,6 +5,11 @@
 //! without requiring a duplicate "twin" implementation.
 
 #[cfg(not(loom))]
+pub const IS_LOOM: bool = false;
+#[cfg(loom)]
+pub const IS_LOOM: bool = true;
+
+#[cfg(not(loom))]
 pub mod atomic {
     pub use std::sync::atomic::*;
 }

@@ -39,11 +39,11 @@ def core.ops.range.RangeFull.Insts.CoreSliceIndexPrivate_slice_indexSealed :
     Visibility: public -/
 @[rust_fun
   "core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeFull, [@T], [@T]>}::index_mut"]
-axiom
-  core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.index_mut
+def core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.index_mut
   {T : Type} :
   core.ops.range.RangeFull → Slice T → Result ((Slice T) × (Slice T →
-    Slice T))
+    Slice T)) :=
+  fun _ s => ok (s, id)
 
 /-- [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFull}::index]:
     Source: '/rustc/library/core/src/slice/index.rs', lines 655:4-655:39
@@ -51,8 +51,9 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeFull, [@T], [@T]>}::index"]
-axiom core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.index
-  {T : Type} : core.ops.range.RangeFull → Slice T → Result (Slice T)
+def core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.index
+  {T : Type} : core.ops.range.RangeFull → Slice T → Result (Slice T) :=
+  fun _ s => ok s
 
 /-- [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFull}::get_unchecked_mut]:
     Source: '/rustc/library/core/src/slice/index.rs', lines 650:4-650:66
@@ -60,11 +61,11 @@ axiom core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.index
     Visibility: public -/
 @[rust_fun
   "core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeFull, [@T], [@T]>}::get_unchecked_mut"]
-axiom
-  core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.get_unchecked_mut
+def core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.get_unchecked_mut
   {T : Type} :
   core.ops.range.RangeFull → MutRawPtr (Slice T) → Result (MutRawPtr (Slice
-    T))
+    T)) :=
+  fun _ p => ok p
 
 /-- [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFull}::get_unchecked]:
     Source: '/rustc/library/core/src/slice/index.rs', lines 645:4-645:66
@@ -72,11 +73,11 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeFull, [@T], [@T]>}::get_unchecked"]
-axiom
-  core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.get_unchecked
+def core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.get_unchecked
   {T : Type} :
   core.ops.range.RangeFull → ConstRawPtr (Slice T) → Result (ConstRawPtr
-    (Slice T))
+    (Slice T)) :=
+  fun _ p => ok p
 
 /-- [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFull}::get_mut]:
     Source: '/rustc/library/core/src/slice/index.rs', lines 640:4-640:57
@@ -84,10 +85,11 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeFull, [@T], [@T]>}::get_mut"]
-axiom core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.get_mut
+def core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.get_mut
   {T : Type} :
   core.ops.range.RangeFull → Slice T → Result ((Option (Slice T)) ×
-    (Option (Slice T) → Slice T))
+    (Option (Slice T) → Slice T)) :=
+  fun _ s => ok (some s, fun opt => match opt with | some x => x | none => s)
 
 /-- [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFull}::get]:
     Source: '/rustc/library/core/src/slice/index.rs', lines 635:4-635:45
@@ -95,9 +97,10 @@ axiom core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.get_mut
     Visibility: public -/
 @[rust_fun
   "core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeFull, [@T], [@T]>}::get"]
-axiom core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.get
+def core.ops.range.RangeFull.Insts.CoreSliceIndexSliceIndexSliceSlice.get
   {T : Type} :
-  core.ops.range.RangeFull → Slice T → Result (Option (Slice T))
+  core.ops.range.RangeFull → Slice T → Result (Option (Slice T)) :=
+  fun _ s => ok (some s)
 
 /-- Trait implementation: [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFull}]
     Source: '/rustc/library/core/src/slice/index.rs', lines 631:0-631:55

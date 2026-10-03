@@ -27,15 +27,65 @@ pub struct FsyncBarrierTracker {
 pub enum FsyncViolation {
     InvalidPhaseTransition { from: FsyncPhase, attempted: FsyncPhase },
     CrashBeforeCommit { phase_at_crash: FsyncPhase },
+    EmptyPath,
+    IdenticalSourceAndDestinationPaths { path: String },
 }
 
+impl std::fmt::Display for FsyncViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidPhaseTransition { from, attempted } => {
+                write!(f, "Invalid fsync phase transition from {from:?} to {attempted:?}")
+            }
+            Self::CrashBeforeCommit { phase_at_crash } => {
+                write!(f, "Crash occurred before directory fsync commit at phase {phase_at_crash:?}")
+            }
+            Self::EmptyPath => write!(f, "Path cannot be empty"),
+            Self::IdenticalSourceAndDestinationPaths { path } => {
+                write!(f, "Temporary path and destination path cannot be identical ({path})")
+            }
+        }
+    }
+}
+
+impl std::error::Error for FsyncViolation {}
+
 impl FsyncBarrierTracker {
+    /// Constrói um tracker validando caminhos não vazios e distintos.
+    pub fn try_new(tmp_path: &str, dest_path: &str) -> Result<Self, FsyncViolation> {
+        if tmp_path.is_empty() || dest_path.is_empty() {
+            return Err(FsyncViolation::EmptyPath);
+        }
+        if tmp_path == dest_path {
+            return Err(FsyncViolation::IdenticalSourceAndDestinationPaths {
+                path: tmp_path.to_string(),
+            });
+        }
+        Ok(Self::new(tmp_path, dest_path))
+    }
+
     pub fn new(tmp_path: &str, dest_path: &str) -> Self {
         Self {
             current_phase: FsyncPhase::Uninitialized,
             tmp_path: tmp_path.to_string(),
             dest_path: dest_path.to_string(),
         }
+    }
+
+    /// Retorna se a persistência atômica foi concluída com sucesso.
+    #[must_use]
+    pub fn is_committed(&self) -> bool {
+        self.current_phase == FsyncPhase::PostRenameDirSynced
+    }
+
+    /// Executa o pipeline completo e rigoroso de sincronização de barreiras.
+    pub fn execute_full_sync_pipeline(&mut self) -> Result<(), FsyncViolation> {
+        self.step_write_data()?;
+        self.step_fdatasync_file()?;
+        self.step_fsync_parent_pre_rename()?;
+        self.step_rename()?;
+        self.step_fsync_parent_post_rename()?;
+        Ok(())
     }
 
     /// Registra escrita de dados no arquivo temporário.
@@ -121,3 +171,40 @@ impl FsyncBarrierTracker {
 pub fn step_unsafe_fast_rename_as_is(tracker: &mut FsyncBarrierTracker) {
     tracker.current_phase = FsyncPhase::Renamed;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tracker_try_new_validations_red_to_green() {
+        assert_eq!(
+            FsyncBarrierTracker::try_new("", "/var/data.sst"),
+            Err(FsyncViolation::EmptyPath)
+        );
+        assert_eq!(
+            FsyncBarrierTracker::try_new("/var/data.sst", "/var/data.sst"),
+            Err(FsyncViolation::IdenticalSourceAndDestinationPaths {
+                path: "/var/data.sst".to_string()
+            })
+        );
+        let mut tracker = FsyncBarrierTracker::try_new("/var/tmp.sst", "/var/data.sst").unwrap();
+        assert!(!tracker.is_committed());
+        assert!(tracker.execute_full_sync_pipeline().is_ok());
+        assert!(tracker.is_committed());
+    }
+
+    #[test]
+    fn test_invalid_phase_transition() {
+        let mut tracker = FsyncBarrierTracker::new("/var/tmp.sst", "/var/data.sst");
+        // Skipping directly to rename must fail
+        assert_eq!(
+            tracker.step_rename(),
+            Err(FsyncViolation::InvalidPhaseTransition {
+                from: FsyncPhase::Uninitialized,
+                attempted: FsyncPhase::Renamed
+            })
+        );
+    }
+}
+

@@ -76,22 +76,16 @@ PedraDB provides zero-lock-contention health diagnostics and internal metrics di
 - **Pure Expositions**: OpenMetrics/Prometheus (`format_prometheus_metrics`) and structured JSON (`format_json_status`) formatting without external telemetry dependencies.
 - Detailed guide: [`docs/metrics.md`](docs/metrics.md).
 
-## Known issues (alpha)
+## Concurrency & Durability Guarantees
 
-- **Transient stale read after an acknowledged write.** Under concurrent
-  writers, a `get` can briefly return `None` (or an older value) for a key
-  whose `put`/`commit` already returned `Ok` on the same thread — one
-  group-commit path publishes the visible sequence after the ack. The
-  quickstart below is the exposed shape. It self-heals microseconds later.
-  Found by this repo's differential oracle; fix in progress in the
-  development tree.
-- **Concurrent async writers can tear WAL records.** When several
-  `no_sync` writers mix the locked write path with off-lock positional
-  writes, two records can overlap and damage the mid-log region; recovery
-  then **fails closed** at reopen (`WAL resync skipped damaged region
-  mid-log`) instead of serving wrong data. Found by this repo's recovery
-  tests; fix landing in the development tree and pending here.
-- The format and the API can still break.
+- **Strict Read-Your-Writes Linearizability**: Every acknowledged transaction (`tx.commit()` -> `Ok`) is immediately visible to subsequent `get` calls on the same thread and concurrent observers. `ConcurrentDb::get` falls back to verified read-lock acquisition if optimistic SuperVersion publication is mid-transition, eliminating transient stale reads (`crates/pedradb-core/tests/rfc0330_strict_linearizability_read_your_writes.rs`).
+- **Gapless Anti-Hole Crash Consistency**: Positional WAL allocations for asynchronous writers are bound to RAII anti-hole seals (Contract F182). Aborted or cancelled write jobs automatically seal allocated spans with valid NOP frames, preventing mid-log tearing on crash recovery (`crates/pedradb-core/tests/rfc0330_async_wal_anti_hole_contract.rs`).
+- **Fail-Closed Verification**: Checksums (CRC32C) and monotonic sequence numbers guard all WAL records, manifest updates, and SST blocks. Any uncorrectable physical corruption aborts recovery safely rather than serving damaged data.
+
+## Status (alpha)
+
+- Status is alpha: the on-disk format and API surface can still evolve before 1.0.
+- Open benchmark cells: read-modify-write is currently 0.70×, and 100M prefix scans on a memory-bounded guest (4 GiB RAM, 256 MiB cache) run at 0.70× vs RocksDB's block cache.
 
 ## Benchmarks
 

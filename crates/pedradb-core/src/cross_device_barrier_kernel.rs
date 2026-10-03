@@ -34,16 +34,60 @@ pub enum CrossDeviceViolation {
     PrematureSourceDeletion,
     /// Manifest commit attempted before target data is finalized and directory synced.
     TargetNotFinalized,
+    /// Tentativa de transição com ID de arquivo incompatível.
+    FileIdMismatch {
+        /// ID de arquivo esperado.
+        expected: u64,
+        /// ID de arquivo fornecido.
+        found: u64,
+    },
+    /// Invalid file id (zero).
+    ZeroFileId,
 }
 
+impl std::fmt::Display for CrossDeviceViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IllegalTransition { from, to } => {
+                write!(f, "Illegal phase transition from {from:?} to {to:?}")
+            }
+            Self::PrematureSourceDeletion => {
+                write!(f, "Premature source deletion before manifest commit")
+            }
+            Self::TargetNotFinalized => {
+                write!(f, "Manifest commit attempted before target data is finalized")
+            }
+            Self::FileIdMismatch { expected, found } => {
+                write!(f, "File ID mismatch: expected {expected}, found {found}")
+            }
+            Self::ZeroFileId => {
+                write!(f, "File ID cannot be zero")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CrossDeviceViolation {}
+
 /// State machine oracle verifying cross-device migration safety.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CrossDeviceTransferOracle {
-    #[allow(dead_code)]
     file_id: u64,
     current_phase: CrossDevicePhase,
 }
 
 impl CrossDeviceTransferOracle {
+    /// Creates a new transfer tracking oracle with validation.
+    pub fn try_new(file_id: u64) -> Result<Self, CrossDeviceViolation> {
+        if file_id == 0 {
+            return Err(CrossDeviceViolation::ZeroFileId);
+        }
+        Ok(Self {
+            file_id,
+            current_phase: CrossDevicePhase::SourceActive,
+        })
+    }
+
     /// Creates a new transfer tracking oracle for a given file ID.
     pub fn new(file_id: u64) -> Self {
         Self {
@@ -52,9 +96,26 @@ impl CrossDeviceTransferOracle {
         }
     }
 
+    /// ID do arquivo monitorado pelo oráculo.
+    #[inline]
+    pub fn file_id(&self) -> u64 {
+        self.file_id
+    }
+
     /// Current phase of the transfer.
     pub fn current_phase(&self) -> CrossDevicePhase {
         self.current_phase
+    }
+
+    /// Transitions to the next phase validating that the transition belongs to the specified file ID.
+    pub fn advance_for_file(&mut self, file_id: u64, next: CrossDevicePhase) -> Result<(), CrossDeviceViolation> {
+        if file_id != self.file_id {
+            return Err(CrossDeviceViolation::FileIdMismatch {
+                expected: self.file_id,
+                found: file_id,
+            });
+        }
+        self.advance_to(next)
     }
 
     /// Transitions to the next phase after validating protocol invariants.
@@ -103,5 +164,34 @@ impl CrossDeviceTransferOracle {
                 ("RollforwardToTarget: Reclaim source file if present", true)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cross_device_oracle_bounds() {
+        assert_eq!(
+            CrossDeviceTransferOracle::try_new(0),
+            Err(CrossDeviceViolation::ZeroFileId)
+        );
+
+        let oracle = CrossDeviceTransferOracle::try_new(42).expect("valid oracle");
+        assert_eq!(oracle.file_id(), 42);
+        assert_eq!(oracle.current_phase(), CrossDevicePhase::SourceActive);
+    }
+
+    #[test]
+    fn test_cross_device_violation_display() {
+        let err = CrossDeviceViolation::ZeroFileId;
+        assert_eq!(format!("{err}"), "File ID cannot be zero");
+
+        let err2 = CrossDeviceViolation::PrematureSourceDeletion;
+        assert_eq!(format!("{err2}"), "Premature source deletion before manifest commit");
+
+        let err3 = CrossDeviceViolation::TargetNotFinalized;
+        assert_eq!(format!("{err3}"), "Manifest commit attempted before target data is finalized");
     }
 }

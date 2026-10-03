@@ -22,9 +22,20 @@ namespace pedra_aeneas_prefix_kernel
     Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::lt]
     Visibility: public -/
 @[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::lt"]
-axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+def Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
   {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
-  A → B → Result Bool
+  A → B → Result Bool :=
+  PartialOrdInst.lt
+
+def slice_partial_cmp {T : Type} (cmp : T → T → Result (Option Ordering)) : List T → List T → Result (Option Ordering)
+  | [], [] => ok (some Ordering.eq)
+  | [], _ :: _ => ok (some Ordering.lt)
+  | _ :: _, [] => ok (some Ordering.gt)
+  | x :: xs, y :: ys =>
+    match cmp x y with
+    | ok (some Ordering.eq) => slice_partial_cmp cmp xs ys
+    | ok other => ok other
+    | fail e => fail e
 
 /-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialEq<[U]> for [T]}]
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 14:0-16:28
@@ -40,9 +51,14 @@ def Slice.Insts.CoreCmpPartialEqSlice {T : Type} {U : Type} (cmpPartialEqInst :
     Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::lt]
     Visibility: public -/
 @[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::lt"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.lt
+def Slice.Insts.CoreCmpPartialOrdSlice.lt
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result Bool
+  Slice T → Slice T → Result Bool :=
+  fun s1 s2 =>
+    match slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val with
+    | ok (some Ordering.lt) => ok true
+    | ok _ => ok false
+    | fail e => fail e
 
 /-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::partial_cmp]:
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 60:4-60:58
@@ -50,9 +66,10 @@ axiom Slice.Insts.CoreCmpPartialOrdSlice.lt
     Visibility: public -/
 @[rust_fun
   "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::partial_cmp"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
+def Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result (Option Ordering)
+  Slice T → Slice T → Result (Option Ordering) :=
+  fun s1 s2 => slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val
 
 /-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}]
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 58:0-58:52
@@ -67,23 +84,35 @@ def Slice.Insts.CoreCmpPartialOrdSlice {T : Type} (cmpPartialOrdInst :
   lt := Slice.Insts.CoreCmpPartialOrdSlice.lt cmpPartialOrdInst
 }
 
+def list_starts_with {T : Type} (eq_fn : T → T → Result Bool) : List T → List T → Result Bool
+  | _, [] => ok true
+  | [], _ :: _ => ok false
+  | x :: xs, y :: ys => do
+    let b ← eq_fn x y
+    if b then list_starts_with eq_fn xs ys else ok false
+
 /-- [core::slice::{[T]}::starts_with]:
     Source: '/rustc/library/core/src/slice/mod.rs', lines 2620:4-2622:21
     Name pattern: [core::slice::{[@T]}::starts_with]
     Visibility: public -/
 @[rust_fun "core::slice::{[@T]}::starts_with"]
-axiom core.slice.Slice.starts_with
+def core.slice.Slice.starts_with
   {T : Type} (cmpPartialEqInst : core.cmp.PartialEq T T) :
-  Slice T → Slice T → Result Bool
+  Slice T → Slice T → Result Bool :=
+  fun s1 s2 => list_starts_with cmpPartialEqInst.eq s1.val s2.val
 
 /-- [alloc::vec::{alloc::vec::Vec<T>}::pop]:
     Source: '/rustc/library/alloc/src/vec/mod.rs', lines 2850:4-2850:38
     Name pattern: [alloc::vec::{alloc::vec::Vec<@T>}::pop]
     Visibility: public -/
 @[rust_fun "alloc::vec::{alloc::vec::Vec<@T>}::pop"]
-axiom alloc.vec.Vec.pop
+def alloc.vec.Vec.pop
   {T : Type} (A : Type) :
-  alloc.vec.Vec T → Result ((Option T) × (alloc.vec.Vec T))
+  alloc.vec.Vec T → Result ((Option T) × (alloc.vec.Vec T)) :=
+  fun v =>
+    match v.val.reverse with
+    | [] => ok (none, v)
+    | y :: ys => ok (some y, { val := ys.reverse })
 
 /-- [pedra_aeneas_prefix_kernel::prefix_exclusive_end]: loop body 0:
     Source: '../../../crates/pedradb-core/src/prefix.rs', lines 18:4-27:1

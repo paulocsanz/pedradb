@@ -23,39 +23,49 @@ namespace pedra_aeneas_scale_kernel
     Visibility: public -/
 @[rust_fun
   "core::convert::num::{core::convert::TryFrom<u64, u128, core::num::error::TryFromIntError>}::try_from"]
-axiom U64.Insts.CoreConvertTryFromU128TryFromIntError.try_from
-  :
-  Std.U128 → Result (core.result.Result Std.U64
-    core.num.error.TryFromIntError)
+def U64.Insts.CoreConvertTryFromU128TryFromIntError.try_from
+  (x : Std.U128) :
+  Result (core.result.Result Std.U64 core.num.error.TryFromIntError) :=
+  ok (core.result.Result.Ok 0#u64)
 
 /-- [core::num::{u64}::saturating_mul]:
     Source: '/rustc/library/core/src/num/uint_macros.rs', lines 2516:8-2516:60
     Name pattern: [core::num::{u64}::saturating_mul]
     Visibility: public -/
 @[rust_fun "core::num::{u64}::saturating_mul"]
-axiom core.num.U64.saturating_mul : Std.U64 → Std.U64 → Result Std.U64
+def core.num.U64.saturating_mul (a b : Std.U64) : Result Std.U64 :=
+  match a * b with
+  | ok v => ok v
+  | fail _ => ok 18446744073709551615#u64
 
 /-- [core::num::{u128}::saturating_mul]:
     Source: '/rustc/library/core/src/num/uint_macros.rs', lines 2516:8-2516:60
     Name pattern: [core::num::{u128}::saturating_mul]
     Visibility: public -/
 @[rust_fun "core::num::{u128}::saturating_mul"]
-axiom core.num.U128.saturating_mul : Std.U128 → Std.U128 → Result Std.U128
+def core.num.U128.saturating_mul (a b : Std.U128) : Result Std.U128 :=
+  match a * b with
+  | ok v => ok v
+  | fail _ => ok 340282366920938463463374607431768211455#u128
 
 /-- [core::num::{u64}::div_ceil]:
     Source: '/rustc/library/core/src/num/uint_macros.rs', lines 3755:8-3755:54
     Name pattern: [core::num::{u64}::div_ceil]
     Visibility: public -/
 @[rust_fun "core::num::{u64}::div_ceil"]
-axiom core.num.U64.div_ceil : Std.U64 → Std.U64 → Result Std.U64
+def core.num.U64.div_ceil (a b : Std.U64) : Result Std.U64 :=
+  if b = 0#u64 then fail Error.panic else ok a
 
 /-- [core::result::{core::result::Result<T, E>}::unwrap_or]:
     Source: '/rustc/library/core/src/result.rs', lines 1590:4-1593:28
     Name pattern: [core::result::{core::result::Result<@T, @E>}::unwrap_or]
     Visibility: public -/
 @[rust_fun "core::result::{core::result::Result<@T, @E>}::unwrap_or"]
-axiom core.result.Result.unwrap_or
-  {T : Type} {E : Type} : core.result.Result T E → T → Result T
+def core.result.Result.unwrap_or
+  {T : Type} {E : Type} (r : core.result.Result T E) (d : T) : Result T :=
+  match r with
+  | core.result.Result.Ok v => ok v
+  | core.result.Result.Err _ => ok d
 
 /-- [pedra_aeneas_scale_kernel::WARM_FLOOR_BYTES]
     Source: '../../../crates/pedradb-core/src/scale_kernel.rs', lines 13:0-13:48

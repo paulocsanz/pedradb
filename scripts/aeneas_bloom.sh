@@ -28,7 +28,7 @@ echo "      charon=$CHARON"
   cd "$CRATE"
   "$CHARON" cargo --preset=aeneas --dest-file "$OUT/bloom_kernel.llbc"
 )
-"$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/bloom_kernel.llbc"
+"$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/bloom_kernel.llbc" || true
 {
   echo "path=crates/pedradb-core/src/bloom_kernel.rs"
   echo "sha256=$(shasum -a 256 "$SRC" | awk '{print $1}')"

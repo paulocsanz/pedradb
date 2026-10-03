@@ -1,0 +1,41 @@
+# cargo-deny configuration (RFC-0015 P2.3 / M3)
+# https://embarkstudios.github.io/cargo-deny/
+#
+# P2.3 scope: security advisories. License/source bans can be tightened later.
+# Run: `cargo deny check advisories`
+# CI:  `.github/workflows/supply-chain.yml`
+
+[graph]
+all-features = false
+no-default-features = false
+
+[advisories]
+# Fail on yanked crates with advisories.
+yanked = "deny"
+# Ignore entries need justification:
+# ignore = [
+#   # { id = "RUSTSEC-YYYY-NNNN", reason = "…" },
+# ]
+
+[licenses]
+# Not enforced in CI (advisories-only job). Present so `cargo deny check` is valid.
+confidence-threshold = 0.8
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

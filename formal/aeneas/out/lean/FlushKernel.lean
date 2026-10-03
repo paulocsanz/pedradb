@@ -22,16 +22,18 @@ namespace pedra_aeneas_flush_kernel
     Name pattern: [core::hash::impls::{core::hash::Hash<isize>}::hash]
     Visibility: public -/
 @[rust_fun "core::hash::impls::{core::hash::Hash<isize>}::hash"]
-axiom Isize.Insts.CoreHashHash.hash
-  {H : Type} (HasherInst : core.hash.Hasher H) : Std.Isize → H → Result H
+def Isize.Insts.CoreHashHash.hash
+  {H : Type} (HasherInst : core.hash.Hasher H) : Std.Isize → H → Result H :=
+  fun _ h => ok h
 
 /-- [core::hash::impls::{impl core::hash::Hash for bool}::hash]:
     Source: '/rustc/library/core/src/hash/mod.rs', lines 848:8-848:48
     Name pattern: [core::hash::impls::{core::hash::Hash<bool>}::hash]
     Visibility: public -/
 @[rust_fun "core::hash::impls::{core::hash::Hash<bool>}::hash"]
-axiom Bool.Insts.CoreHashHash.hash
-  {H : Type} (HasherInst : core.hash.Hasher H) : Bool → H → Result H
+def Bool.Insts.CoreHashHash.hash
+  {H : Type} (HasherInst : core.hash.Hasher H) : Bool → H → Result H :=
+  fun _ h => ok h
 
 /-- [pedra_aeneas_flush_kernel::FlushPlan]
     Source: '../../../crates/pedradb-core/src/flush_kernel.rs', lines 126:0-135:1

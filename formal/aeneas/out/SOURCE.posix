@@ -1,4 +1,4 @@
 path=crates/pedradb-posix/src/lib_kernel.rs
-sha256=5ea6d5fbd798f60c54375fb29e64b7729e06b746f58c72f8e255c72fda73d8de
+sha256=f49cec655651bfa66a92f845e44c3c46423e7cd3b90715b173944a1fc1ebc495
 aeneas=f5a4c58-dirty
 charon=0.1.232

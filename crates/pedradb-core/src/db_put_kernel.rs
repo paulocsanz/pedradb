@@ -725,7 +725,16 @@ impl<E: Env> Db<E> {
             self.sync,
         );
         self.vlog_prepare_wal(do_sync)?;
-        let n = self.wal.lock().append_write_ops(&records)?;
+        // DST campaign F-CAMP-1 (seed 424252): a failed WAL append tears the
+        // segment mid-log; appending after the hole re-anchors the log and the
+        // F171 fail-closed recovery must then refuse the whole DB on reopen.
+        // The tail is untrustworthy exactly like a failed sync — fence (the
+        // G1/group and vlog-prepare paths already do).
+        let append_res = { self.wal.lock().append_write_ops(&records) };
+        let n = match append_res {
+            Ok(n) => n,
+            Err(e) => return Err(self.fence_io_err(e)),
+        };
         self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
         let planned = crate::write_admission_kernel::wal_commit_plan(do_sync, false);
         let sync_err = match planned {

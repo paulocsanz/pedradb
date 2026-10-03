@@ -1,16 +1,20 @@
-# Aeneas extracts (public PedraDB kernels)
+# Aeneas extract (vote kernel)
 
-Production kernel files under `crates/pedradb-core` (and ops / posix /
-io-uring / compat / spec) are the proof term. Each `formal/aeneas/<k>-kernel`
-crate sets `[lib] path` at that file. Charon+Aeneas emit Lean in
-`formal/aeneas/out/lean`; theorems live in `formal/aeneas/lean`.
+Second machine for [`vote_kernel.rs`](../../crates/pedradb-raft/src/vote_kernel.rs).
+The crate in [`vote-kernel/`](vote-kernel/) sets `[lib] path` to the
+production `vote_kernel.rs`. There is no hand-written Lean twin.
 
 ```sh
-# Crate that rustc already linked still compiles as an extract crate:
-cargo test --manifest-path formal/aeneas/bloom-kernel/Cargo.toml
+# Always: the include crate must compile (same rustc as the workspace).
+cargo test --manifest-path formal/aeneas/vote-kernel/Cargo.toml
 
 # When Charon + Aeneas are on PATH (see PINS.md):
-./scripts/aeneas_bloom.sh
+./scripts/aeneas_vote.sh
 ```
 
-Raft / store / world extracts are not in this repository.
+`./scripts/pedra_formal.sh --ci` runs the extract-crate `cargo test` and,
+if `lake` is on PATH, `lake build Vote`.
+`--extract` / `--extract-required` also re-run Charon+Aeneas.
+
+Lean accepted the theorems in [`EXTRACT.md`](EXTRACT.md).
+Those are theorems of **extracted terms**, not of persist or the Raft loop.

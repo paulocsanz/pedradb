@@ -53,6 +53,9 @@ pub struct RangeTombstone {
 impl RangeTombstone {
     /// Determina se uma chave pontual cai dentro do intervalo do range tombstone.
     pub fn covers_key(&self, key: &[u8]) -> bool {
+        if self.start_key >= self.end_key {
+            return false;
+        }
         key >= self.start_key.as_slice() && key < self.end_key.as_slice()
     }
 }
@@ -114,9 +117,13 @@ impl RangeMergeSemiringEvaluator {
             .max()
             .unwrap_or(0);
 
+        // Garante ordenação causal decrescente estrita por sequence number
+        let mut sorted_mutations: Vec<&PointMutation> = mutations.iter().collect();
+        sorted_mutations.sort_by_key(|m| std::cmp::Reverse(m.seq()));
+
         // Coleta mutações visíveis sob o snapshot
         let mut visible_mutations = Vec::new();
-        for m in mutations {
+        for m in sorted_mutations {
             if m.seq() <= snapshot_seq {
                 if m.seq() <= max_range_seq {
                     // Aniquilado pelo range tombstone!
@@ -207,7 +214,9 @@ impl RangeMergeSemiringEvaluator {
                     for m in l1_mutations {
                         if m.seq() <= rt.seq {
                             if let PointMutation::Merge { seq, operand } = m {
-                                if val.windows(operand.len()).any(|w| w == operand.as_slice()) {
+                                if !operand.is_empty()
+                                    && val.windows(operand.len()).any(|w| w == operand.as_slice())
+                                {
                                     return Err(RangeMergeSemiringViolation::ResurrectedPreTombstoneMerge {
                                         key: key.to_vec(),
                                         merge_seq: *seq,

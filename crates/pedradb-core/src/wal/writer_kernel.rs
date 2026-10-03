@@ -127,10 +127,15 @@ impl LockFreeWalRing {
         record_data.extend_from_slice(&seq.to_le_bytes());
         record_data.extend_from_slice(payload);
 
-        let crc = crc::record_checksum(
+        let crc_val = crc::record_checksum(
             RecordType::Full as u8,
             record_data.len() as u16,
             &record_data,
+        );
+        let crc = crate::mutate_switch!(
+            crate::mutation_switch_kernel::MUTANT_CORRUPT_RECORD_CRC,
+            crc_val,
+            crc_val ^ 0xDEAD_BEEF
         );
 
         let h_crc = crc.to_le_bytes();
@@ -232,12 +237,18 @@ pub struct WalWriter<W> {
     /// `position`; `reserve_frame` advances it. Sequential writes keep
     /// `reserved_to == position`.
     reserved_to: u64,
+    /// Out-of-order pwrite completion tracker: maps ticket -> ticket + len.
+    /// Ensures `position` only advances contiguously so no holes are left in WAL.
+    completed_pwrite_intervals: std::collections::BTreeMap<u64, u64>,
 }
 
 /// Staging state for [`WalWriter`] (RFC-0209 P0.2).
 struct StagedBuf {
     /// Pending framed bytes not yet handed to the sink.
     buf: Vec<u8>,
+    /// Reserved span start for `buf` (F-CAMP-4): staged bytes own their
+    /// ticket; the drain writes exactly `[start, start + buf.len())`.
+    start: u64,
     /// Flush cap in bytes; `0` is the misuse guard (flush every append —
     /// byte-for-byte the AS-IS behavior; see `wal_buffer_kernel`).
     max: u64,
@@ -286,6 +297,7 @@ impl<W: EnvFile> WalWriter<W> {
             frame: Vec::new(),
             staged: None,
             reserved_to: raw_pos,
+            completed_pwrite_intervals: std::collections::BTreeMap::new(),
         })
     }
 
@@ -302,6 +314,7 @@ impl<W: EnvFile> WalWriter<W> {
     /// enabled before the first write.
     pub(crate) fn enable_staging(&mut self, max: u64) {
         self.staged = Some(StagedBuf {
+            start: self.reserved_to,
             buf: Vec::new(),
             max,
         });
@@ -313,14 +326,19 @@ impl<W: EnvFile> WalWriter<W> {
     /// the bytes return to the buffer — a failed drain is retryable, like
     /// the direct write path whose frame the caller still holds.
     pub(crate) fn drain_staged(&mut self) -> Result<()> {
-        let buf = match self.staged.as_mut() {
-            Some(st) if !st.buf.is_empty() => std::mem::take(&mut st.buf),
+        let (buf, start) = match self.staged.as_mut() {
+            Some(st) if !st.buf.is_empty() => (std::mem::take(&mut st.buf), st.start),
             _ => return Ok(()),
         };
-        let at = self.position.saturating_sub(buf.len() as u64);
-        match self.emit_bytes(&buf, at) {
-            Ok(()) => Ok(()),
+        let len = buf.len() as u64;
+        match self.emit_bytes(&buf, start) {
+            Ok(()) => {
+                self.commit_pwrite(start, len);
+                Ok(())
+            }
             Err(e) => {
+                // `start` is kept: the span stays ours and the retry writes
+                // the same region (never a second reservation for it).
                 if let Some(st) = self.staged.as_mut() {
                     st.buf = buf;
                 }
@@ -345,9 +363,7 @@ impl<W: EnvFile> WalWriter<W> {
         // RFC-0209 P0.2 order rule (b): a direct write drains staged bytes
         // first so the file order stays the logical order.
         self.drain_staged()?;
-        let at = self.position;
-        self.emit_bytes(&frame, at)?;
-        self.note_sink_write(frame.len() as u64);
+        self.write_owned(&frame)?;
         // Do not leave the just-written bytes in `frame` — `Wal::sync_data`
         // drains staged frames from `encode_write_op_batches`. Re-emitting
         // this buffer would duplicate the record (same seq) on recover.
@@ -377,9 +393,7 @@ impl<W: EnvFile> WalWriter<W> {
         // RFC-0209 P0.2 order rule (b): group writes are direct — drain
         // staged bytes first (same rule as `add_record`).
         self.drain_staged()?;
-        let at = self.position;
-        self.emit_bytes(&frame, at)?;
-        self.note_sink_write(frame.len() as u64);
+        self.write_owned(&frame)?;
         frame.clear();
         self.frame = frame;
         Ok(())
@@ -506,12 +520,7 @@ impl<W: EnvFile> WalWriter<W> {
             return Ok(());
         }
         self.drain_staged()?;
-        let at = self.position;
-        match &mut self.sink {
-            WalSink::Exclusive(w) => w.write_wal(buf, at)?,
-            WalSink::Shared(arc) => arc.write_wal_at_shared(buf, at)?,
-        }
-        self.note_sink_write(buf.len() as u64);
+        self.write_owned(buf)?;
         Ok(())
     }
 
@@ -523,29 +532,52 @@ impl<W: EnvFile> WalWriter<W> {
             // time — the logical append point — so `reserve_space` still
             // sees the true frontier. Disabled (default): the pre-0209
             // single write per frame.
-            if let Some(st) = self.staged.as_mut() {
-                st.buf.extend_from_slice(buf);
-                let staged_len = st.buf.len() as u64;
-                let staged_max = st.max;
+            if self.staged.is_some() {
+                // F-CAMP-4: staged bytes own their reserved span too —
+                // `position` is only the drained watermark, never a free
+                // append point while pwrite tickets are in flight.
                 let n = buf.len() as u64;
-                self.note_sink_write(n);
-                if crate::wal_buffer_kernel::should_flush(staged_len, staged_max) {
+                let at = self.reserve_pending(n);
+                let flush = {
+                    let st = self.staged.as_mut().expect("checked above");
+                    if st.buf.is_empty() {
+                        st.start = at;
+                    }
+                    st.buf.extend_from_slice(buf);
+                    crate::wal_buffer_kernel::should_flush(st.buf.len() as u64, st.max)
+                };
+                if flush {
                     return self.drain_staged();
                 }
                 return Ok(());
             }
-            let at = self.position;
-            self.emit_bytes(buf, at)?;
-            self.note_sink_write(buf.len() as u64);
+            self.write_owned(buf)?;
         }
         Ok(())
     }
 
-    fn note_sink_write(&mut self, n: u64) {
-        self.position = self.position.saturating_add(n);
-        if self.reserved_to < self.position {
-            self.reserved_to = self.position;
+    /// Reservation frontier: the exclusive-append point. Every physical
+    /// write (locked or off-lock pwrite) owns the span it reserved here;
+    /// `position` is only the contiguous drained watermark (F-CAMP-4).
+    #[must_use]
+    pub(crate) fn reservation_frontier(&self) -> u64 {
+        self.reserved_to
+    }
+
+    /// F-CAMP-4: a locked (under `wal.lock()`) physical write OWNS its
+    /// span — allocate at the reservation frontier, write exactly there,
+    /// commit the interval. Writing at `position` while a pwrite ticket is
+    /// in flight overlaps that ticket's span: two sink writes race, records
+    /// tear, and recovery fail-stops on the damaged region mid-log.
+    pub(crate) fn write_owned(&mut self, buf: &[u8]) -> Result<()> {
+        if crate::write_admission_kernel::batch_is_empty(buf.len() as u64) {
+            return Ok(());
         }
+        let len = buf.len() as u64;
+        let at = self.reserve_pending(len);
+        self.emit_bytes(buf, at)?;
+        self.commit_pwrite(at, len);
+        Ok(())
     }
 
     /// RFC-0193: allocate `len` bytes at the reservation frontier.
@@ -629,7 +661,11 @@ impl<W: EnvFile> WalWriter<W> {
         let length_u16 =
             u16::try_from(payload_len).expect("physical record fragment must fit in u16");
 
-        let checksum = crc::record_checksum(rtype as u8, length_u16, &buf[hdr_pos + HEADER_SIZE..]);
+        let checksum = crate::mutate_switch!(
+            crate::mutation_switch_kernel::MUTANT_CORRUPT_RECORD_CRC,
+            crc::record_checksum(rtype as u8, length_u16, &buf[hdr_pos + HEADER_SIZE..]),
+            crc::record_checksum(rtype as u8, length_u16, &buf[hdr_pos + HEADER_SIZE..]) ^ 0xDEAD_BEEF
+        );
 
         let mut header = [0u8; HEADER_SIZE];
         header[0..4].copy_from_slice(&checksum.to_le_bytes());
@@ -679,6 +715,20 @@ impl<W: EnvFile> WalWriter<W> {
             w.flush()?;
         }
         Ok(self.position)
+    }
+
+    /// RFC-0314: Seal the WAL segment by emitting an immutable sentinel seal frame.
+    pub fn write_sentinel_seal(&mut self) -> Result<()> {
+        self.drain_staged()?;
+        let current_pos = self.position;
+        let mut tracker = crate::wal_segment_seal_kernel::WalPreallocationTracker::new(current_pos.saturating_add(16));
+        let _ = tracker.advance_logical(current_pos);
+        if let Ok(seal) = tracker.encode_seal() {
+            self.emit_bytes(&seal, current_pos)?;
+            self.flush()?;
+            self.position = self.position.saturating_add(16);
+        }
+        Ok(())
     }
 
     /// Consume the writer and return the underlying sink. Drains staged
@@ -765,6 +815,7 @@ impl<W: crate::env::EnvFile> WalWriter<W> {
     /// Recover of a closed file then matches `position` (mmap grow pad
     /// is not left on disk).
     pub(crate) fn truncate_to_logical(&mut self) -> Result<()> {
+        self.drain_staged()?;
         let pos = self.position;
         match &mut self.sink {
             WalSink::Exclusive(w) => {
@@ -780,23 +831,31 @@ impl<W: crate::env::EnvFile> WalWriter<W> {
     }
 
     /// Advance the written frontier to `ticket+len` after a successful
-    /// off-lock pwrite. Must not run at reserve time: a failed job must
-    /// leave [`Self::position`] at the last committed byte so
-    /// `wal_segment_is_empty` still sees an empty segment.
+    /// off-lock pwrite, ensuring that `position` only advances contiguously
+    /// without leaving holes for in-flight or failed preceding writes.
     pub(crate) fn commit_pwrite(&mut self, ticket: u64, len: u64) {
-        let end = ticket.saturating_add(len);
-        if self.position < end {
-            self.position = end;
-            self.block_offset = (self.position as usize) % BLOCK_SIZE;
+        if crate::write_admission_kernel::batch_is_empty(len) {
+            return;
         }
+        let end = ticket.saturating_add(len);
+        if ticket <= self.position {
+            if end > self.position {
+                self.position = end;
+            }
+        } else {
+            self.completed_pwrite_intervals.insert(ticket, end);
+        }
+        while let Some(&end_offset) = self.completed_pwrite_intervals.get(&self.position) {
+            self.completed_pwrite_intervals.remove(&self.position);
+            self.position = end_offset;
+        }
+        // Invariant (F-CAMP-4): `block_offset` is the framing alignment of
+        // the RESERVATION frontier (`reserved_to % BLOCK_SIZE`), maintained
+        // by the framing state machine. The drained watermark can sit below
+        // the frontier while tickets are in flight — re-pointing
+        // `block_offset` at it here misaligned every later frame.
     }
 
-    /// Abort an in-flight preframed pwrite that failed or cancelled:
-    /// strictly restores `block_offset` to match `position % BLOCK_SIZE`.
-    pub(crate) fn abort_pwrite(&mut self) {
-        self.block_offset = (self.position as usize) % BLOCK_SIZE;
-        self.reserved_to = self.position;
-    }
 }
 
 /// Byte source of one logical record for [`WalWriter::fragment_from`]
@@ -1479,6 +1538,55 @@ mod tests {
         let drained = ring.drain_to(&mut sink).unwrap();
         assert!(drained > 0);
         assert_eq!(ring.pending_bytes(), 0);
+    }
+
+    #[test]
+    fn out_of_order_commit_pwrite_must_not_jump_uncommitted_prefix() {
+        let mut writer = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        let t0 = writer.reserve_pending(50);
+        let t1 = writer.reserve_pending(50);
+        assert_eq!(t0, 0);
+        assert_eq!(t1, 50);
+
+        // Ticket 1 finishes before ticket 0
+        writer.commit_pwrite(t1, 50);
+
+        // Crucial invariant: position MUST NOT advance past the uncommitted prefix [0..50)!
+        assert_eq!(
+            writer.position(),
+            0,
+            "position must not advance to 100 while [0..50) has not committed"
+        );
+
+        // Now ticket 0 finishes
+        writer.commit_pwrite(t0, 50);
+
+        // Now position should advance contiguously to 100!
+        assert_eq!(
+            writer.position(),
+            100,
+            "position must advance to 100 once [0..50) completes"
+        );
+    }
+
+    #[test]
+    fn truncate_to_logical_drains_staged_buffer_before_truncating() {
+        let mut writer = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        writer.enable_staging(64 * 1024);
+        writer.write_frame(b"staged-record").unwrap();
+        // Record is staged in user-space buffer — its span is RESERVED but
+        // `position` (drained watermark) has not moved yet (F-CAMP-4).
+        assert!(!writer.staged.as_ref().unwrap().buf.is_empty());
+        assert_eq!(writer.position(), 0);
+
+        writer.truncate_to_logical().unwrap();
+        // Staged buffer must be drained!
+        assert!(writer.staged.as_ref().unwrap().buf.is_empty());
+        let pos = writer.position();
+        assert!(pos > 0);
+        // Bytes must actually be in the sink!
+        let sink = writer.into_inner().into_inner();
+        assert_eq!(sink.len() as u64, pos);
     }
 }
 

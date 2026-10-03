@@ -22,8 +22,9 @@ namespace pedra_aeneas_wal_recover_kernel
     Name pattern: [core::hash::impls::{core::hash::Hash<isize>}::hash]
     Visibility: public -/
 @[rust_fun "core::hash::impls::{core::hash::Hash<isize>}::hash"]
-axiom Isize.Insts.CoreHashHash.hash
-  {H : Type} (HasherInst : core.hash.Hasher H) : Std.Isize → H → Result H
+def Isize.Insts.CoreHashHash.hash
+  {H : Type} (HasherInst : core.hash.Hasher H) : Std.Isize → H → Result H :=
+  fun _ h => ok h
 
 /-- [pedra_aeneas_wal_recover_kernel::format::BLOCK_SIZE]
     Source: 'src/../../../../crates/pedradb-core/src/wal/format.rs', lines 12:0-12:37

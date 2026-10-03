@@ -33,11 +33,11 @@ theorem auto_flush_due_step_work_eq : auto_flush_due_step_work = auto_flush_due_
 theorem auto_flush_due_step_work_positive : 0 < auto_flush_due_step_work := by decide
 
 /-- `scan_kernel.scan_reads_file` (ScanKernel.lean, catalog:scan_guard): derived one-unfolding
-     cost — leaf=1 local=2 dispatch=1
+     cost — leaf=0 local=3 dispatch=1
      cmp=0 arith=0 (nested=0,
      self=0 excluded). AUTO-GENERATED. -/
-def scan_kernel_scan_reads_file_leaf_calls : Nat := 1
-def scan_kernel_scan_reads_file_local_calls : Nat := 2
+def scan_kernel_scan_reads_file_leaf_calls : Nat := 0
+def scan_kernel_scan_reads_file_local_calls : Nat := 3
 def scan_kernel_scan_reads_file_dispatches : Nat := 1
 def scan_kernel_scan_reads_file_cmp_ops : Nat := 0
 def scan_kernel_scan_reads_file_arith_ops : Nat := 0
@@ -93,11 +93,11 @@ theorem probe_order_covering_loop_step_work_eq : probe_order_covering_loop_step_
 theorem probe_order_covering_loop_step_work_positive : 0 < probe_order_covering_loop_step_work := by decide
 
 /-- `level_count_loop` (ScaleKernel.lean, catalog:scale_predict): derived one-unfolding
-     cost — leaf=1 local=0 dispatch=2
+     cost — leaf=0 local=1 dispatch=2
      cmp=2 arith=0 (nested=0,
      self=0 excluded). AUTO-GENERATED. -/
-def level_count_loop_leaf_calls : Nat := 1
-def level_count_loop_local_calls : Nat := 0
+def level_count_loop_leaf_calls : Nat := 0
+def level_count_loop_local_calls : Nat := 1
 def level_count_loop_dispatches : Nat := 2
 def level_count_loop_cmp_ops : Nat := 2
 def level_count_loop_arith_ops : Nat := 0

@@ -34,8 +34,17 @@ pub struct PrefixExtractor {
 }
 
 impl PrefixExtractor {
+    /// Creates a prefix extractor with compile-time or runtime length.
     pub const fn new(prefix_len: usize) -> Self {
         Self { prefix_len }
+    }
+
+    /// Safely constructs a prefix extractor, rejecting zero length.
+    pub fn try_new(prefix_len: usize) -> Result<Self, PrefixHomomorphismViolation> {
+        if prefix_len == 0 {
+            return Err(PrefixHomomorphismViolation::ZeroPrefixLength);
+        }
+        Ok(Self { prefix_len })
     }
 
     #[must_use]
@@ -71,7 +80,31 @@ pub enum PrefixHomomorphismViolation {
         omitted_key: Vec<u8>,
         target_prefix: Vec<u8>,
     },
+    /// Prefix length cannot be zero.
+    ZeroPrefixLength,
+    /// Target prefix for scan/seek cannot be empty.
+    EmptyTargetPrefix,
 }
+
+impl std::fmt::Display for PrefixHomomorphismViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MonotonicityInversion { key_a, key_b, prefix_a, prefix_b } => {
+                write!(f, "Monotonicity inversion: keys [{key_a:?}, {key_b:?}] but prefixes [{prefix_a:?}, {prefix_b:?}]")
+            }
+            Self::PrefixConvexityBroken { start_key, mid_key, end_key, expected_prefix, got_prefix } => {
+                write!(f, "Prefix convexity broken: span [{start_key:?}, {end_key:?}] expected prefix {expected_prefix:?}, mid key {mid_key:?} has {got_prefix:?}")
+            }
+            Self::KeyOmissionInContiguousScan { omitted_key, target_prefix } => {
+                write!(f, "Key {omitted_key:?} omitted during contiguous scan for prefix {target_prefix:?}")
+            }
+            Self::ZeroPrefixLength => write!(f, "Prefix length cannot be zero"),
+            Self::EmptyTargetPrefix => write!(f, "Target scan prefix cannot be empty"),
+        }
+    }
+}
+
+impl std::error::Error for PrefixHomomorphismViolation {}
 
 /// Oráculo de verificação formal de homomorfismo de prefixo.
 pub struct PrefixHomomorphismOracle;
@@ -98,8 +131,11 @@ impl PrefixHomomorphismOracle {
             let ord_prefix = comparator.compare(p_a, p_b);
             let ord_full = comparator.compare(k_a, k_b);
 
-            // Se prefixo A é estritamente maior que prefixo B, mas chave A é menor que B, violação!
-            if ord_prefix == Ordering::Greater && ord_full != Ordering::Greater {
+            // Monotonicidade estrita: se chaves estão invertidas ou prefixo inverte a relação da chave
+            if ord_full == Ordering::Greater
+                || (ord_full == Ordering::Less && ord_prefix == Ordering::Greater)
+                || (ord_full == Ordering::Equal && ord_prefix != Ordering::Equal)
+            {
                 return Err(PrefixHomomorphismViolation::MonotonicityInversion {
                     key_a: k_a.clone(),
                     key_b: k_b.clone(),
@@ -148,15 +184,101 @@ impl PrefixHomomorphismOracle {
 
         for key in sorted_keys {
             let p = extractor.extract(key);
-            if comparator.compare(p, target_prefix) == Ordering::Equal {
+            let ord = comparator.compare(p, target_prefix);
+            if ord == Ordering::Equal {
                 in_prefix = true;
                 results.push(key.as_slice());
-            } else if in_prefix {
-                // Como as chaves são ordenadas e convexas, ao sair do prefixo podemos encerrar
+            } else if in_prefix || ord == Ordering::Greater {
+                // Como as chaves são ordenadas e convexas, ao sair do prefixo ou ultrapassá-lo encerramos
                 break;
             }
         }
 
         results
     }
+
+    /// Safely performs a prefix scan, validating that the target prefix is non-empty.
+    pub fn try_scan_prefix<'a, C: CustomComparator>(
+        comparator: &C,
+        extractor: &PrefixExtractor,
+        sorted_keys: &'a [Vec<u8>],
+        target_prefix: &[u8],
+    ) -> Result<Vec<&'a [u8]>, PrefixHomomorphismViolation> {
+        if target_prefix.is_empty() {
+            return Err(PrefixHomomorphismViolation::EmptyTargetPrefix);
+        }
+        Ok(Self::scan_prefix(comparator, extractor, sorted_keys, target_prefix))
+    }
+
+    /// Locates the index of the first key matching the target prefix via binary search in $O(\log N)$.
+    pub fn seek_prefix_first<C: CustomComparator>(
+        comparator: &C,
+        extractor: &PrefixExtractor,
+        sorted_keys: &[Vec<u8>],
+        target_prefix: &[u8],
+    ) -> Option<usize> {
+        if sorted_keys.is_empty() || target_prefix.is_empty() {
+            return None;
+        }
+        let mut low = 0;
+        let mut high = sorted_keys.len();
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let p = extractor.extract(&sorted_keys[mid]);
+            match comparator.compare(p, target_prefix) {
+                Ordering::Less => low = mid + 1,
+                Ordering::Equal | Ordering::Greater => high = mid,
+            }
+        }
+        if low < sorted_keys.len() && comparator.compare(extractor.extract(&sorted_keys[low]), target_prefix) == Ordering::Equal {
+            Some(low)
+        } else {
+            None
+        }
+    }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_zero_prefix_len_try_new_rejected() {
+        let err = PrefixExtractor::try_new(0).unwrap_err();
+        assert_eq!(err, PrefixHomomorphismViolation::ZeroPrefixLength);
+    }
+
+    #[test]
+    fn test_try_scan_prefix_empty_target_rejected() {
+        let cmp = ByteLexicographicalComparator;
+        let ext = PrefixExtractor::new(4);
+        let keys = [b"user_1".to_vec()];
+        let err = PrefixHomomorphismOracle::try_scan_prefix(&cmp, &ext, &keys, b"").unwrap_err();
+        assert_eq!(err, PrefixHomomorphismViolation::EmptyTargetPrefix);
+    }
+
+    #[test]
+    fn test_seek_prefix_first_binary_search() {
+        let cmp = ByteLexicographicalComparator;
+        let ext = PrefixExtractor::new(4);
+        let keys = vec![
+            b"aaaa_01".to_vec(),
+            b"bbbb_01".to_vec(),
+            b"user_01".to_vec(),
+            b"user_02".to_vec(),
+            b"zone_01".to_vec(),
+        ];
+
+        // Seek existing prefix
+        let idx = PrefixHomomorphismOracle::seek_prefix_first(&cmp, &ext, &keys, b"user");
+        assert_eq!(idx, Some(2));
+
+        // Seek non-existing prefix
+        let idx_none = PrefixHomomorphismOracle::seek_prefix_first(&cmp, &ext, &keys, b"cccc");
+        assert_eq!(idx_none, None);
+
+        // Seek with empty target
+        assert_eq!(PrefixHomomorphismOracle::seek_prefix_first(&cmp, &ext, &keys, b""), None);
+    }
+}
+

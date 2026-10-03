@@ -23,6 +23,10 @@ echo "      charon=$CHARON"
 ( cd "$CRATE" && "$CHARON" cargo --preset=aeneas \
     --start-from 'crate::merge::visible_at' \
     --start-from 'crate::merge::visible_at_as_is' \
+    --start-from 'crate::merge::get_live' \
+    --start-from 'crate::merge::get_live_as_is' \
+    --start-from 'crate::merge::put_crash_reopen_survives' \
+    --start-from 'crate::merge::put_crash_reopen_survives_as_is' \
     --start-from 'crate::merge::range_tombstone_covers' \
     --start-from 'crate::merge::range_tombstone_covers_as_is' \
     --start-from 'crate::merge::user_key_in_range' \
@@ -37,6 +41,11 @@ echo "      charon=$CHARON"
     --start-from 'crate::merge::bound_to_owned' \
     --start-from 'crate::merge::sift_step' \
     --start-from 'crate::merge::sift_step_as_is' \
+    --start-from 'crate::merge::streaming_visible_iter_emitted' \
+    --start-from 'crate::wal::wal_state_kernel::inv_wal' \
+    --start-from 'crate::wal::wal_state_kernel::wal_append' \
+    --start-from 'crate::wal::wal_state_kernel::wal_sync' \
+    --start-from 'crate::wal::wal_state_kernel::wal_ack' \
     --dest-file "$OUT/merge_kernel.llbc" )
 "$AENEAS" -backend lean -dest "$OUT/lean" "$OUT/merge_kernel.llbc"
 # Lean 4 `do` match rejects dotted constructors (`key.ValueType.Deletion`)

@@ -389,35 +389,6 @@ pub fn filesystem_available_bytes(path: &Path) -> io::Result<u64> {
 
 /// Total physical RAM bytes available on the machine, or `None` if unsupported/error.
 #[must_use]
-/// RFC-0306: the memory ceiling this process may actually use — the
-/// cgroup limit when one exists (Docker/K8s), else host physical RAM.
-/// `sysconf(_SC_PHYS_PAGES)` reports the HOST: a container budgeted at
-/// 47 GiB on a 1 TiB host resolved its auto RAM budget from the host and
-/// the 250M hydrate OOM'd at the container wall with backpressure never
-/// armed.
-#[must_use]
-pub fn effective_memory_limit_bytes() -> Option<u64> {
-    let host = total_physical_memory_bytes();
-    // cgroup v2
-    if let Ok(txt) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
-        if let Ok(v) = txt.trim().parse::<u64>() {
-            if v > 0 && v != u64::MAX {
-                return Some(host.map_or(v, |h| h.min(v)));
-            }
-        }
-    }
-    // cgroup v1
-    if let Ok(txt) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes") {
-        if let Ok(v) = txt.trim().parse::<u64>() {
-            // v1 reports a huge sentinel when unlimited.
-            if v > 0 && v < (1u64 << 60) {
-                return Some(host.map_or(v, |h| h.min(v)));
-            }
-        }
-    }
-    host
-}
-
 pub fn total_physical_memory_bytes() -> Option<u64> {
     #[cfg(all(unix, not(miri)))]
     {

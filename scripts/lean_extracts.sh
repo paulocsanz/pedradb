@@ -20,25 +20,37 @@ if [[ -z "$LAKE" ]]; then
   exit 0
 fi
 
-# Only the libs shipped in this tree (engine crates). Raft/store/stream/
-# http/journal/replicate/fold/world/recipes kernels are not shipped here.
 LIBS=(
-  Lookup Changelog Manifest Compact VlogGc
-  Cqe Iter Properties Scale DiskPressure Crc
-  EnvCrash WalState WalRecover Reopen D1Modelo
-  WriteAck WriteAdmission GroupCommit Flush Key
-  Batch Merge ProbeOrder Locktab Scan Cf LsmR1
-  Leveling Posix
+  Lookup RpcMode StoreCompact StoreTxn Snapshot Si IndexVal Changelog
+  Cursor Cl Children Pin Pack Ship Fold Manifest Compact VlogGc TxGlue
+  L28 Tcg Cqe Iter Properties Scale DiskPressure ClientAxis GroupWindow
+  LeftoverPage ScanReadahead WriteCycle DurabilitySpine ProductCrown RatioCurve Crc
+  EnvCrash WalState WalRecover Reopen D1Modelo WriteAck WriteAdmission GroupCommit Flush
+  DcsApply StoreApply StoreCommit StoreAeAck StoreVote Key
+  Lease Txn T1Modelo Membership StoreMembership C1Modelo
+  CapiHandles Batch Merge FailClosed ProbeOrder Locktab Scan Cf Fields LsmR1
+  Leveling Posix Form Auth Path World
 )
 
 # Cross-lib composition: import two Kernels. No generated *Kernel.lean.
 COMPOSE=(
   ComposeIterMerge
+  ComposeMembershipClone
   ComposeScanCrc
+  ComposeC1Membership
   ComposeConcurrent
+  ComposeStoreRaft
+  ComposeStoreFinish
   ComposeStorageWrite
+  ComposeL28
   ComposeDurabilitySpine
   ComposeProductCrown
+  ComposeWriter
+  ComposeRecovery
+  ComposeDefining
+  ComposeProduct
+  ComposePutRecover
+  ComposeM2
   LsmCompactBridges
   LsmCompactDerived
   ProbeLadderBridges
@@ -52,6 +64,7 @@ COMPOSE=(
   CountDerived
   BloomBridges
   BloomMayContainDerived
+  CrcClass
 )
 
 for lib in "${LIBS[@]}"; do
@@ -61,6 +74,10 @@ for lib in "${LIBS[@]}"; do
   fi
   if grep -q "sorry" "$LEAN_DIR/${lib}.lean"; then
     echo "FAIL  ${lib}.lean contains sorry" >&2
+    exit 1
+  fi
+  if grep -q "sorry" "$LEAN_DIR/${lib}Kernel.lean"; then
+    echo "FAIL  ${lib}Kernel.lean contains sorry" >&2
     exit 1
   fi
   if ! grep -q "^theorem " "$LEAN_DIR/${lib}.lean"; then

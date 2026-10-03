@@ -60,6 +60,7 @@ pub struct PetriTransition {
 /// Motor formal de análise da Rede de Petri de background workers.
 pub struct BackgroundWorkerPetriNet {
     transitions: Vec<PetriTransition>,
+    max_capacity_per_place: Option<u32>,
 }
 
 impl Default for BackgroundWorkerPetriNet {
@@ -97,11 +98,69 @@ impl Default for BackgroundWorkerPetriNet {
                     produced_manifest: 0,
                 },
             ],
+            max_capacity_per_place: None,
         }
     }
 }
 
 impl BackgroundWorkerPetriNet {
+    /// Cria uma nova rede de Petri com transições especificadas.
+    pub fn new(transitions: Vec<PetriTransition>) -> Self {
+        Self {
+            transitions,
+            max_capacity_per_place: None,
+        }
+    }
+
+    /// Configura um limite máximo finito de tokens por lugar.
+    pub fn with_capacity_limit(mut self, limit: u32) -> Self {
+        self.max_capacity_per_place = Some(limit);
+        self
+    }
+
+    /// Valida se uma marcação respeita os limites de capacidade dos lugares.
+    pub fn check_capacity(&self, m: &PetriMarking) -> Result<(), PetriNetLivenessViolation> {
+        if let Some(limit) = self.max_capacity_per_place {
+            if m.p_fd_available > limit {
+                return Err(PetriNetLivenessViolation::CapacityLimitExceeded {
+                    resource: "p_fd_available",
+                    tokens: m.p_fd_available,
+                });
+            }
+            if m.p_quota_available > limit {
+                return Err(PetriNetLivenessViolation::CapacityLimitExceeded {
+                    resource: "p_quota_available",
+                    tokens: m.p_quota_available,
+                });
+            }
+            if m.p_manifest_lock > limit {
+                return Err(PetriNetLivenessViolation::CapacityLimitExceeded {
+                    resource: "p_manifest_lock",
+                    tokens: m.p_manifest_lock,
+                });
+            }
+            if m.p_flush_tasks > limit {
+                return Err(PetriNetLivenessViolation::CapacityLimitExceeded {
+                    resource: "p_flush_tasks",
+                    tokens: m.p_flush_tasks,
+                });
+            }
+            if m.p_compact_tasks > limit {
+                return Err(PetriNetLivenessViolation::CapacityLimitExceeded {
+                    resource: "p_compact_tasks",
+                    tokens: m.p_compact_tasks,
+                });
+            }
+            if m.p_blob_gc_tasks > limit {
+                return Err(PetriNetLivenessViolation::CapacityLimitExceeded {
+                    resource: "p_blob_gc_tasks",
+                    tokens: m.p_blob_gc_tasks,
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Avalia se uma transição está habilitada sob a marcação atual.
     pub fn is_enabled(&self, trans: &PetriTransition, m: &PetriMarking) -> bool {
         if m.p_fd_available < trans.required_fd
@@ -119,31 +178,49 @@ impl BackgroundWorkerPetriNet {
         }
     }
 
-    /// Dispara uma transição habilitada, retornando a nova marcação resultante.
-    pub fn fire(&self, trans: &PetriTransition, m: &PetriMarking) -> PetriMarking {
-        assert!(self.is_enabled(trans, m), "Transição deve estar habilitada para disparo");
+    /// Tenta disparar uma transição habilitada de forma segura (sem panic).
+    pub fn try_fire(&self, trans: &PetriTransition, m: &PetriMarking) -> Option<PetriMarking> {
+        if !self.is_enabled(trans, m) {
+            return None;
+        }
 
         let mut next = *m;
-        next.p_fd_available = next.p_fd_available - trans.required_fd + trans.produced_fd;
-        next.p_quota_available = next.p_quota_available - trans.required_quota + trans.produced_quota;
-        next.p_manifest_lock = next.p_manifest_lock - trans.required_manifest + trans.produced_manifest;
+        next.p_fd_available = next
+            .p_fd_available
+            .saturating_sub(trans.required_fd)
+            .saturating_add(trans.produced_fd);
+        next.p_quota_available = next
+            .p_quota_available
+            .saturating_sub(trans.required_quota)
+            .saturating_add(trans.produced_quota);
+        next.p_manifest_lock = next
+            .p_manifest_lock
+            .saturating_sub(trans.required_manifest)
+            .saturating_add(trans.produced_manifest);
 
         match trans.required_task {
-            "flush" => next.p_flush_tasks -= 1,
-            "compact" => next.p_compact_tasks -= 1,
-            "blob_gc" => next.p_blob_gc_tasks -= 1,
+            "flush" => next.p_flush_tasks = next.p_flush_tasks.saturating_sub(1),
+            "compact" => next.p_compact_tasks = next.p_compact_tasks.saturating_sub(1),
+            "blob_gc" => next.p_blob_gc_tasks = next.p_blob_gc_tasks.saturating_sub(1),
             _ => {}
         }
 
-        next
+        Some(next)
     }
 
-    /// Explora o grafo de alcançabilidade a partir da marcação inicial M0 e prova a ausência de deadlocks.
+    /// Dispara uma transição de forma resiliente, retornando a marcação inalterada se desabilitada.
+    pub fn fire(&self, trans: &PetriTransition, m: &PetriMarking) -> PetriMarking {
+        self.try_fire(trans, m).unwrap_or(*m)
+    }
+
+    /// Explora o grafo de alcançabilidade a partir da marcação inicial M0 e prova a ausência de deadlocks e estouros de capacidade.
     pub fn verify_liveness_and_deadlock_freedom(
         &self,
         initial_marking: PetriMarking,
         max_states: usize,
     ) -> Result<usize, PetriNetLivenessViolation> {
+        self.check_capacity(&initial_marking)?;
+
         let mut visited = HashSet::new();
         let mut queue = VecDeque::new();
 
@@ -165,9 +242,9 @@ impl BackgroundWorkerPetriNet {
 
             let mut any_enabled = false;
             for trans in &self.transitions {
-                if self.is_enabled(trans, &curr_m) {
+                if let Some(next_m) = self.try_fire(trans, &curr_m) {
                     any_enabled = true;
-                    let next_m = self.fire(trans, &curr_m);
+                    self.check_capacity(&next_m)?;
                     if !visited.contains(&next_m) {
                         visited.insert(next_m);
                         let mut next_path = path.clone();

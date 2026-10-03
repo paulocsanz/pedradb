@@ -50,16 +50,75 @@ pub enum CrossCfIsolationViolation {
         /// Oldest sequence required by the lagging CF.
         cf_required_seq: u64,
     },
+    /// Checkpoints map cannot be empty.
+    EmptyCheckpoints,
+    /// Record key cannot be empty.
+    EmptyKey,
+    /// Monotonic sequence number cannot be zero.
+    ZeroSequenceNumber,
+}
+
+impl std::fmt::Display for CrossCfIsolationViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CrossCfContamination { cf_id, record_seq, flushed_seq } => write!(
+                f,
+                "Cross-CF contamination: record seq {record_seq} applied to CF {cf_id} despite flushed seq {flushed_seq}"
+            ),
+            Self::UnsafeWalTruncation { segment_max_seq, lagging_cf_id, cf_required_seq } => write!(
+                f,
+                "Unsafe WAL truncation at max seq {segment_max_seq}: CF {lagging_cf_id} still requires seq {cf_required_seq}"
+            ),
+            Self::EmptyCheckpoints => write!(f, "CF checkpoints map cannot be empty"),
+            Self::EmptyKey => write!(f, "Cross-CF WAL record key cannot be empty"),
+            Self::ZeroSequenceNumber => write!(f, "Sequence number cannot be zero"),
+        }
+    }
+}
+
+impl std::error::Error for CrossCfIsolationViolation {}
+
+impl CrossCfWalRecord {
+    /// Creates a record with validation.
+    pub fn try_new(
+        cf_id: ColumnFamilyId,
+        seq: u64,
+        key: Vec<u8>,
+        value: Option<Vec<u8>>,
+    ) -> Result<Self, CrossCfIsolationViolation> {
+        if key.is_empty() {
+            return Err(CrossCfIsolationViolation::EmptyKey);
+        }
+        if seq == 0 {
+            return Err(CrossCfIsolationViolation::ZeroSequenceNumber);
+        }
+        Ok(Self {
+            cf_id,
+            seq,
+            key,
+            value,
+        })
+    }
 }
 
 /// Manages cross-CF recovery partitioning and WAL truncation bounds.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CrossCfReplayManager {
     /// Map of Column Family -> flushed_seq (highest sequence durable in SSTs for that CF).
     pub cf_flushed_checkpoints: BTreeMap<ColumnFamilyId, u64>,
 }
 
 impl CrossCfReplayManager {
+    /// Creates a manager with strict validation of checkpoints.
+    pub fn try_new(checkpoints: BTreeMap<ColumnFamilyId, u64>) -> Result<Self, CrossCfIsolationViolation> {
+        if checkpoints.is_empty() {
+            return Err(CrossCfIsolationViolation::EmptyCheckpoints);
+        }
+        Ok(Self {
+            cf_flushed_checkpoints: checkpoints,
+        })
+    }
+
     /// Creates a manager with established CF flush thresholds.
     #[must_use]
     pub fn new(checkpoints: BTreeMap<ColumnFamilyId, u64>) -> Self {
@@ -132,5 +191,48 @@ impl CrossCfReplayManager {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cross_cf_record_bounds() {
+        assert_eq!(
+            CrossCfWalRecord::try_new(1, 10, vec![], Some(vec![1, 2])),
+            Err(CrossCfIsolationViolation::EmptyKey)
+        );
+        assert_eq!(
+            CrossCfWalRecord::try_new(1, 0, vec![1, 2], Some(vec![3])),
+            Err(CrossCfIsolationViolation::ZeroSequenceNumber)
+        );
+        let rec = CrossCfWalRecord::try_new(2, 42, vec![10], None).expect("valid record");
+        assert_eq!(rec.cf_id, 2);
+        assert_eq!(rec.seq, 42);
+    }
+
+    #[test]
+    fn test_cross_cf_manager_bounds() {
+        assert_eq!(
+            CrossCfReplayManager::try_new(BTreeMap::new()),
+            Err(CrossCfIsolationViolation::EmptyCheckpoints)
+        );
+
+        let mut ckpts = BTreeMap::new();
+        ckpts.insert(1, 100);
+        let mgr = CrossCfReplayManager::try_new(ckpts).expect("valid manager");
+        assert_eq!(mgr.cf_flushed_checkpoints.get(&1), Some(&100));
+    }
+
+    #[test]
+    fn test_cross_cf_error_display() {
+        let err = CrossCfIsolationViolation::EmptyCheckpoints;
+        assert_eq!(format!("{err}"), "CF checkpoints map cannot be empty");
+        let err2 = CrossCfIsolationViolation::EmptyKey;
+        assert_eq!(format!("{err2}"), "Cross-CF WAL record key cannot be empty");
+        let err3 = CrossCfIsolationViolation::ZeroSequenceNumber;
+        assert_eq!(format!("{err3}"), "Sequence number cannot be zero");
     }
 }
