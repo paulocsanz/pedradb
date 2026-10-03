@@ -25,7 +25,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 fn run() -> pedradb_core::Result<()> {
     let dir = scratch("feed");
-    let db = ConcurrentDb::open(&dir)?;
+    let mut db = ConcurrentDb::open(&dir)?;
 
     let cursor = db.last_sequence();
     db.put(b"user/ada", b"active")?;

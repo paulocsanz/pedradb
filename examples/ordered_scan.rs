@@ -26,7 +26,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 fn run() -> pedradb_core::Result<()> {
     let dir = scratch("scan");
-    let db = ConcurrentDb::open(&dir)?;
+    let mut db = ConcurrentDb::open(&dir)?;
 
     // Naive ids: lexicographic order is not numeric order.
     for (k, v) in [

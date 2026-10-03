@@ -27,7 +27,7 @@ fn run() -> pedradb_ops::Result<()> {
     let backups = root.join("backups");
     let restored = root.join("restored");
 
-    let db = ConcurrentDb::open(&live)?;
+    let mut db = ConcurrentDb::open(&live)?;
     db.put(b"epoch", b"base")?;
     db.put(b"k", b"v1")?;
 

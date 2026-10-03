@@ -26,7 +26,7 @@ fn run() -> pedradb_core::Result<()> {
     let dir = scratch("hello");
 
     {
-        let db = ConcurrentDb::open(&dir)?;
+        let mut db = ConcurrentDb::open(&dir)?;
         db.put(b"hello", b"world")?;
         assert_eq!(db.get(b"hello").as_deref(), Some(b"world".as_ref()));
         db.close()?;
