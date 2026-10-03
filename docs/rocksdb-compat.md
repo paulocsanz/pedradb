@@ -112,7 +112,7 @@ handled in the crate, recorded here so they are not re-discovered):
 
 1. **CF scan leakage**: a naive raw-keyspace `default` CF lets other CFs'
    encoded keys leak into full scans. Fixed by prefixing `default` whenever
-   named CFs exist and bounding each CF scan to `prefix, prefix\x01)`.
+   named CFs exist and bounding each CF scan to `[prefix, prefix\x01)`.
 2. **Fault-arm timing**: arming `fail_after(n)` before `Db::open` burns the
    budget on open's own I/O. The harness opens healthy, then arms via the
    shared-`Rc` env clone (same pattern as pedradb-sim).
@@ -269,7 +269,7 @@ not `F_FULLFSYNC`; we do **not** downgrade `sync_all` to win the bench (G1).
 (mixing `F_FULLFSYNC` ~4.8 ms with `fdatasync` ~50 µs is not an engine
 measurement). Official 2× gate is vs `ROCKS_PARITY_FULL_SYNC=1`. Writes
 already meet it; `ycsb_c` / `deps_mvcc_latest` / `deps_scan` wait on P1
-iterators. See [RFC-0031.
+iterators. See RFC-0031.
 
 ### Lab numbers after P0.1 debounce (2026-08-15, interval=64, same records/ops)
 

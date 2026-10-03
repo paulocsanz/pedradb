@@ -115,6 +115,24 @@ impl<R: Read> WalReader<R> {
             }
 
             let header_offset = self.block_cursor;
+            // RFC-0314: Sentinel Seal Frame recognition at logical EOF.
+            if header_offset + crate::wal_segment_seal_kernel::SEAL_FRAME_LEN <= self.block_end {
+                let candidate_slice = &self.block[header_offset..header_offset + crate::wal_segment_seal_kernel::SEAL_FRAME_LEN];
+                if candidate_slice[0..4] == crate::wal_segment_seal_kernel::SEAL_MAGIC.to_le_bytes() {
+                    match crate::wal_segment_seal_kernel::WalPreallocationTracker::parse_frame_or_seal(candidate_slice) {
+                        crate::wal_segment_seal_kernel::SealParseResult::ValidSeal { .. } => {
+                            return Ok(None);
+                        }
+                        crate::wal_segment_seal_kernel::SealParseResult::CorruptFrame(msg) => {
+                            return Err(CoreError::Internal(format!(
+                                "Corrupt seal frame at offset {}: {msg}",
+                                self.current_record_stream_offset()
+                            )));
+                        }
+                        crate::wal_segment_seal_kernel::SealParseResult::TrailingZeroes => {}
+                    }
+                }
+            }
             let rtype_byte = self.block[header_offset + 6];
             let length =
                 decode_length([self.block[header_offset + 4], self.block[header_offset + 5]]);

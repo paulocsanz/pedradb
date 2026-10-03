@@ -10,6 +10,21 @@
 
 #![forbid(unsafe_code)]
 
+/// Violações de limites e invariantes de amplificação RUM.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RumBudgetViolation {
+    /// Número de níveis da árvore LSM deve ser pelo menos 1.
+    InvalidNumLevels,
+    /// Razão de crescimento entre níveis consecutivos (T) deve ser pelo menos 2.
+    InvalidLevelRatio,
+    /// Porcentagem reservada para leitura não pode ultrapassar 100%.
+    ReservedPercentageExceeds100 { percent: u32 },
+    /// Capacidade total de IOPS do dispositivo deve ser estritamente positiva.
+    ZeroTotalDeviceIops,
+    /// Overflow aritmético nos cálculos de limites teóricos.
+    ArithmeticOverflow,
+}
+
 /// Configuration governing LSM amplification and hardware budget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RumBudgetConfig {
@@ -37,6 +52,27 @@ impl Default for RumBudgetConfig {
     }
 }
 
+impl RumBudgetConfig {
+    /// Valida as restrições matemáticas e físicas da configuração RUM.
+    pub fn validate(&self) -> Result<(), RumBudgetViolation> {
+        if self.num_levels == 0 {
+            return Err(RumBudgetViolation::InvalidNumLevels);
+        }
+        if self.level_ratio < 2 {
+            return Err(RumBudgetViolation::InvalidLevelRatio);
+        }
+        if self.reserved_read_iops_percent > 100 {
+            return Err(RumBudgetViolation::ReservedPercentageExceeds100 {
+                percent: self.reserved_read_iops_percent,
+            });
+        }
+        if self.total_device_iops == 0 {
+            return Err(RumBudgetViolation::ZeroTotalDeviceIops);
+        }
+        Ok(())
+    }
+}
+
 /// Calculated theoretical amplification bounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TheoreticalAmplificationBounds {
@@ -44,6 +80,8 @@ pub struct TheoreticalAmplificationBounds {
     pub max_write_amp: u64,
     /// Maximum expected read amplification (disk reads per point lookup) in permille.
     pub max_read_amp_permille: u64,
+    /// Maximum theoretical space amplification factor in permille (1000 = 1.0x).
+    pub max_space_amp_permille: u64,
     /// Minimum guaranteed read IOPS floor.
     pub reserved_read_iops: u64,
     /// Maximum allowable background compaction IOPS ceiling.
@@ -61,25 +99,75 @@ impl RumParetoEvaluator {
         Self { config }
     }
 
-    /// Computes the theoretical upper bounds on read and write amplifications.
-    pub fn compute_bounds(&self) -> TheoreticalAmplificationBounds {
-        // Write Amp <= T * L
-        let max_write_amp = (self.config.level_ratio as u64) * (self.config.num_levels as u64);
+    /// Computa com segurança os limites teóricos de amplificação RUM.
+    pub fn checked_compute_bounds(&self) -> Result<TheoreticalAmplificationBounds, RumBudgetViolation> {
+        self.config.validate()?;
 
-        // Read Amp <= 1 (L_max data block) + sum(FPR across levels)
-        let total_fpr_permille = (self.config.bloom_fpr_permille as u64) * (self.config.num_levels as u64);
-        let max_read_amp_permille = 1000 + total_fpr_permille; // 1000 = 1.0 base read
+        let max_write_amp = (self.config.level_ratio as u64)
+            .checked_mul(self.config.num_levels as u64)
+            .ok_or(RumBudgetViolation::ArithmeticOverflow)?;
 
-        // IOPS split
-        let reserved_read_iops = (self.config.total_device_iops * self.config.reserved_read_iops_percent as u64) / 100;
+        let total_fpr = (self.config.bloom_fpr_permille as u64)
+            .checked_mul(self.config.num_levels as u64)
+            .ok_or(RumBudgetViolation::ArithmeticOverflow)?;
+
+        let max_read_amp_permille = 1000u64
+            .checked_add(total_fpr)
+            .ok_or(RumBudgetViolation::ArithmeticOverflow)?;
+
+        let max_space_amp_permille = if self.config.level_ratio > 1 {
+            1000u64.saturating_add(1000u64 / (self.config.level_ratio as u64 - 1))
+        } else {
+            2000u64
+        };
+
+        let reserved_read_iops = self
+            .config
+            .total_device_iops
+            .checked_mul(self.config.reserved_read_iops_percent as u64)
+            .map(|prod| prod / 100)
+            .unwrap_or_else(|| {
+                (self.config.total_device_iops / 100).saturating_mul(self.config.reserved_read_iops_percent as u64)
+            });
+
         let max_compaction_iops = self.config.total_device_iops.saturating_sub(reserved_read_iops);
 
-        TheoreticalAmplificationBounds {
+        Ok(TheoreticalAmplificationBounds {
             max_write_amp,
             max_read_amp_permille,
+            max_space_amp_permille,
             reserved_read_iops,
             max_compaction_iops,
-        }
+        })
+    }
+
+    /// Computes the theoretical upper bounds on read and write amplifications.
+    pub fn compute_bounds(&self) -> TheoreticalAmplificationBounds {
+        self.checked_compute_bounds().unwrap_or_else(|_| {
+            let max_write_amp = (self.config.level_ratio as u64).saturating_mul(self.config.num_levels as u64);
+            let total_fpr_permille = (self.config.bloom_fpr_permille as u64).saturating_mul(self.config.num_levels as u64);
+            let max_read_amp_permille = 1000u64.saturating_add(total_fpr_permille);
+            let max_space_amp_permille = if self.config.level_ratio > 1 {
+                1000u64.saturating_add(1000u64 / (self.config.level_ratio as u64 - 1))
+            } else {
+                2000u64
+            };
+            let reserved_read_iops = (self.config.total_device_iops / 100).saturating_mul(self.config.reserved_read_iops_percent as u64);
+            let max_compaction_iops = self.config.total_device_iops.saturating_sub(reserved_read_iops);
+            TheoreticalAmplificationBounds {
+                max_write_amp,
+                max_read_amp_permille,
+                max_space_amp_permille,
+                reserved_read_iops,
+                max_compaction_iops,
+            }
+        })
+    }
+
+    /// Regula a admissão de requisições de IOPS de compactação de background, garantindo o piso de leitura.
+    pub fn admit_compaction_iops(&self, requested_compaction_iops: u64) -> Result<u64, RumBudgetViolation> {
+        let bounds = self.checked_compute_bounds()?;
+        Ok(std::cmp::min(requested_compaction_iops, bounds.max_compaction_iops))
     }
 
     /// Evaluates whether an in-flight background compaction burst is within the allowable hardware budget.

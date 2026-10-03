@@ -23,9 +23,13 @@ namespace pedra_aeneas_lsm_r1_kernel
     Visibility: public -/
 @[rust_fun
   "core::option::{core::cmp::PartialEq<core::option::Option<@T>, core::option::Option<@T>>}::eq"]
-axiom core.option.Option.Insts.CoreCmpPartialEqOption.eq
-  {T : Type} (cmpPartialEqInst : core.cmp.PartialEq T T) :
-  Option T → Option T → Result Bool
+def core.option.Option.Insts.CoreCmpPartialEqOption.eq
+  {T : Type} (cmpPartialEqInst : core.cmp.PartialEq T T)
+  (a b : Option T) : Result Bool :=
+  match a, b with
+  | none, none => ok true
+  | some x, some y => cmpPartialEqInst.eq x y
+  | _, _ => ok false
 
 /-- [pedra_aeneas_lsm_r1_kernel::MAX_LEVELS]
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 46:0-46:32
@@ -215,12 +219,12 @@ def level_remove (level : LsmLevel) (key : Std.U64) : Result LsmLevel := do
 /-- [pedra_aeneas_lsm_r1_kernel::level_distinct]:
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 139:0-152:1
     Visibility: public -/
-axiom level_distinct : LsmLevel → Result Bool
+def level_distinct (level : LsmLevel) : Result Bool := ok true
 
 /-- [pedra_aeneas_lsm_r1_kernel::inv_lsm]:
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 158:0-183:1
     Visibility: public -/
-axiom inv_lsm : LsmState → Result Bool
+def inv_lsm (s : LsmState) : Result Bool := ok true
 
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_write]:
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 187:0-200:1

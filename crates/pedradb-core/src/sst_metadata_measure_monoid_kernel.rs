@@ -25,6 +25,66 @@ impl SstMetadataMeasure {
         obsolete_bytes: 0,
     };
 
+    /// Valida que a medida satisfaz as restrições físicas de um SST válido:
+    /// 1. Bytes obsoletos não podem exceder os bytes brutos totais.
+    /// 2. Quantidade de tombstones não pode exceder o total de registros.
+    pub fn is_valid(&self) -> bool {
+        self.obsolete_bytes <= self.raw_data_bytes && self.tombstone_count <= self.record_count
+    }
+
+    /// Constrói uma medida de metadados com validação estrita de integridade física.
+    pub fn try_new(
+        raw_data_bytes: u64,
+        record_count: u64,
+        tombstone_count: u64,
+        obsolete_bytes: u64,
+    ) -> Result<Self, MeasureMonoidViolation> {
+        let m = Self {
+            raw_data_bytes,
+            record_count,
+            tombstone_count,
+            obsolete_bytes,
+        };
+        if !m.is_valid() {
+            return Err(MeasureMonoidViolation::InvalidMeasureBounds {
+                raw_data_bytes,
+                obsolete_bytes,
+                record_count,
+                tombstone_count,
+            });
+        }
+        Ok(m)
+    }
+
+    /// Combina duas medidas com verificação estrita de ausência de overflow aritmético.
+    #[must_use]
+    pub fn checked_combine(self, other: Self) -> Option<Self> {
+        let bypass_overflow = crate::mutate_switch!(
+            crate::mutation_switch_kernel::MUTANT_OVERFLOW_SATURATION_BYPASS,
+            false,
+            true
+        );
+        if bypass_overflow {
+            return Some(self.combine(other));
+        }
+
+        let raw_data_bytes = self.raw_data_bytes.checked_add(other.raw_data_bytes)?;
+        let record_count = self.record_count.checked_add(other.record_count)?;
+        let tombstone_count = self.tombstone_count.checked_add(other.tombstone_count)?;
+        let obsolete_bytes = self.obsolete_bytes.checked_add(other.obsolete_bytes)?;
+        Some(Self {
+            raw_data_bytes,
+            record_count,
+            tombstone_count,
+            obsolete_bytes,
+        })
+    }
+
+    /// Combina duas medidas retornando erro explícito se ocorrer overflow.
+    pub fn try_combine(self, other: Self) -> Result<Self, MeasureMonoidViolation> {
+        self.checked_combine(other).ok_or(MeasureMonoidViolation::IntegerOverflow)
+    }
+
     /// Operação monoidal de combinação aditiva (oplus).
     pub fn combine(self, other: Self) -> Self {
         Self {
@@ -40,7 +100,8 @@ impl SstMetadataMeasure {
         if self.raw_data_bytes == 0 {
             0
         } else {
-            (self.obsolete_bytes.saturating_mul(1000)) / self.raw_data_bytes
+            let permille = (self.obsolete_bytes.saturating_mul(1000)) / self.raw_data_bytes;
+            permille.min(1000)
         }
     }
 }
@@ -57,7 +118,46 @@ pub enum MeasureMonoidViolation {
     },
     /// A associatividade monoidal falhou.
     AssociativityViolation,
+    /// O elemento neutro (identidade) falhou.
+    IdentityViolation,
+    /// A comutatividade monoidal falhou.
+    CommutativityViolation,
+    /// Limites físicos da medida violados (e.g. obsolete_bytes > raw_data_bytes).
+    InvalidMeasureBounds {
+        /// Bytes brutos totais.
+        raw_data_bytes: u64,
+        /// Bytes obsoletos alegados.
+        obsolete_bytes: u64,
+        /// Contagem total de registros.
+        record_count: u64,
+        /// Contagem de tombstones alegada.
+        tombstone_count: u64,
+    },
+    IntegerOverflow,
+    EmptySlices,
 }
+
+impl std::fmt::Display for MeasureMonoidViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PartitionConservationBroken { expected_total, aggregated_slices } => write!(
+                f,
+                "Partition conservation broken: expected total {expected_total:?}, aggregated slices {aggregated_slices:?}"
+            ),
+            Self::AssociativityViolation => write!(f, "Monoid associativity axiom violated"),
+            Self::IdentityViolation => write!(f, "Monoid identity axiom violated"),
+            Self::CommutativityViolation => write!(f, "Monoid commutativity axiom violated"),
+            Self::InvalidMeasureBounds { raw_data_bytes, obsolete_bytes, record_count, tombstone_count } => write!(
+                f,
+                "Invalid measure bounds: raw={raw_data_bytes}, obsolete={obsolete_bytes}, records={record_count}, tombstones={tombstone_count}"
+            ),
+            Self::IntegerOverflow => write!(f, "Integer overflow occurred during monoidal measure combination"),
+            Self::EmptySlices => write!(f, "Slice collection cannot be empty"),
+        }
+    }
+}
+
+impl std::error::Error for MeasureMonoidViolation {}
 
 /// Oráculo de verificação do monoide de medidas de SST.
 pub struct SstMeasureMonoidOracle;
@@ -73,7 +173,9 @@ impl SstMeasureMonoidOracle {
         c: SstMetadataMeasure,
     ) -> Result<(), MeasureMonoidViolation> {
         // Elemento neutro
-        assert_eq!(a.combine(SstMetadataMeasure::IDENTITY), a);
+        if a.combine(SstMetadataMeasure::IDENTITY) != a {
+            return Err(MeasureMonoidViolation::IdentityViolation);
+        }
 
         // Associatividade
         let ab_c = a.combine(b).combine(c);
@@ -83,7 +185,9 @@ impl SstMeasureMonoidOracle {
         }
 
         // Comutatividade
-        assert_eq!(a.combine(b), b.combine(a));
+        if a.combine(b) != b.combine(a) {
+            return Err(MeasureMonoidViolation::CommutativityViolation);
+        }
 
         Ok(())
     }
@@ -94,8 +198,25 @@ impl SstMeasureMonoidOracle {
         original: SstMetadataMeasure,
         slices: &[SstMetadataMeasure],
     ) -> Result<(), MeasureMonoidViolation> {
+        if !original.is_valid() {
+            return Err(MeasureMonoidViolation::InvalidMeasureBounds {
+                raw_data_bytes: original.raw_data_bytes,
+                obsolete_bytes: original.obsolete_bytes,
+                record_count: original.record_count,
+                tombstone_count: original.tombstone_count,
+            });
+        }
+
         let mut total = SstMetadataMeasure::IDENTITY;
         for &slice in slices {
+            if !slice.is_valid() {
+                return Err(MeasureMonoidViolation::InvalidMeasureBounds {
+                    raw_data_bytes: slice.raw_data_bytes,
+                    obsolete_bytes: slice.obsolete_bytes,
+                    record_count: slice.record_count,
+                    tombstone_count: slice.tombstone_count,
+                });
+            }
             total = total.combine(slice);
         }
 
@@ -109,3 +230,42 @@ impl SstMeasureMonoidOracle {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sst_metadata_measure_try_new_red_to_green() {
+        assert!(matches!(
+            SstMetadataMeasure::try_new(100, 10, 2, 200),
+            Err(MeasureMonoidViolation::InvalidMeasureBounds { .. })
+        ));
+        assert!(matches!(
+            SstMetadataMeasure::try_new(100, 10, 20, 50),
+            Err(MeasureMonoidViolation::InvalidMeasureBounds { .. })
+        ));
+        let m = SstMetadataMeasure::try_new(1000, 100, 5, 200).expect("valid");
+        assert_eq!(m.obsolete_permille(), 200);
+    }
+
+    #[test]
+    fn test_checked_and_try_combine_overflow_detection() {
+        let m1 = SstMetadataMeasure {
+            raw_data_bytes: u64::MAX,
+            record_count: 10,
+            tombstone_count: 0,
+            obsolete_bytes: 0,
+        };
+        let m2 = SstMetadataMeasure {
+            raw_data_bytes: 1,
+            record_count: 0,
+            tombstone_count: 0,
+            obsolete_bytes: 0,
+        };
+
+        assert_eq!(m1.checked_combine(m2), None);
+        assert_eq!(m1.try_combine(m2), Err(MeasureMonoidViolation::IntegerOverflow));
+    }
+}
+

@@ -8,15 +8,17 @@
 //! 5. Prova Construtiva de Não-Reúso de Nonce e Integridade de Criptografia em Repouso
 
 use pedradb_core::compaction_banach_contraction_kernel::{
-    BanachCompactionScheduler, CompactionDebtVector,
+    BanachCompactionError, BanachCompactionScheduler, CompactionDebtVector,
 };
 use pedradb_core::crypto_nonce_space_time_kernel::{
-    CryptoNonceGenerator, CryptoSpaceTimeCoords, AEAD_NONCE_SIZE, CANONICAL_NONCE_SIZE,
+    CryptoNonceError, CryptoNonceGenerator, CryptoSpaceTimeCoords, AEAD_NONCE_SIZE,
+    CANONICAL_NONCE_SIZE,
 };
 use pedradb_core::pinned_slice_lease_kernel::{LeaseState, PinnedSliceLease};
 use pedradb_core::separator_order_preservation_kernel::SeparatorOrderOracle;
 use pedradb_core::vlog_hole_alignment_kernel::{
-    DeadValueSpan, SafeHolePunch, VLogHolePunchPlanner, DEFAULT_FS_BLOCK_SIZE,
+    DeadValueSpan, SafeHolePunch, VLogHoleAlignmentError, VLogHolePunchPlanner,
+    DEFAULT_FS_BLOCK_SIZE,
 };
 use std::cmp::Ordering;
 
@@ -58,6 +60,47 @@ fn test_separator_order_preservation_oracle() {
     assert_eq!(res_custom.separator_key, inv_a);
     assert!(SeparatorOrderOracle::verify_bounds(inv_a, inv_b, &res_custom.separator_key, &inverted_cmp));
 }
+
+#[test]
+fn test_separator_order_preservation_boundary_and_successor_green() {
+    let standard_cmp = |a: &[u8], b: &[u8]| a.cmp(b);
+
+    // 1. Truncation when diff_byte + 1 == b[diff_idx] and b has trailing bytes:
+    // a = "abcdef" (6 bytes), b = "abde" (4 bytes).
+    // diff_idx = 2 ('c' vs 'd'). diff_byte + 1 == 'd'.
+    // candidate = "abd" (3 bytes). "abcdef" < "abd" < "abde".
+    // Must be successfully shortened to "abd" (saving 3 bytes).
+    let res = SeparatorOrderOracle::find_shortest_separator(b"abcdef", b"abde", &standard_cmp);
+    assert!(res.was_truncated, "Must successfully truncate to 'abd'");
+    assert_eq!(res.separator_key, b"abd");
+    assert!(SeparatorOrderOracle::verify_bounds(b"abcdef", b"abde", &res.separator_key, &standard_cmp));
+
+    // 2. No length reduction when candidate.len() == a.len()
+    // a = "ab" (len 2), b = "ad" (len 2).
+    // An equal-length candidate saves 0 bytes, so was_truncated must be false.
+    let res_no_len_reduction = SeparatorOrderOracle::find_shortest_separator(b"ab", b"ad", &standard_cmp);
+    assert!(!res_no_len_reduction.was_truncated, "Equal length separator must not report was_truncated=true");
+    assert_eq!(res_no_len_reduction.separator_key, b"ab");
+
+    // 3. Short successor computation for SST block builders
+    let succ = SeparatorOrderOracle::find_short_successor(b"abcdef", &standard_cmp);
+    assert!(succ.was_truncated);
+    assert_eq!(succ.separator_key, b"b");
+    assert_eq!(standard_cmp(b"abcdef", &succ.separator_key), Ordering::Less);
+
+    // 4. Short successor with all 0xff bytes
+    let all_ff = vec![0xff, 0xff, 0xff];
+    let succ_ff = SeparatorOrderOracle::find_short_successor(&all_ff, &standard_cmp);
+    assert!(!succ_ff.was_truncated);
+    assert_eq!(succ_ff.separator_key, all_ff);
+
+    // 5. Short successor under inverted comparator
+    let inverted_cmp = |x: &[u8], y: &[u8]| y.cmp(x);
+    let inv_succ = SeparatorOrderOracle::find_short_successor(b"middle", &inverted_cmp);
+    assert!(!inv_succ.was_truncated);
+    assert_eq!(inv_succ.separator_key, b"middle");
+}
+
 
 #[test]
 fn test_vlog_hole_alignment_planner() {
@@ -112,7 +155,82 @@ fn test_vlog_hole_alignment_planner() {
             punched_bytes: 8192,
         }
     );
+
+    // 5. Invariant: Contiguous sub-block spans must coalesce in byte space before alignment
+    let spans_sub = vec![
+        DeadValueSpan::new(1000, 5000), // 4000 dead bytes
+        DeadValueSpan::new(5000, 9000), // 4000 dead bytes
+    ];
+    let punches_sub = planner.plan_multi_punch(&spans_sub);
+    assert_eq!(
+        punches_sub,
+        vec![SafeHolePunch {
+            aligned_start: 4096,
+            aligned_end: 8192,
+            punched_bytes: 4096,
+        }],
+        "Contiguous sub-block dead spans must coalesce to reclaim enclosed block"
+    );
+
+    // 6. Invariant: Live record span isolation must detect overlap with punch
+    let punch_test = vec![SafeHolePunch {
+        aligned_start: 4096,
+        aligned_end: 8192,
+        punched_bytes: 4096,
+    }];
+    // Live record from 4000 to 4200 crosses into 4096..8192 punch -> MUST NOT be reported as isolated!
+    assert!(
+        !planner.verify_live_span_isolated(4000, 200, &punch_test),
+        "Live record crossing into hole punch must be detected as destroyed"
+    );
 }
+
+#[test]
+fn test_vlog_hole_alignment_validation_and_overflow_green() {
+    // 1. try_new validation for block size
+    assert_eq!(
+        VLogHolePunchPlanner::try_new(0).err(),
+        Some(VLogHoleAlignmentError::InvalidBlockSize(0))
+    );
+    assert_eq!(
+        VLogHolePunchPlanner::try_new(3000).err(),
+        Some(VLogHoleAlignmentError::InvalidBlockSize(3000))
+    );
+    let planner = VLogHolePunchPlanner::try_new(4096).expect("valid block size");
+
+    // 2. DeadValueSpan::try_new validation
+    assert_eq!(
+        DeadValueSpan::try_new(100, 50).err(),
+        Some(VLogHoleAlignmentError::InvalidSpan { start: 100, end: 50 })
+    );
+    let valid_span = DeadValueSpan::try_new(100, 500).expect("valid span");
+    assert_eq!(valid_span.len(), 400);
+
+    // 3. Inverted span len() does not panic under release/debug
+    let inverted = DeadValueSpan { start_offset: 500, end_offset: 100 };
+    assert_eq!(inverted.len(), 0);
+
+    // 4. Overflow at near u64::MAX boundary:
+    // When start_offset cannot be rounded up to a block boundary within u64,
+    // it must return None and NEVER produce aligned_start < start_offset!
+    let near_max_span = DeadValueSpan::new(u64::MAX - 2000, u64::MAX);
+    let punch = planner.plan_span_punch(&near_max_span);
+    if let Some(p) = punch {
+        assert!(
+            p.aligned_start >= near_max_span.start_offset,
+            "CRITICAL INVARIANT VIOLATION: aligned_start ({}) < start_offset ({})",
+            p.aligned_start, near_max_span.start_offset
+        );
+    }
+
+    // 5. Total reclaimed bytes helper
+    let punches = vec![
+        SafeHolePunch { aligned_start: 0, aligned_end: 4096, punched_bytes: 4096 },
+        SafeHolePunch { aligned_start: 8192, aligned_end: 16384, punched_bytes: 8192 },
+    ];
+    assert_eq!(VLogHolePunchPlanner::total_reclaimed_bytes(&punches), 12288);
+}
+
 
 #[test]
 fn test_pinned_slice_lease_decoupling() {
@@ -154,6 +272,44 @@ fn test_pinned_slice_lease_decoupling() {
 }
 
 #[test]
+fn test_pinned_slice_lease_eviction_and_cleanup_green() {
+    let payload = b"block_data_for_unpin_testing".to_vec();
+    let mut lease = PinnedSliceLease::new_pinned(77, payload.clone(), 1000, 20);
+
+    // 1. Initial state inspection
+    assert_eq!(lease.block_id, 77);
+    assert_eq!(lease.remaining_pin_ticks(1005), 15);
+    assert_eq!(lease.get_slice(), Some(payload.as_slice()));
+    assert!(!lease.is_released());
+
+    // 2. check_and_decouple_evict returns the block_id to unpin from cache
+    assert_eq!(lease.check_and_decouple_evict(1015), None); // 15 <= 20
+    assert_eq!(lease.check_and_decouple_evict(1025), Some(77)); // decoupled!
+    assert_eq!(lease.check_and_decouple_evict(1030), None); // already decoupled
+    assert!(lease.is_detached_private());
+    assert_eq!(lease.remaining_pin_ticks(1030), 0);
+    assert_eq!(lease.get_slice(), Some(payload.as_slice()));
+
+    // 3. release_and_unpin when already detached: block was already unpinned
+    assert_eq!(lease.release_and_unpin(), None);
+    assert!(lease.is_released());
+    assert_eq!(lease.get_slice(), None);
+    assert!(lease.payload.is_empty(), "Payload memory must be reclaimed on release");
+
+    // 4. release_and_unpin while still pinned: MUST return block_id to unpin
+    let mut pinned_lease = PinnedSliceLease::new_pinned(88, vec![1, 2, 3], 2000, 100);
+    assert_eq!(pinned_lease.release_and_unpin(), Some(88));
+    assert!(pinned_lease.is_released());
+    assert_eq!(pinned_lease.get_slice(), None);
+
+    // 5. Zero-tick policy: decouples immediately
+    let mut immediate_lease = PinnedSliceLease::new_pinned(99, vec![9, 9], 500, 0);
+    assert_eq!(immediate_lease.check_and_decouple_evict(500), Some(99));
+    assert!(immediate_lease.is_detached_private());
+}
+
+
+#[test]
 fn test_compaction_banach_contraction_scheduler() {
     let gamma = 0.5f64;
     let scheduler = BanachCompactionScheduler::new(gamma);
@@ -190,6 +346,62 @@ fn test_compaction_banach_contraction_scheduler() {
         assert!((debt - 2.0).abs() < 1e-6, "debt {} must converge to 2.0", debt);
     }
 }
+
+#[test]
+fn test_compaction_banach_validation_and_fixed_point_green() {
+    // 1. try_new validation for gamma
+    assert_eq!(
+        BanachCompactionScheduler::try_new(0.0).err(),
+        Some(BanachCompactionError::InvalidGamma(0.0))
+    );
+    assert_eq!(
+        BanachCompactionScheduler::try_new(1.0).err(),
+        Some(BanachCompactionError::InvalidGamma(1.0))
+    );
+    assert_eq!(
+        BanachCompactionScheduler::try_new(-0.5).err(),
+        Some(BanachCompactionError::InvalidGamma(-0.5))
+    );
+    assert!(BanachCompactionScheduler::try_new(f64::NAN).is_err());
+    let scheduler = BanachCompactionScheduler::try_new(0.5).expect("valid gamma");
+
+    // 2. CompactionDebtVector validation against NaN and negative debts
+    assert_eq!(
+        CompactionDebtVector::try_new(vec![1.0, -0.5]).err(),
+        Some(BanachCompactionError::InvalidDebt(-0.5))
+    );
+    assert!(CompactionDebtVector::try_new(vec![1.0, f64::NAN]).is_err());
+    let valid_vector = CompactionDebtVector::try_new(vec![10.0, 5.0, 2.0]).expect("valid debts");
+    assert_eq!(valid_vector.norm_inf(), 10.0);
+
+    // 3. Safe steps_to_convergence validation
+    assert_eq!(
+        scheduler.try_steps_to_convergence(16.0, 0.0).err(),
+        Some(BanachCompactionError::InvalidEpsilon(0.0))
+    );
+    assert_eq!(
+        scheduler.try_steps_to_convergence(16.0, -1.0).err(),
+        Some(BanachCompactionError::InvalidEpsilon(-1.0))
+    );
+    assert_eq!(
+        scheduler.try_steps_to_convergence(-5.0, 0.1).err(),
+        Some(BanachCompactionError::InvalidDebt(-5.0))
+    );
+    // d0 = 16.0, eps = 0.015625 (which is 16 * 0.5^10) -> exactly 10 steps
+    let steps = scheduler.try_steps_to_convergence(16.0, 0.015625).expect("valid steps");
+    assert_eq!(steps, 10);
+
+    // 4. Exact theoretical fixed point computation D* = W / (1 - gamma)
+    let write_load = vec![1.5, 3.0, 0.5];
+    let fixed_point = scheduler.compute_fixed_point(&write_load).expect("fixed point");
+    // With gamma = 0.5, 1 / (1 - 0.5) = 2.0 -> D* = 2 * write_load
+    assert_eq!(fixed_point.level_debts, vec![3.0, 6.0, 1.0]);
+
+    // Verify fixed-point idempotency: T(D*) == D*
+    let transitioned = scheduler.transition_step(&fixed_point, &write_load);
+    assert!(fixed_point.distance_inf(&transitioned) < 1e-12, "T(D*) must be identical to D*");
+}
+
 
 #[test]
 fn test_crypto_nonce_space_time_generator() {
@@ -237,3 +449,40 @@ fn test_crypto_nonce_space_time_generator() {
     assert_ne!(aead_base, aead_file);
     assert_ne!(aead_base, aead_offset);
 }
+
+#[test]
+fn test_crypto_nonce_epoch_overflow_and_parse_green() {
+    let valid_uuid = [7u8; 16];
+    let nil_uuid = [0u8; 16];
+
+    // 1. try_new rejects Nil UUID
+    assert_eq!(
+        CryptoSpaceTimeCoords::try_new(nil_uuid, 1, 1, 0).err(),
+        Some(CryptoNonceError::NilSuperblockUuid)
+    );
+    let coords = CryptoSpaceTimeCoords::try_new(valid_uuid, 100, 200, 4096).expect("valid coords");
+
+    // 2. Canonical nonce roundtrip via parse_canonical_nonce
+    let encoded = CryptoNonceGenerator::generate_canonical_nonce(&coords);
+    let decoded = CryptoNonceGenerator::parse_canonical_nonce(&encoded).expect("valid roundtrip");
+    assert_eq!(decoded, coords);
+
+    // 3. Slice parsing with wrong length
+    assert_eq!(
+        CryptoNonceGenerator::parse_canonical_nonce_slice(&[1, 2, 3]).err(),
+        Some(CryptoNonceError::InvalidCanonicalNonceLength(3))
+    );
+
+    // 4. CRITICAL: High 32-bit epoch barrier collision eradication in AEAD nonce!
+    // If epoch barrier exceeds 2^32, (epoch as u32) without high-bit diffusion collides with epoch % 2^32!
+    let coords_low = CryptoSpaceTimeCoords::new(valid_uuid, 42, 100, 4096);
+    let coords_high = CryptoSpaceTimeCoords::new(valid_uuid, (1u64 << 32) | 42, 100, 4096);
+    let aead_low = CryptoNonceGenerator::derive_aead_nonce_96(&coords_low);
+    let aead_high = CryptoNonceGenerator::derive_aead_nonce_96(&coords_high);
+
+    assert_ne!(
+        aead_low, aead_high,
+        "CRITICAL NONCE REUSE: AEAD nonce collided across epoch barrier overflow (42 vs (1<<32)|42)!"
+    );
+}
+

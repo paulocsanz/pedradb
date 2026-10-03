@@ -49,9 +49,6 @@ pub struct TableCache {
 pub(crate) struct PayloadKit {
     pub source: Arc<dyn crate::env::SstFileSource>,
     pub pool: Arc<SstPayloadPool>,
-    /// Shared plain-image block cache (RFC-0305): verified, decompressed
-    /// block bodies served to the point-seek path under one byte budget.
-    pub plain: Arc<PlainBlockCache>,
 }
 
 impl std::fmt::Debug for PayloadKit {
@@ -153,7 +150,7 @@ impl TableCache {
         }
         let table = Arc::new(SstTable::open_on(env, path)?);
         if let Some(kit) = self.payload_kit() {
-            table.attach_payload_kit(&kit.source, &kit.pool, &kit.plain);
+            table.attach_payload_kit(&kit.source, &kit.pool);
         }
         {
             let mut g = self.inner.lock();
@@ -331,6 +328,15 @@ impl SstPayloadPool {
         self.total.store(g.total, Ordering::Relaxed);
     }
 
+    /// Unregister a table whose file has been deleted or aborted, releasing its accounted resident bytes.
+    pub fn unregister(&self, path: &Path) {
+        let mut g = self.inner.lock();
+        if let Some(old) = g.map.remove(path) {
+            g.total = g.total.saturating_sub(old.bytes);
+            self.total.store(g.total, Ordering::Relaxed);
+        }
+    }
+
     /// Whether a currently-empty file of `bytes` can become resident without
     /// evicting another table. Used by bulk get_hit: hydrate leaves payloads
     /// empty (100M OOM otherwise); 1M/10M point gets promote into the leftover
@@ -408,211 +414,6 @@ impl SstPayloadPool {
 }
 
 const BLOCK_CACHE_SHARDS: usize = 16;
-
-/// Byte-budgeted cache of verified, decompressed SST block bodies for the
-/// point-seek path (RFC-0305).
-///
-/// The Rocks-shaped `set_block_cache` knob lands here: a point get probes
-/// one 16 KiB block, and at dataset ≫ RAM the retained fraction is the
-/// warm-hit rate. Only CRC-verified, fully decompressed images are
-/// inserted, so a hit never re-runs the integrity gate and can never serve
-/// tampered bytes. Lazy LRU with ghost epochs (the F178 pattern) and the
-/// same 16-shard split as [`BlockCache`].
-pub struct PlainBlockCache {
-    /// Total payload-byte budget. Atomic so the Rocks `set_block_cache`
-    /// knob resizes in place (every attached table shares this instance;
-    /// an Arc swap would strand a kit on the old cache) without taking
-    /// every shard lock to apply it. Shrinks land lazily: inserts evict
-    /// down to the new shard budget. Callers clamp to >= 1 — an "empty"
-    /// request degrades to always-miss, never unlimited.
-    pub(crate) budget_bytes: AtomicU64,
-    shards: Box<[Mutex<PlainShard>]>,
-}
-
-#[derive(Debug, Default)]
-struct PlainShard {
-    map: HashMap<(u64, u64), PlainSlot>,
-    /// Recency queue, least-recent-first: `(key, epoch)` in push order. A
-    /// hit re-pushes with a fresh epoch (lazy LRU); earlier queue entries
-    /// for the same key become ghosts that eviction skips and drains.
-    order: VecDeque<((u64, u64), u64)>,
-    epoch: u64,
-    used_bytes: u64,
-    hits: u64,
-    misses: u64,
-}
-
-#[derive(Debug)]
-struct PlainSlot {
-    img: Arc<[u8]>,
-    ins_epoch: u64,
-    bytes: u64,
-}
-
-impl PlainBlockCache {
-    /// Create with a payload-byte budget. Rocks `NewLRUCache` semantics: the
-    /// budget bounds retained decompressed bytes; `0` is clamped to 1 so an
-    /// empty request degrades to always-miss rather than unlimited.
-    #[must_use]
-    pub fn with_budget_bytes(bytes: u64) -> Self {
-        let budget = bytes.max(1);
-        let num_shards = if budget < (BLOCK_CACHE_SHARDS as u64) * 1024 {
-            1
-        } else {
-            BLOCK_CACHE_SHARDS
-        };
-        let shards = (0..num_shards)
-            .map(|_| Mutex::new(PlainShard::default()))
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
-        Self {
-            budget_bytes: AtomicU64::new(budget),
-            shards,
-        }
-    }
-
-    /// Per-shard share of the atomic budget, read per admission so a knob
-    /// store lands on the very next insert without re-locking every shard.
-    fn shard_budget(&self) -> u64 {
-        let total = self.budget_bytes.load(Ordering::Relaxed);
-        if self.shards.len() == 1 {
-            total
-        } else {
-            total.div_ceil(self.shards.len() as u64)
-        }
-    }
-
-    #[inline]
-    fn shard_idx(&self, id: u64, offset: u64) -> usize {
-        if self.shards.len() == 1 {
-            0
-        } else {
-            let h = id.wrapping_mul(FX_SEED) ^ offset;
-            (h as usize) & (self.shards.len() - 1)
-        }
-    }
-
-    /// Verified plain image for `(table instance id, block offset)`, refreshed.
-    #[must_use]
-    pub fn get(&self, id: u64, offset: u64) -> Option<Arc<[u8]>> {
-        let key = (id, offset);
-        let shard = &self.shards[self.shard_idx(id, offset)];
-        let mut g = shard.lock();
-        if g.map.contains_key(&key) {
-            g.hits = g.hits.saturating_add(1);
-            Self::touch_shard(&mut g, &key);
-            return g.map.get(&key).map(|s| Arc::clone(&s.img));
-        }
-        g.misses = g.misses.saturating_add(1);
-        None
-    }
-
-    /// Retain a verified plain image, charging its decompressed length.
-    pub fn insert(&self, id: u64, offset: u64, img: Arc<[u8]>) {
-        let key = (id, offset);
-        let bytes = img.len() as u64;
-        let shard = &self.shards[self.shard_idx(id, offset)];
-        let mut g = shard.lock();
-        if g.map.contains_key(&key) {
-            let old_bytes = g.map.get(&key).map_or(0, |s| s.bytes);
-            g.used_bytes = g.used_bytes.saturating_sub(old_bytes).saturating_add(bytes);
-            g.epoch = g.epoch.wrapping_add(1);
-            let ins_epoch = g.epoch;
-            if let Some(slot) = g.map.get_mut(&key) {
-                slot.img = img;
-                slot.ins_epoch = ins_epoch;
-                slot.bytes = bytes;
-            }
-            g.order.push_back((key, ins_epoch));
-            return;
-        }
-        let shard_budget = self.shard_budget();
-        while shard_budget > 0 && g.used_bytes.saturating_add(bytes) > shard_budget {
-            if !Self::evict_one(&mut g) {
-                break;
-            }
-        }
-        if shard_budget > 0 && g.used_bytes.saturating_add(bytes) > shard_budget {
-            // Single image larger than the whole shard budget: refuse rather
-            // than loop (the probe re-reads from file, correctness intact).
-            return;
-        }
-        g.epoch = g.epoch.wrapping_add(1);
-        let ins_epoch = g.epoch;
-        g.used_bytes = g.used_bytes.saturating_add(bytes);
-        g.map.insert(
-            key,
-            PlainSlot {
-                img,
-                ins_epoch,
-                bytes,
-            },
-        );
-        g.order.push_back((key, ins_epoch));
-    }
-
-    /// Whether an image of `len` decompressed bytes can fit a shard at the
-    /// current budget — a lock-free pre-admission check so the miss path can
-    /// skip the copy + insert when retention is off or cannot hold the image.
-    #[must_use]
-    pub fn admits_len(&self, len: u64) -> bool {
-        self.shard_budget() >= len
-    }
-
-    /// Hit count across shards.
-    #[must_use]
-    pub fn hits(&self) -> u64 {
-        self.shards.iter().map(|s| s.lock().hits).sum()
-    }
-
-    /// Miss count across shards.
-    #[must_use]
-    pub fn misses(&self) -> u64 {
-        self.shards.iter().map(|s| s.lock().misses).sum()
-    }
-
-    /// Retained decompressed bytes.
-    #[must_use]
-    pub fn used_bytes(&self) -> u64 {
-        self.shards.iter().map(|s| s.lock().used_bytes).sum()
-    }
-
-    /// Drop all entries (tests).
-    pub fn clear(&self) {
-        for s in &self.shards {
-            let mut g = s.lock();
-            g.map.clear();
-            g.order.clear();
-            g.used_bytes = 0;
-        }
-    }
-
-    /// Lazy-LRU touch, bounded against hit-only growth (as [`BlockCache`]).
-    fn touch_shard(g: &mut PlainShard, key: &(u64, u64)) {
-        if g.order.len() >= g.map.len().saturating_mul(4).max(64) {
-            return;
-        }
-        g.epoch = g.epoch.wrapping_add(1);
-        let e = g.epoch;
-        if let Some(slot) = g.map.get_mut(key) {
-            slot.ins_epoch = e;
-        }
-        g.order.push_back((*key, e));
-    }
-
-    /// O(1)-amortized LRU evict, skipping ghost queue entries (F178).
-    fn evict_one(g: &mut PlainShard) -> bool {
-        while let Some((old, epoch)) = g.order.pop_front() {
-            if g.map.get(&old).is_some_and(|s| s.ins_epoch == epoch) {
-                if let Some(slot) = g.map.remove(&old) {
-                    g.used_bytes = g.used_bytes.saturating_sub(slot.bytes);
-                }
-                return true;
-            }
-        }
-        false
-    }
-}
 
 /// Block cache for decompressed SST blocks (keyed by absolute path + block index).
 #[derive(Debug)]
@@ -1878,70 +1679,5 @@ mod tests {
             &[3u8, 3, 3],
             "held reader bytes survive eviction"
         );
-    }
-
-    /// RFC-0305 teeth: the byte budget bounds retention with lazy-LRU
-    /// eviction, the (id, offset) key namespaces table instances, an image
-    /// larger than the whole budget is refused, and resize evicts in place.
-    #[test]
-    fn rfc0305_plain_block_cache_budget_generation_and_resize() {
-        use std::sync::Arc as StdArc;
-
-        let c = PlainBlockCache::with_budget_bytes(10_000);
-        let img = |b: u8| StdArc::from(vec![b; 4096].into_boxed_slice()) as StdArc<[u8]>;
-
-        c.insert(1, 0, img(1));
-        c.insert(1, 4096, img(2));
-        assert_eq!(c.used_bytes(), 8192);
-        // Over-budget insert evicts the least-recent entry: (1, 0).
-        c.insert(1, 8192, img(3));
-        assert_eq!(c.used_bytes(), 8192, "budget held after eviction");
-        assert!(c.get(1, 0).is_none(), "LRU entry evicted to fit");
-        assert!(c.get(1, 4096).is_some());
-        assert!(c.get(1, 8192).is_some());
-
-        // Touch (1, 4096) so it is most-recent, then force another eviction.
-        let _ = c.get(1, 4096);
-        c.insert(2, 0, img(4));
-        assert_eq!(c.used_bytes(), 8192);
-        assert!(c.get(1, 8192).is_none(), "untouched entry is the new LRU");
-        assert!(c.get(1, 4096).is_some(), "touched entry survives");
-        assert!(
-            c.get(2, 0).is_some(),
-            "generation key (2, 0) must not collide with the evicted (1, 0)"
-        );
-
-        // Same offset under different generations: coexisting entries, no
-        // shadowing — the stale-bytes bug class the id exists to close.
-        let img_a = StdArc::from(vec![0xAA; 16].into_boxed_slice());
-        let img_b = StdArc::from(vec![0xBB; 16].into_boxed_slice());
-        c.insert(7, 512, StdArc::clone(&img_a));
-        c.insert(8, 512, StdArc::clone(&img_b));
-        assert_eq!(c.get(7, 512).as_deref(), Some(&*img_a));
-        assert_eq!(c.get(8, 512).as_deref(), Some(&*img_b));
-
-        // An image larger than the whole budget is refused; the probe
-        // re-reads from file instead of looping evictions.
-        let tiny = PlainBlockCache::with_budget_bytes(8);
-        tiny.insert(1, 0, img(9));
-        assert_eq!(tiny.used_bytes(), 0);
-        assert!(tiny.get(1, 0).is_none());
-
-        // Knob shrink through the atomic budget: eviction is lazy, the next
-        // admission brings the shard down to the new budget, LRU-first —
-        // both 4 KiB entries go, the small ones (and the new one) stay.
-        c.budget_bytes.store(4100, std::sync::atomic::Ordering::SeqCst);
-        assert_eq!(
-            c.budget_bytes.load(std::sync::atomic::Ordering::SeqCst),
-            4100,
-            "knob lands on the shared budget"
-        );
-        c.insert(9, 0, StdArc::from(vec![0xCC; 16].into_boxed_slice()));
-        assert_eq!(c.used_bytes(), 48, "shrunk budget enforced on next insert");
-        assert!(c.get(1, 4096).is_none());
-        assert!(c.get(2, 0).is_none());
-        assert!(c.get(7, 512).is_some());
-        assert!(c.get(8, 512).is_some());
-        assert!(c.get(9, 0).is_some());
     }
 }

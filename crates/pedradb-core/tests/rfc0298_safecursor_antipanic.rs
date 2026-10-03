@@ -128,6 +128,26 @@ fn test_prefix_delta_restart_adversarial_inputs() {
     corrupt.extend_from_slice(&0u32.to_le_bytes()); // restart[0] = 0
     corrupt.extend_from_slice(&1u32.to_le_bytes()); // num_restarts = 1
     assert!(PrefixDeltaBlock::decode_and_verify(&corrupt, 16).is_err());
+
+    // Zero restart interval must not cause division-by-zero panic
+    assert!(PrefixDeltaBlock::decode_and_verify(&corrupt, 0).is_err());
+    let entry = pedradb_core::prefix_delta_restart_kernel::BlockKvEntry {
+        key: b"k".to_vec(),
+        val: b"v".to_vec(),
+    };
+    let _ = PrefixDeltaBlock::encode_block(&[entry.clone()], 0);
+
+    // Phantom extra restart points beyond entries must be rejected
+    let valid_block = PrefixDeltaBlock::encode_block(&[entry.clone()], 16);
+    // Tamper with valid block: declare 2 restart points instead of 1, pointing to offset 0 and 0
+    let tampered = valid_block.clone();
+    let old_trailer_start = tampered.len() - 8; // restart[0] (4B) + num_restarts (4B)
+    let payload = tampered[..old_trailer_start].to_vec();
+    let mut tampered_block = payload;
+    tampered_block.extend_from_slice(&0u32.to_le_bytes()); // restart[0] = 0
+    tampered_block.extend_from_slice(&0u32.to_le_bytes()); // restart[1] = 0 (duplicate / phantom)
+    tampered_block.extend_from_slice(&2u32.to_le_bytes()); // num_restarts = 2
+    assert!(PrefixDeltaBlock::decode_and_verify(&tampered_block, 16).is_err(), "Phantom or non-monotonic restart offsets must be rejected");
 }
 
 #[test]

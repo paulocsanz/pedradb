@@ -669,7 +669,7 @@ def lock_alphabet_linearizes_n2 (a0 : Std.U8) (a1 : Std.U8) : Result Bool := do
   let b ← lock_alphabet_step false false a0
   if b
   then
-    lock_alphabet_step (a0 = LOCK_ACT_ACQUIRE_WRITE) (a0 = LOCK_ACT_SUBMIT) a1
+    lock_alphabet_step (a0 == LOCK_ACT_ACQUIRE_WRITE) (a0 == LOCK_ACT_SUBMIT) a1
   else ok false
 
 /-- [pedra_aeneas_group_commit_kernel::lock_alphabet_linearizes_n2_as_is]:
@@ -688,18 +688,18 @@ def lock_alphabet_linearizes_n3
   if b
   then
     let b1 ←
-      lock_alphabet_step (a0 = LOCK_ACT_ACQUIRE_WRITE) (a0 = LOCK_ACT_SUBMIT)
+      lock_alphabet_step (a0 == LOCK_ACT_ACQUIRE_WRITE) (a0 == LOCK_ACT_SUBMIT)
         a1
     if b1
     then
       let holding_write ←
         if a0 = LOCK_ACT_ACQUIRE_WRITE
         then ok true
-        else ok (a1 = LOCK_ACT_ACQUIRE_WRITE)
+        else ok (a1 == LOCK_ACT_ACQUIRE_WRITE)
       let submitted ←
         if a0 = LOCK_ACT_SUBMIT
         then ok true
-        else ok (a1 = LOCK_ACT_SUBMIT)
+        else ok (a1 == LOCK_ACT_SUBMIT)
       lock_alphabet_step holding_write submitted a2
     else ok false
   else ok false
@@ -817,8 +817,12 @@ def write_group_wait_grant_as_is
     Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 640:0-646:1
     Visibility: public -/
 def write_group_wait_grant_linearizes (harness_owns : Bool) : Result Bool := do
-  let _ ← write_group_wait_grant harness_owns
-  lock_alphabet_linearizes_n2 LOCK_ACT_ACQUIRE_WRITE LOCK_ACT_SUBMIT
+  let w ← write_group_wait_grant harness_owns
+  match w with
+  | WriteGroupWait.HarnessGrant =>
+    lock_alphabet_linearizes_n2 LOCK_ACT_ACQUIRE_WRITE LOCK_ACT_SUBMIT
+  | WriteGroupWait.OsPark =>
+    lock_alphabet_linearizes_n2 LOCK_ACT_ACQUIRE_WRITE LOCK_ACT_SUBMIT
 
 /-- [pedra_aeneas_group_commit_kernel::write_group_wait_grant_linearizes_as_is]:
     Source: '../../../crates/pedradb-core/src/group_commit_kernel.rs', lines 651:0-653:1

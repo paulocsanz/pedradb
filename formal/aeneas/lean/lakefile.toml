@@ -522,6 +522,9 @@ name = "ComposePutRecover"
 name = "ComposeM2"
 
 [[lean_lib]]
+name = "ComposeM2Spines"
+
+[[lean_lib]]
 name = "MagicKernel"
 
 [[lean_lib]]
@@ -595,3 +598,6 @@ name = "FilterPartitionKernel"
 
 [[lean_lib]]
 name = "FilterPartition"
+
+[[lean_lib]]
+name = "HostTcb"

@@ -639,7 +639,10 @@ pub fn write_group_wait_grant_as_is(_harness_owns: bool) -> WriteGroupWait {
 #[must_use]
 pub fn write_group_wait_grant_linearizes(harness_owns: bool) -> bool {
     match write_group_wait_grant(harness_owns) {
-        WriteGroupWait::HarnessGrant | WriteGroupWait::OsPark => {
+        WriteGroupWait::HarnessGrant => {
+            lock_alphabet_linearizes_n2(LOCK_ACT_ACQUIRE_WRITE, LOCK_ACT_SUBMIT)
+        }
+        WriteGroupWait::OsPark => {
             lock_alphabet_linearizes_n2(LOCK_ACT_ACQUIRE_WRITE, LOCK_ACT_SUBMIT)
         }
     }

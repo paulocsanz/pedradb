@@ -37,12 +37,45 @@ pub enum CodecError {
     },
 }
 
+impl std::fmt::Display for CodecError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnexpectedEndOfStream => write!(f, "Unexpected end of stream while decoding block"),
+            Self::InvalidBackreferenceOffset { offset, output_len } => write!(
+                f,
+                "Invalid backreference offset {offset} for output length {output_len}"
+            ),
+            Self::LengthMismatch { declared_len, actual_len } => write!(
+                f,
+                "Codec length mismatch: declared {declared_len} != actual decoded {actual_len}"
+            ),
+            Self::BlockSizeExceeded { size, max_size } => write!(
+                f,
+                "Block size {size} exceeds maximum allowable capacity {max_size}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CodecError {}
+
 /// A verified, deterministic byte codec implementing a run-length and literal token scheme.
 pub struct BlockCodec;
 
 impl BlockCodec {
     /// Maximum allowed uncompressed block size (4 MiB).
     pub const MAX_BLOCK_SIZE: usize = 4 * 1024 * 1024;
+
+    /// Compresses a raw byte slice with capacity bounds checking.
+    pub fn try_compress(input: &[u8]) -> Result<Vec<u8>, CodecError> {
+        if input.len() > Self::MAX_BLOCK_SIZE {
+            return Err(CodecError::BlockSizeExceeded {
+                size: input.len(),
+                max_size: Self::MAX_BLOCK_SIZE,
+            });
+        }
+        Ok(Self::compress(input))
+    }
 
     /// Compresses a raw byte slice using a deterministic token-based encoding.
     /// Format:
@@ -186,5 +219,24 @@ impl BlockCodec {
             Ok(decompressed) => decompressed == input,
             Err(_) => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_codec_inversion_bounds_red_to_green() {
+        let oversized = vec![0u8; BlockCodec::MAX_BLOCK_SIZE + 1];
+        assert_eq!(
+            BlockCodec::try_compress(&oversized).err(),
+            Some(CodecError::BlockSizeExceeded {
+                size: BlockCodec::MAX_BLOCK_SIZE + 1,
+                max_size: BlockCodec::MAX_BLOCK_SIZE,
+            })
+        );
+
+        assert_eq!(BlockCodec::decompress(&[]).err(), Some(CodecError::UnexpectedEndOfStream));
     }
 }

@@ -10,9 +10,45 @@
 
 #![forbid(unsafe_code)]
 
+use std::fmt;
+
 /// Golden ratio and prime constants for 2-independent universal hashing.
 const PRIME_64_A: u64 = 0x9E3779B97F4A7C15;
 const PRIME_64_B: u64 = 0xBF58476D1CE4E5B9;
+
+/// Maximum allowable probes to prevent algorithmic complexity DoS.
+pub const MAX_BLOOM_PROBES: u32 = 64;
+
+/// Errors resulting from invalid Bloom filter parameters or security constraints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntropyBloomError {
+    /// Salt is zero, which disables per-table entropy and leaves filter vulnerable to hash flooding.
+    ZeroEntropySalt,
+    /// Probe count is zero.
+    ZeroProbes,
+    /// Probe count exceeds safety threshold of 64 probes per key.
+    ExcessiveProbes {
+        /// Attempted probe count.
+        probes: u32,
+    },
+    /// Total bit capacity is zero.
+    ZeroBitCapacity,
+}
+
+impl fmt::Display for EntropyBloomError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ZeroEntropySalt => write!(f, "Table entropy salt cannot be zero"),
+            Self::ZeroProbes => write!(f, "Number of probes cannot be zero"),
+            Self::ExcessiveProbes { probes } => {
+                write!(f, "Number of probes {} exceeds maximum allowed {}", probes, MAX_BLOOM_PROBES)
+            }
+            Self::ZeroBitCapacity => write!(f, "Total bit capacity cannot be zero"),
+        }
+    }
+}
+
+impl std::error::Error for EntropyBloomError {}
 
 /// Per-table entropy configuration and filter builder.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,13 +81,44 @@ pub enum FilterDensityStatus {
 impl EntropyBloomFilter {
     /// Creates a new salted Bloom filter with `total_bits` and `table_salt`.
     pub fn new(total_bits: usize, num_probes: u32, table_salt: u64) -> Self {
+        Self::try_new(total_bits, num_probes, table_salt).unwrap_or_else(|_| {
+            let byte_len = (total_bits + 7) / 8;
+            Self {
+                table_salt: if table_salt == 0 { 0x517c_c1b7_2722_0a95 } else { table_salt },
+                bits: vec![0u8; byte_len.max(1)],
+                num_probes: num_probes.clamp(1, MAX_BLOOM_PROBES),
+                items_count: 0,
+            }
+        })
+    }
+
+    /// Safely constructs a new salted Bloom filter, rejecting zero salts, zero capacity,
+    /// and excessive probes (>64).
+    pub fn try_new(
+        total_bits: usize,
+        num_probes: u32,
+        table_salt: u64,
+    ) -> Result<Self, EntropyBloomError> {
+        if table_salt == 0 {
+            return Err(EntropyBloomError::ZeroEntropySalt);
+        }
+        if total_bits == 0 {
+            return Err(EntropyBloomError::ZeroBitCapacity);
+        }
+        if num_probes == 0 {
+            return Err(EntropyBloomError::ZeroProbes);
+        }
+        if num_probes > MAX_BLOOM_PROBES {
+            return Err(EntropyBloomError::ExcessiveProbes { probes: num_probes });
+        }
+
         let byte_len = (total_bits + 7) / 8;
-        Self {
+        Ok(Self {
             table_salt,
             bits: vec![0u8; byte_len.max(1)],
-            num_probes: num_probes.max(1),
+            num_probes,
             items_count: 0,
-        }
+        })
     }
 
     /// Total capacity in bits.
@@ -89,7 +156,7 @@ impl EntropyBloomFilter {
             let bit_offset = bit_idx % 8;
             self.bits[byte_idx] |= 1 << bit_offset;
         }
-        self.items_count += 1;
+        self.items_count = self.items_count.saturating_add(1);
     }
 
     /// Checks if a key may be present.
@@ -121,3 +188,42 @@ impl EntropyBloomFilter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bloom_entropy_hardening_red_to_green() {
+        // 1. Rejeita salt zero
+        assert_eq!(
+            EntropyBloomFilter::try_new(1024, 4, 0),
+            Err(EntropyBloomError::ZeroEntropySalt)
+        );
+
+        // 2. Rejeita probes zero
+        assert_eq!(
+            EntropyBloomFilter::try_new(1024, 0, 0x1234),
+            Err(EntropyBloomError::ZeroProbes)
+        );
+
+        // 3. Rejeita probes excessivos (>64)
+        assert_eq!(
+            EntropyBloomFilter::try_new(1024, 100, 0x1234),
+            Err(EntropyBloomError::ExcessiveProbes { probes: 100 })
+        );
+
+        // 4. Rejeita capacidade zero de bits
+        assert_eq!(
+            EntropyBloomFilter::try_new(0, 4, 0x1234),
+            Err(EntropyBloomError::ZeroBitCapacity)
+        );
+
+        // 5. Sucesso e saturação sem overflow
+        let mut filter = EntropyBloomFilter::try_new(1024, 4, 0x1234).unwrap();
+        filter.items_count = u64::MAX;
+        filter.insert(b"test_key");
+        assert_eq!(filter.items_count, u64::MAX); // saturating_add previne overflow
+    }
+}
+

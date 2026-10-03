@@ -264,9 +264,16 @@ fn test_pilar5_ftl_erase_boundary_alignment_and_discard() {
 fn test_pilar6_cross_device_exdev_migration_barrier() {
     let file_id = 999;
     let mut oracle = CrossDeviceTransferOracle::new(file_id);
+    assert_eq!(oracle.file_id(), 999);
+
+    // Mismatched file ID is strictly rejected
+    assert_eq!(
+        oracle.advance_for_file(888, CrossDevicePhase::TargetTempSynced),
+        Err(CrossDeviceViolation::FileIdMismatch { expected: 999, found: 888 })
+    );
 
     // 1. Advance through valid lifecycle
-    assert!(oracle.advance_to(CrossDevicePhase::TargetTempSynced).is_ok());
+    assert!(oracle.advance_for_file(999, CrossDevicePhase::TargetTempSynced).is_ok());
     assert!(oracle.advance_to(CrossDevicePhase::TargetFinalized).is_ok());
 
     // 2. Pre-manifest crash recovery: rolls back to source

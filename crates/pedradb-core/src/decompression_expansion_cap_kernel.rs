@@ -39,11 +39,22 @@ pub enum DecompressionCapError {
         /// Maximum allowed bytes.
         max_allowed: usize,
     },
+    /// Decompressed output is shorter than declared length (unexpected short/truncated stream).
+    TruncatedOutput {
+        /// Actual bytes produced.
+        produced: usize,
+        /// Expected declared length.
+        expected: usize,
+    },
     /// Compressed input is corrupted or malformed.
     CorruptedInput {
         /// Diagnostic reason.
         reason: String,
     },
+    /// Maximum expansion ratio cannot be zero.
+    ZeroExpansionRatio,
+    /// Absolute size ceiling cannot be zero bytes.
+    ZeroAbsoluteBytes,
 }
 
 impl fmt::Display for DecompressionCapError {
@@ -61,8 +72,17 @@ impl fmt::Display for DecompressionCapError {
             Self::RuntimeBudgetExceeded { bytes_produced, max_allowed } => {
                 write!(f, "decompression runtime budget exceeded: {bytes_produced}B > {max_allowed}B")
             }
+            Self::TruncatedOutput { produced, expected } => {
+                write!(f, "decompressed output truncated: produced {produced}B < declared {expected}B")
+            }
             Self::CorruptedInput { reason } => {
                 write!(f, "corrupted compressed input: {reason}")
+            }
+            Self::ZeroExpansionRatio => {
+                write!(f, "max expansion ratio cannot be zero")
+            }
+            Self::ZeroAbsoluteBytes => {
+                write!(f, "max absolute bytes cannot be zero")
             }
         }
     }
@@ -77,6 +97,22 @@ pub struct DecompressionCapPolicy {
     pub max_expansion_ratio: u32,
     /// Absolute ceiling on uncompressed block size in bytes.
     pub max_absolute_bytes: usize,
+}
+
+impl DecompressionCapPolicy {
+    /// Creates a validated policy rejecting zero values.
+    pub fn try_new(max_expansion_ratio: u32, max_absolute_bytes: usize) -> Result<Self, DecompressionCapError> {
+        if max_expansion_ratio == 0 {
+            return Err(DecompressionCapError::ZeroExpansionRatio);
+        }
+        if max_absolute_bytes == 0 {
+            return Err(DecompressionCapError::ZeroAbsoluteBytes);
+        }
+        Ok(Self {
+            max_expansion_ratio,
+            max_absolute_bytes,
+        })
+    }
 }
 
 impl Default for DecompressionCapPolicy {
@@ -94,6 +130,17 @@ pub struct DecompressionCapGovernor {
 }
 
 impl DecompressionCapGovernor {
+    /// Creates a new governor with custom policy, validating bounds.
+    pub fn try_new(policy: DecompressionCapPolicy) -> Result<Self, DecompressionCapError> {
+        if policy.max_expansion_ratio == 0 {
+            return Err(DecompressionCapError::ZeroExpansionRatio);
+        }
+        if policy.max_absolute_bytes == 0 {
+            return Err(DecompressionCapError::ZeroAbsoluteBytes);
+        }
+        Ok(Self { policy })
+    }
+
     /// Creates a new governor with custom policy.
     #[must_use]
     pub fn new(policy: DecompressionCapPolicy) -> Self {
@@ -129,15 +176,18 @@ impl DecompressionCapGovernor {
         Ok(())
     }
 
-    /// Safely unpacks run-length or raw compressed data under strict output cap monitoring.
-    pub fn safe_unpack(
+    /// Safely unpacks run-length or raw compressed data directly into an existing buffer.
+    /// Reuses existing vector capacity and wipes destination on any error to prevent leak/forensics.
+    pub fn safe_unpack_into(
         &self,
         compressed: &[u8],
         declared_len: usize,
-    ) -> Result<Vec<u8>, DecompressionCapError> {
+        dest: &mut Vec<u8>,
+    ) -> Result<usize, DecompressionCapError> {
         self.pre_validate_header(compressed.len(), declared_len)?;
+        dest.clear();
+        dest.reserve(declared_len.min(64 * 1024));
 
-        let mut output = Vec::with_capacity(declared_len.min(64 * 1024));
         let mut cursor = 0;
 
         // Structured unpacker: reads tagged sequences [flag: 0 = literal, 1 = repeat]
@@ -148,6 +198,7 @@ impl DecompressionCapGovernor {
             if tag == 0 {
                 // Literal run: next 2 bytes length, followed by bytes
                 if cursor + 2 > compressed.len() {
+                    dest.clear();
                     return Err(DecompressionCapError::CorruptedInput {
                         reason: "truncated literal header".to_string(),
                     });
@@ -155,21 +206,24 @@ impl DecompressionCapGovernor {
                 let len = u16::from_le_bytes([compressed[cursor], compressed[cursor + 1]]) as usize;
                 cursor += 2;
                 if cursor + len > compressed.len() {
+                    dest.clear();
                     return Err(DecompressionCapError::CorruptedInput {
                         reason: "truncated literal payload".to_string(),
                     });
                 }
-                if output.len() + len > declared_len {
+                if dest.len().saturating_add(len) > declared_len {
+                    dest.clear();
                     return Err(DecompressionCapError::RuntimeBudgetExceeded {
-                        bytes_produced: output.len() + len,
+                        bytes_produced: dest.len() + len,
                         max_allowed: declared_len,
                     });
                 }
-                output.extend_from_slice(&compressed[cursor..cursor + len]);
+                dest.extend_from_slice(&compressed[cursor..cursor + len]);
                 cursor += len;
             } else if tag == 1 {
                 // Repeat run: next 2 bytes count, next byte value
                 if cursor + 3 > compressed.len() {
+                    dest.clear();
                     return Err(DecompressionCapError::CorruptedInput {
                         reason: "truncated repeat header".to_string(),
                     });
@@ -177,13 +231,193 @@ impl DecompressionCapGovernor {
                 let count = u16::from_le_bytes([compressed[cursor], compressed[cursor + 1]]) as usize;
                 let val = compressed[cursor + 2];
                 cursor += 3;
-                if output.len() + count > declared_len {
+                if dest.len().saturating_add(count) > declared_len {
+                    dest.clear();
                     return Err(DecompressionCapError::RuntimeBudgetExceeded {
-                        bytes_produced: output.len() + count,
+                        bytes_produced: dest.len() + count,
                         max_allowed: declared_len,
                     });
                 }
-                output.resize(output.len() + count, val);
+                dest.resize(dest.len() + count, val);
+            } else {
+                dest.clear();
+                return Err(DecompressionCapError::CorruptedInput {
+                    reason: format!("unknown run tag {tag}"),
+                });
+            }
+        }
+
+        Ok(dest.len())
+    }
+
+    /// Safely unpacks run-length or raw compressed data under strict output cap monitoring.
+    pub fn safe_unpack(
+        &self,
+        compressed: &[u8],
+        declared_len: usize,
+    ) -> Result<Vec<u8>, DecompressionCapError> {
+        let mut output = Vec::with_capacity(declared_len.min(64 * 1024));
+        self.safe_unpack_into(compressed, declared_len, &mut output)?;
+        Ok(output)
+    }
+
+    /// Safely unpacks compressed data requiring that the output matches `declared_len` exactly.
+    pub fn safe_unpack_exact(
+        &self,
+        compressed: &[u8],
+        declared_len: usize,
+    ) -> Result<Vec<u8>, DecompressionCapError> {
+        let output = self.safe_unpack(compressed, declared_len)?;
+        if output.len() != declared_len {
+            return Err(DecompressionCapError::TruncatedOutput {
+                produced: output.len(),
+                expected: declared_len,
+            });
+        }
+        Ok(output)
+    }
+}
+
+/// Incremental streaming decoder that unpacks compressed input into bounded chunks of at most M bytes.
+pub struct StreamingBoundedDecoder<'a> {
+    _governor: &'a DecompressionCapGovernor,
+    max_chunk_bytes: usize,
+    total_budget: usize,
+    compressed_cursor: usize,
+    pending_repeat: Option<(usize, u8)>,
+    pending_literal_range: Option<(usize, usize)>,
+    total_produced: usize,
+}
+
+impl<'a> StreamingBoundedDecoder<'a> {
+    /// Creates a new streaming bounded decoder with maximum chunk size M and total budget.
+    #[must_use]
+    pub fn new(
+        governor: &'a DecompressionCapGovernor,
+        max_chunk_bytes: usize,
+        total_budget: usize,
+    ) -> Self {
+        Self {
+            _governor: governor,
+            max_chunk_bytes: max_chunk_bytes.max(1),
+            total_budget,
+            compressed_cursor: 0,
+            pending_repeat: None,
+            pending_literal_range: None,
+            total_produced: 0,
+        }
+    }
+
+    /// Decodes the next bounded chunk from the compressed stream, producing at most `max_chunk_bytes`.
+    /// Returns `Ok(None)` when EOF is reached.
+    pub fn decode_next_chunk(
+        &mut self,
+        compressed: &[u8],
+    ) -> Result<Option<Vec<u8>>, DecompressionCapError> {
+        if self.compressed_cursor >= compressed.len()
+            && self.pending_repeat.is_none()
+            && self.pending_literal_range.is_none()
+        {
+            return Ok(None);
+        }
+
+        let mut chunk = Vec::with_capacity(self.max_chunk_bytes);
+
+        while chunk.len() < self.max_chunk_bytes {
+            // 1. Drain pending literal range if any
+            if let Some((start, end)) = self.pending_literal_range.take() {
+                let avail = end.saturating_sub(start);
+                let to_take = avail.min(self.max_chunk_bytes - chunk.len());
+                let new_total = self.total_produced.saturating_add(to_take);
+                if new_total > self.total_budget {
+                    return Err(DecompressionCapError::RuntimeBudgetExceeded {
+                        bytes_produced: new_total,
+                        max_allowed: self.total_budget,
+                    });
+                }
+                chunk.extend_from_slice(&compressed[start..start + to_take]);
+                self.total_produced = new_total;
+                if avail > to_take {
+                    self.pending_literal_range = Some((start + to_take, end));
+                    break;
+                }
+            }
+
+            // 2. Drain pending repeat if any
+            if let Some((remaining, val)) = self.pending_repeat.take() {
+                let to_take = remaining.min(self.max_chunk_bytes - chunk.len());
+                let new_total = self.total_produced.saturating_add(to_take);
+                if new_total > self.total_budget {
+                    return Err(DecompressionCapError::RuntimeBudgetExceeded {
+                        bytes_produced: new_total,
+                        max_allowed: self.total_budget,
+                    });
+                }
+                chunk.resize(chunk.len() + to_take, val);
+                self.total_produced = new_total;
+                if remaining > to_take {
+                    self.pending_repeat = Some((remaining - to_take, val));
+                    break;
+                }
+            }
+
+            if self.compressed_cursor >= compressed.len() {
+                break;
+            }
+
+            let tag = compressed[self.compressed_cursor];
+            self.compressed_cursor += 1;
+
+            if tag == 0 {
+                // Literal run
+                if self.compressed_cursor + 2 > compressed.len() {
+                    return Err(DecompressionCapError::CorruptedInput {
+                        reason: "truncated literal header".to_string(),
+                    });
+                }
+                let len = u16::from_le_bytes([
+                    compressed[self.compressed_cursor],
+                    compressed[self.compressed_cursor + 1],
+                ]) as usize;
+                self.compressed_cursor += 2;
+                if self.compressed_cursor + len > compressed.len() {
+                    return Err(DecompressionCapError::CorruptedInput {
+                        reason: "truncated literal payload".to_string(),
+                    });
+                }
+
+                let avail_in_chunk = self.max_chunk_bytes - chunk.len();
+                let to_take = len.min(avail_in_chunk);
+                let new_total = self.total_produced.saturating_add(to_take);
+                if new_total > self.total_budget {
+                    return Err(DecompressionCapError::RuntimeBudgetExceeded {
+                        bytes_produced: new_total,
+                        max_allowed: self.total_budget,
+                    });
+                }
+
+                chunk.extend_from_slice(&compressed[self.compressed_cursor..self.compressed_cursor + to_take]);
+                self.total_produced = new_total;
+                if len > to_take {
+                    self.pending_literal_range = Some((self.compressed_cursor + to_take, self.compressed_cursor + len));
+                    self.compressed_cursor += len;
+                    break;
+                }
+                self.compressed_cursor += len;
+            } else if tag == 1 {
+                // Repeat run
+                if self.compressed_cursor + 3 > compressed.len() {
+                    return Err(DecompressionCapError::CorruptedInput {
+                        reason: "truncated repeat header".to_string(),
+                    });
+                }
+                let count = u16::from_le_bytes([
+                    compressed[self.compressed_cursor],
+                    compressed[self.compressed_cursor + 1],
+                ]) as usize;
+                let val = compressed[self.compressed_cursor + 2];
+                self.compressed_cursor += 3;
+                self.pending_repeat = Some((count, val));
             } else {
                 return Err(DecompressionCapError::CorruptedInput {
                     reason: format!("unknown run tag {tag}"),
@@ -191,6 +425,59 @@ impl DecompressionCapGovernor {
             }
         }
 
-        Ok(output)
+        if chunk.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(chunk))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decompression_cap_policy_bounds() {
+        assert_eq!(
+            DecompressionCapPolicy::try_new(0, 1024),
+            Err(DecompressionCapError::ZeroExpansionRatio)
+        );
+        assert_eq!(
+            DecompressionCapPolicy::try_new(1024, 0),
+            Err(DecompressionCapError::ZeroAbsoluteBytes)
+        );
+
+        let policy = DecompressionCapPolicy::try_new(100, 1024 * 1024).expect("valid policy");
+        let gov = DecompressionCapGovernor::try_new(policy).expect("valid governor");
+
+        // Validate excessive expansion
+        let err = gov.pre_validate_header(1, 101).unwrap_err();
+        match err {
+            DecompressionCapError::ExcessiveDeclaredExpansion { ratio, max_ratio, .. } => {
+                assert_eq!(ratio, 101);
+                assert_eq!(max_ratio, 100);
+            }
+            _ => panic!("unexpected error: {err:?}"),
+        }
+
+        // Validate ceiling exceeded
+        let err2 = gov.pre_validate_header(100, 1024 * 1024 + 1).unwrap_err();
+        match err2 {
+            DecompressionCapError::AbsoluteCeilingExceeded { declared_len, ceiling } => {
+                assert_eq!(declared_len, 1024 * 1024 + 1);
+                assert_eq!(ceiling, 1024 * 1024);
+            }
+            _ => panic!("unexpected error: {err2:?}"),
+        }
+    }
+
+    #[test]
+    fn test_decompression_cap_display() {
+        let err = DecompressionCapError::ZeroExpansionRatio;
+        assert_eq!(format!("{err}"), "max expansion ratio cannot be zero");
+
+        let err2 = DecompressionCapError::ZeroAbsoluteBytes;
+        assert_eq!(format!("{err2}"), "max absolute bytes cannot be zero");
     }
 }

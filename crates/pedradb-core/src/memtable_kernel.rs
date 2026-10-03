@@ -192,7 +192,7 @@ impl<'a> MemInternalRange<'a> {
     /// hot user's versions one by one — the shared deps memtable holds
     /// dozens per hot key after apply). No-op when positioned elsewhere.
     fn step_user(&mut self, user: &[u8]) {
-        if self
+        while self
             .peek()
             .is_some_and(|(k, _)| k.user_key.as_ref() == user)
         {
@@ -4158,5 +4158,41 @@ mod tests {
             .collect();
         assert_eq!(old.len(), 1);
         assert_eq!(&old[0].1[..], b"v".as_slice());
+    }
+
+    #[test]
+    fn rfc0307_test_step_user_skips_only_matching_user_map_and_merge() {
+        // Case 1: MemInternalRange (map-only after spill_tail)
+        {
+            let mut mt = MemTable::new();
+            mt.put(Bytes::copy_from_slice(b"alpha"), 1, b"v1".as_slice());
+            mt.put(Bytes::copy_from_slice(b"alpha"), 2, b"v2".as_slice());
+            mt.put(Bytes::copy_from_slice(b"beta"), 3, b"v3".as_slice());
+            mt.spill_tail();
+
+            let mut it = mt.iter_internal_iter(Bound::Unbounded, Bound::Unbounded);
+            it.step_user(b"mismatch"); // must NOT skip alpha
+            assert_eq!(it.next().unwrap().0.user_key.as_ref(), b"alpha");
+
+            let mut it = mt.iter_internal_iter(Bound::Unbounded, Bound::Unbounded);
+            it.step_user(b"alpha"); // MUST skip alpha to beta
+            assert_eq!(it.next().unwrap().0.user_key.as_ref(), b"beta");
+        }
+
+        // Case 2: MemInternalMerge (tail present without spill_tail)
+        {
+            let mut mt = MemTable::new();
+            mt.put(Bytes::copy_from_slice(b"alpha"), 1, b"v1".as_slice());
+            mt.put(Bytes::copy_from_slice(b"alpha"), 2, b"v2".as_slice());
+            mt.put(Bytes::copy_from_slice(b"beta"), 3, b"v3".as_slice());
+
+            let mut it = mt.iter_internal_iter(Bound::Unbounded, Bound::Unbounded);
+            it.step_user(b"mismatch"); // must NOT skip alpha
+            assert_eq!(it.next().unwrap().0.user_key.as_ref(), b"alpha");
+
+            let mut it = mt.iter_internal_iter(Bound::Unbounded, Bound::Unbounded);
+            it.step_user(b"alpha"); // MUST skip alpha to beta
+            assert_eq!(it.next().unwrap().0.user_key.as_ref(), b"beta");
+        }
     }
 }

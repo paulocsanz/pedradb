@@ -47,8 +47,6 @@ pub mod d1_modelo_kernel;
 #[doc(hidden)]
 #[path = "db_kernel.rs"]
 pub mod db;
-pub use db::lookup_tables_probed;
-pub use db::bulk_boundary_diag_take;
 pub mod durability_spine_kernel;
 #[path = "env_kernel.rs"]
 pub mod env;
@@ -57,6 +55,52 @@ pub mod env_crash_kernel;
 pub mod error;
 pub mod flush_kernel;
 pub mod group_commit_kernel;
+pub mod group_commit_queue_kernel;
+pub mod torn_write_recovery_kernel;
+pub mod sst_block_decompression_guard_kernel;
+pub mod foster_lyapunov_pacer_kernel;
+pub mod direct_io_sector_alignment_kernel;
+pub mod wal_prune_watermark_kernel;
+pub mod compaction_hysteresis_pacer_kernel;
+pub mod quiescent_epoch_reclaim_kernel;
+pub mod wal_segment_seal_kernel;
+pub mod compaction_overlap_matrix_kernel;
+pub mod sst_candidate_index_kernel;
+pub mod decay_model_kernel;
+pub mod front_coding_block_iter_kernel;
+pub mod checkpoint_barrier_kernel;
+pub mod sector_aligned_io_kernel;
+pub mod io_ring_completion_order_kernel;
+pub mod ephemeral_key_zeroization_kernel;
+pub mod entropy_residue_verifier_kernel;
+pub mod distributed_lease_epoch_kernel;
+pub mod snapshot_read_linearizability_kernel;
+pub mod adaptive_bloom_budget_kernel;
+pub mod read_amplification_bounds_kernel;
+pub mod cloud_hypervisor_pause_kernel;
+pub mod cloud_silent_corruption_quarantine_kernel;
+pub mod cloud_multitenant_fair_io_kernel;
+pub mod asymmetric_partition_fencing_kernel;
+pub mod cloud_storage_watchdog_kernel;
+pub mod cloud_campaign_oracle_kernel;
+/// RFC-0323: Structural Hardening, Domain Types, Smart Constructors & Typestate Kernel.
+pub mod structural_hardening_kernel;
+/// RFC-0324: WAL Durability Barrier, Crash Recovery Reconciler & Omni Verification Oracle.
+pub mod wal_durability_barrier_kernel;
+pub mod wal_crash_recovery_reconciler_kernel;
+pub mod omni_verification_oracle_kernel;
+/// RFC-0326: The Six Grand Frontiers — POSIX Syscall Contracts, FFI Provenance & Hardware Liar Resilience.
+pub mod posix_syscall_contract_kernel;
+pub mod ffi_provenance_guard_kernel;
+pub mod hardware_liar_resilience_kernel;
+/// RFC-0327: WAL Archive Healing, Multi-Tenant Namespace Fencing & Causal History Bisimulation.
+pub mod wal_archive_healing_kernel;
+pub mod multitenant_namespace_fence_kernel;
+pub mod causal_history_bisimulation_kernel;
+/// RFC-0328: Domain Bounds Kernel & Structural Impossibility Barriers.
+pub mod domain_bounds_kernel;
+/// RFC-0329: Zero-Recompile Mutation Switching & Anti-Vacuity Kernel.
+pub mod mutation_switch_kernel;
 pub mod group_window_kernel;
 /// Health assessment, self-diagnosis, and telemetry exporters.
 pub mod health_kernel;
@@ -322,6 +366,9 @@ pub mod ram_pressure_kernel;
 pub mod backpressure_kernel;
 /// RFC-0305 hydrate writer-phase diagnostics (`PEDRA_HYDRATE_DIAG`).
 pub mod write_diag_kernel;
+/// RFC-0306 point-path counters for external probes (thread-local read).
+pub use sst::{sst_block_crc_skipped, sst_blocks_decoded};
+pub use db::lookup_tables_probed;
 pub mod leftover_page_kernel;
 #[path = "lock_kernel.rs"]
 pub mod lock;
@@ -455,4 +502,14 @@ pub use vlog::{
     VLOG_VALUE_PREFIX,
 };
 pub use workload_class_kernel::{workload_class, workload_class_as_is, WorkloadClass};
+pub use domain_bounds_kernel::{
+    CheckedPermille, DomainBoundsError, DomainSequence, KeyInterval, NonEmptyKey,
+    OwnedNonEmptyKey, ValidTenantId,
+};
+pub use mutation_switch_kernel::{
+    active_mutant, is_mutant_active, reset_mutant, set_active_mutant, MutantGuard,
+    MutationSwitchError, MUTANT_BASELINE, MUTANT_BYPASS_WAL_SYNC, MUTANT_CORRUPT_RECORD_CRC,
+    MUTANT_DECOMPRESSION_BOMB_BYPASS, MUTANT_DROP_MANIFEST_EDIT, MUTANT_FABRICATE_ORPHAN_KEY,
+    MUTANT_INVERT_COMPARATOR, MUTANT_OVERFLOW_SATURATION_BYPASS, MUTANT_RESURRECT_TOMBSTONE,
+};
 pub mod sync_kernel;

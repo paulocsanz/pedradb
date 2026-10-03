@@ -6,7 +6,7 @@ the clones that produced the `.llbc` / Lean.
 
 | Tool | Source | How to pin | rev (this host, 2026-08-15) |
 |------|--------|------------|------------------------------|
-| Aeneas | `$(AENEAS_CHECKOUT)` → `~/.local/bin/aeneas` | `aeneas -version` / git HEAD | `daa85d7e89400fa978be83fedbc7e475a83f0889` |
+| Aeneas | `/Users/paulo/software/aeneas` (`pedra-dyn-struct`) → `~/.local/bin/aeneas` | `aeneas -version` / git HEAD | `ff713e6` (Chars UTF-8; `get_unchecked` = get + undef OOB) |
 | Charon | `aeneas/charon` (`charon-pin`) → `~/.local/bin/charon` | `charon version` | `0.1.232` / git `340b1af4df92608d0911fc2ba26eef3fd3a30ab4` |
 | Lean | `formal/aeneas/lean/lean-toolchain` | `elan toolchain install leanprover/lean4:v4.31.0` | `leanprover/lean4:v4.31.0` (`lake build Vote` green 2026-08-15) |
 | rustc for Charon | `charon toolchain-version` | rustup channel | `nightly-2026-06-01` |
@@ -27,7 +27,5 @@ Nix (no local pin until a successful run):
 nix run github:aeneasverif/aeneas#charon -L -- cargo --preset=aeneas
 ```
 
-`lake build` on this host (2026-08-15) accepted `vote_decision_matches_spec`
-(raft vote kernel; not shipped in this tree). CI without elan still must not
-say “Lean proved” unless `./scripts/lean_wal_apply_reopen.sh --required` and
-`./scripts/lean_extracts.sh --required` are green.
+`lake build Vote` on this host (2026-08-15) accepted `vote_decision_matches_spec`.
+CI without elan still must not say “Lean proved vote” unless `./scripts/lean_vote.sh --required` is green.

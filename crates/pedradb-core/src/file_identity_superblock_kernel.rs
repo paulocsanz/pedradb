@@ -10,6 +10,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::fmt;
+
 /// Magic identifier for PedraDB SST file superblocks.
 pub const SST_SUPERBLOCK_MAGIC: [u8; 8] = *b"PEDRASST";
 /// Total superblock size in bytes.
@@ -41,7 +43,36 @@ pub enum SuperblockError {
     FileNumberMismatch { expected: u64, actual: u64 },
     /// UUID does not match expected MANIFEST record (inode recycled).
     UuidMismatch,
+    /// File number cannot be zero.
+    ZeroFileNumber,
+    /// File UUID cannot be all zeroes (nil UUID).
+    NilUuid,
+    /// Creation epoch cannot be zero.
+    ZeroEpoch,
+    /// Reserved superblock bytes (40..60) must be zero.
+    ReservedBytesNonZero,
 }
+
+impl fmt::Display for SuperblockError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidMagic => write!(f, "Invalid superblock magic bytes"),
+            Self::CrcMismatch { computed, stored } => {
+                write!(f, "Superblock CRC mismatch: computed={computed:#010x}, stored={stored:#010x}")
+            }
+            Self::FileNumberMismatch { expected, actual } => {
+                write!(f, "File number mismatch: expected {expected}, actual {actual}")
+            }
+            Self::UuidMismatch => write!(f, "File UUID mismatch (inode recycled)"),
+            Self::ZeroFileNumber => write!(f, "File number cannot be zero"),
+            Self::NilUuid => write!(f, "File UUID cannot be all zeroes"),
+            Self::ZeroEpoch => write!(f, "File creation epoch cannot be zero"),
+            Self::ReservedBytesNonZero => write!(f, "Reserved superblock bytes must be zero"),
+        }
+    }
+}
+
+impl std::error::Error for SuperblockError {}
 
 impl FileSuperblock {
     /// Simple CRC32C computation for 60-byte payload.
@@ -60,8 +91,17 @@ impl FileSuperblock {
         !crc
     }
 
-    /// Creates and signs a new superblock for a new file.
-    pub fn new(file_uuid: [u8; 16], file_number: u64, creation_epoch: u64) -> Self {
+    /// Safely validates parameters and creates a new superblock.
+    pub fn try_new(file_uuid: [u8; 16], file_number: u64, creation_epoch: u64) -> Result<Self, SuperblockError> {
+        if file_number == 0 {
+            return Err(SuperblockError::ZeroFileNumber);
+        }
+        if file_uuid == [0u8; 16] {
+            return Err(SuperblockError::NilUuid);
+        }
+        if creation_epoch == 0 {
+            return Err(SuperblockError::ZeroEpoch);
+        }
         let mut header = Self {
             magic: SST_SUPERBLOCK_MAGIC,
             file_uuid,
@@ -71,7 +111,12 @@ impl FileSuperblock {
         };
         let encoded_60 = header.encode_raw_60();
         header.crc = Self::compute_crc(&encoded_60);
-        header
+        Ok(header)
+    }
+
+    /// Creates and signs a new superblock for a new file (panics if invalid, for backwards compatibility).
+    pub fn new(file_uuid: [u8; 16], file_number: u64, creation_epoch: u64) -> Self {
+        Self::try_new(file_uuid, file_number, creation_epoch).expect("Invalid superblock parameters")
     }
 
     fn encode_raw_60(&self) -> [u8; 60] {
@@ -92,7 +137,7 @@ impl FileSuperblock {
         buf
     }
 
-    /// Deserializes and validates checksum of a 64-byte block.
+    /// Deserializes and validates checksum and fields of a 64-byte block.
     pub fn decode(bytes: &[u8; SUPERBLOCK_SIZE]) -> Result<Self, SuperblockError> {
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
@@ -112,13 +157,28 @@ impl FileSuperblock {
 
         let mut file_uuid = [0u8; 16];
         file_uuid.copy_from_slice(&bytes[8..24]);
+        if file_uuid == [0u8; 16] {
+            return Err(SuperblockError::NilUuid);
+        }
 
         let file_number = u64::from_be_bytes([
             bytes[24], bytes[25], bytes[26], bytes[27], bytes[28], bytes[29], bytes[30], bytes[31],
         ]);
+        if file_number == 0 {
+            return Err(SuperblockError::ZeroFileNumber);
+        }
+
         let creation_epoch = u64::from_be_bytes([
             bytes[32], bytes[33], bytes[34], bytes[35], bytes[36], bytes[37], bytes[38], bytes[39],
         ]);
+        if creation_epoch == 0 {
+            return Err(SuperblockError::ZeroEpoch);
+        }
+
+        // Verify reserved 20 bytes (40..60) are zero
+        if bytes[40..60].iter().any(|&b| b != 0) {
+            return Err(SuperblockError::ReservedBytesNonZero);
+        }
 
         Ok(Self {
             magic,

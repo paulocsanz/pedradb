@@ -58,3 +58,11 @@ theorem posix_as_is_admits_nonzero_and_eintr :
   constructor
   · unfold fdatasync_rc_ok_as_is; rfl
   · unfold fdatasync_eintr_retry_admitted_as_is; rfl
+
+/-- RFC-0260 F5: Generalized POSIX barrier contract: for ALL return codes, exactly rc == 0 is admitted.
+    Any non-zero return code (including negative errno returns like -1) is refused. -/
+theorem posix_rc_refused_of_nonzero :
+    ∀ (rc : Std.I32), rc ≠ 0#i32 → fdatasync_rc_ok rc = ok false := by
+  intro rc hne
+  unfold fdatasync_rc_ok
+  simp [hne]

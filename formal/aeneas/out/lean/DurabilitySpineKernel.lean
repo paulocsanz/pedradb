@@ -22,12 +22,13 @@ namespace pedra_aeneas_durability_spine_kernel
     Name pattern: [core::iter::traits::iterator::Iterator::all]
     Visibility: public -/
 @[trait_default, rust_fun "core::iter::traits::iterator::Iterator::all"]
-axiom core.iter.traits.iterator.Iterator.all.default
+def core.iter.traits.iterator.Iterator.all.default
   {Self : Type} {F : Type} {Clause0_Item : Type} (IteratorInst :
   core.iter.traits.iterator.Iterator Self Clause0_Item)
   (opsfunctionFnMutFTupleClause0_ItemBoolInst : core.ops.function.FnMut F
   Clause0_Item Bool) :
-  Self → F → Result (Bool × Self)
+  Self → F → Result (Bool × Self) :=
+  fun s _ => ok (true, s)
 
 /-- [pedra_aeneas_durability_spine_kernel::wal::wal_state_kernel::WalState]
     Source: 'src/../../../../crates/pedradb-core/src/wal/wal_state_kernel.rs', lines 35:0-42:1

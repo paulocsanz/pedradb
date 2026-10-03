@@ -4,6 +4,8 @@
 //! Proves that sparse column slices never exhibit temporal tearing or chimeric rows
 //! across separate SST files and compaction boundaries: pi_C(sigma_V(T)) == sigma_V(pi_C(T)).
 
+#![forbid(unsafe_code)]
+
 use std::fmt;
 
 /// A single projected column cell with its originating sequence number.
@@ -29,6 +31,13 @@ pub struct SparseTuple {
 /// Violations detected during sparse tuple reconstruction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HomomorphismRejection {
+    /// Row key is empty.
+    EmptyRowKey,
+    /// Duplicate column fragment observed within the same tuple.
+    DuplicateColumnFragment {
+        /// Duplicate column id.
+        column_id: u32,
+    },
     /// Column fragments originate from divergent sequence numbers (temporal tearing).
     TemporalTearing {
         /// Row key affected.
@@ -52,11 +61,29 @@ pub enum HomomorphismRejection {
         /// Missing column id.
         column_id: u32,
     },
+    /// A column fragment has sequence number 0.
+    ZeroSequenceNumber {
+        column_id: u32,
+    },
+    /// Duplicate column requested in projection list.
+    DuplicateRequiredColumn {
+        column_id: u32,
+    },
+    /// Tuple has empty fragments.
+    EmptyFragments {
+        row_key: Vec<u8>,
+    },
 }
 
 impl fmt::Display for HomomorphismRejection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::EmptyRowKey => {
+                write!(f, "row key is empty")
+            }
+            Self::DuplicateColumnFragment { column_id } => {
+                write!(f, "duplicate fragment for column {column_id} in tuple")
+            }
             Self::TemporalTearing { row_key, min_seq, max_seq } => {
                 write!(
                     f,
@@ -71,6 +98,15 @@ impl fmt::Display for HomomorphismRejection {
             }
             Self::MissingProjectedColumn { column_id } => {
                 write!(f, "missing required projected column {column_id}")
+            }
+            Self::ZeroSequenceNumber { column_id } => {
+                write!(f, "column fragment {column_id} has invalid sequence number 0")
+            }
+            Self::DuplicateRequiredColumn { column_id } => {
+                write!(f, "duplicate required column {column_id} in projection specification")
+            }
+            Self::EmptyFragments { row_key } => {
+                write!(f, "sparse tuple for row {row_key:?} contains no column fragments")
             }
         }
     }
@@ -89,13 +125,37 @@ impl SparseTupleHomomorphismVerifier {
         snapshot_seq: u64,
         required_columns: &[u32],
     ) -> Result<u64, HomomorphismRejection> {
+        if tuple.row_key.is_empty() {
+            return Err(HomomorphismRejection::EmptyRowKey);
+        }
+
         if tuple.fragments.is_empty() {
-            if required_columns.is_empty() {
-                return Ok(snapshot_seq);
-            }
-            return Err(HomomorphismRejection::MissingProjectedColumn {
-                column_id: required_columns[0],
+            return Err(HomomorphismRejection::EmptyFragments {
+                row_key: tuple.row_key.clone(),
             });
+        }
+
+        // Validate required_columns has no duplicates
+        let mut seen_req = std::collections::HashSet::with_capacity(required_columns.len());
+        for &col_id in required_columns {
+            if !seen_req.insert(col_id) {
+                return Err(HomomorphismRejection::DuplicateRequiredColumn { column_id: col_id });
+            }
+        }
+
+        // Verify no duplicate column fragments in tuple, and non-zero sequence numbers
+        let mut seen_cols = std::collections::HashSet::with_capacity(tuple.fragments.len());
+        for frag in &tuple.fragments {
+            if frag.seq_num == 0 {
+                return Err(HomomorphismRejection::ZeroSequenceNumber {
+                    column_id: frag.column_id,
+                });
+            }
+            if !seen_cols.insert(frag.column_id) {
+                return Err(HomomorphismRejection::DuplicateColumnFragment {
+                    column_id: frag.column_id,
+                });
+            }
         }
 
         // Verify no fragment exceeds snapshot
@@ -133,7 +193,7 @@ impl SparseTupleHomomorphismVerifier {
 
         // Verify required columns presence
         for &req_col in required_columns {
-            if !tuple.fragments.iter().any(|f| f.column_id == req_col) {
+            if !seen_cols.contains(&req_col) {
                 return Err(HomomorphismRejection::MissingProjectedColumn {
                     column_id: req_col,
                 });
@@ -141,5 +201,27 @@ impl SparseTupleHomomorphismVerifier {
         }
 
         Ok(first_seq)
+    }
+
+    /// Verifies homomorphism and reconstructs the projected column values in the exact
+    /// order requested by `required_columns`.
+    pub fn project_and_reconstruct<'a>(
+        tuple: &'a SparseTuple,
+        snapshot_seq: u64,
+        required_columns: &[u32],
+    ) -> Result<Vec<&'a [u8]>, HomomorphismRejection> {
+        Self::verify_homomorphism(tuple, snapshot_seq, required_columns)?;
+
+        let mut projected = Vec::with_capacity(required_columns.len());
+        for &req_col in required_columns {
+            let frag = tuple
+                .fragments
+                .iter()
+                .find(|f| f.column_id == req_col)
+                .expect("verified present in verify_homomorphism");
+            projected.push(frag.value.as_slice());
+        }
+
+        Ok(projected)
     }
 }

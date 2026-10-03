@@ -101,7 +101,7 @@ cargo test -q -p pedradb-core --test rfc0285_cinco_pilares_motor_puro
 
 echo ""
 echo ">>> [STAGE 20] Dez Pilares de Robustez Caixote / Metal / Federação (RFC-0285)"
-cargo test -q -p pedradb-core --test rfc0285_dez_pilares_metal_federation
+cargo test -q -p pedradb-core --test rfc0285_dez_pilares_caixote_metal_federation
 
 echo ""
 echo ">>> [STAGE 21] Cinco Fronteiras Matemáticas do Motor Puro (RFC-0286)"

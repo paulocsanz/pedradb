@@ -22,14 +22,14 @@ namespace pedra_aeneas_cqe_kernel
     Name pattern: [core::sync::atomic::private::Align8]
     Visibility: public -/
 @[rust_type "core::sync::atomic::private::Align8"]
-axiom core.sync.atomic.private.Align8 (T : Type) : Type
+def core.sync.atomic.private.Align8 (T : Type) : Type := T
 
 /-- [core::sync::atomic::Atomic]
     Source: '/rustc/library/core/src/sync/atomic.rs', lines 366:0-366:37
     Name pattern: [core::sync::atomic::Atomic]
     Visibility: public -/
 @[rust_type "core::sync::atomic::Atomic"]
-axiom core.sync.atomic.Atomic (T : Type) (Clause0_Storage : Type) : Type
+def core.sync.atomic.Atomic (T : Type) (Clause0_Storage : Type) : Type := T
 
 /-- [core::sync::atomic::Ordering]
     Source: '/rustc/library/core/src/sync/atomic.rs', lines 447:0-447:17
@@ -49,10 +49,9 @@ inductive core.sync.atomic.Ordering where
     Visibility: public -/
 @[rust_fun
   "core::sync::atomic::{core::sync::atomic::Atomic<u64, core::sync::atomic::private::Align8<u64>>}::new"]
-axiom core.sync.atomic.AtomicU64Align8U64.new
-  :
-  Std.U64 → Result (core.sync.atomic.Atomic Std.U64
-    (core.sync.atomic.private.Align8 Std.U64))
+def core.sync.atomic.AtomicU64Align8U64.new (val : Std.U64)
+  : Result (core.sync.atomic.Atomic Std.U64 (core.sync.atomic.private.Align8 Std.U64)) :=
+  ok val
 
 /-- [core::sync::atomic::{core::sync::atomic::Atomic<u64, core::sync::atomic::private::Align8<u64>>}::fetch_add]:
     Source: '/rustc/library/core/src/sync/atomic.rs', lines 3160:12-3160:81
@@ -60,10 +59,10 @@ axiom core.sync.atomic.AtomicU64Align8U64.new
     Visibility: public -/
 @[rust_fun
   "core::sync::atomic::{core::sync::atomic::Atomic<u64, core::sync::atomic::private::Align8<u64>>}::fetch_add"]
-axiom core.sync.atomic.AtomicU64Align8U64.fetch_add
-  :
-  core.sync.atomic.Atomic Std.U64 (core.sync.atomic.private.Align8 Std.U64) →
-    Std.U64 → core.sync.atomic.Ordering → Result Std.U64
+def core.sync.atomic.AtomicU64Align8U64.fetch_add
+  (a : core.sync.atomic.Atomic Std.U64 (core.sync.atomic.private.Align8 Std.U64))
+  (val : Std.U64) (ord : core.sync.atomic.Ordering) : Result Std.U64 :=
+  ok a
 
 /-- [pedra_aeneas_cqe_kernel::next_user_data]: loop body 0:
     Source: '../../../crates/pedradb-io-uring/src/cqe_kernel.rs', lines 39:4-45:5

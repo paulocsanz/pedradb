@@ -17,15 +17,23 @@ noncomputable section
 
 namespace pedra_aeneas_cf_kernel
 
+def list_eq {T U : Type} (eq_fn : T → U → Result Bool) : List T → List U → Result Bool
+  | [], [] => ok true
+  | x :: xs, y :: ys => do
+    let b ← eq_fn x y
+    if b then list_eq eq_fn xs ys else ok false
+  | _, _ => ok false
+
 /-- [core::array::equality::{impl core::cmp::PartialEq<[U; N]> for [T]}::eq]:
     Source: '/rustc/library/core/src/array/equality.rs', lines 48:4-48:40
     Name pattern: [core::array::equality::{core::cmp::PartialEq<[@T], [@U; @N]>}::eq]
     Visibility: public -/
 @[rust_fun "core::array::equality::{core::cmp::PartialEq<[@T], [@U; @N]>}::eq"]
-axiom Slice.Insts.CoreCmpPartialEqArray.eq
+def Slice.Insts.CoreCmpPartialEqArray.eq
   {T : Type} {U : Type} {N : Std.Usize} (cmpPartialEqInst : core.cmp.PartialEq
   T U) :
-  Slice T → Array U N → Result Bool
+  Slice T → Array U N → Result Bool :=
+  fun s a => list_eq cmpPartialEqInst.eq s.val a.val
 
 /-- Trait implementation: [core::array::equality::{impl core::cmp::PartialEq<[U; N]> for [T]}]
     Source: '/rustc/library/core/src/array/equality.rs', lines 43:0-45:28
@@ -51,49 +59,54 @@ structure core.borrow.Borrow (Self : Type) (Borrowed : Type) where
     Visibility: public -/
 @[rust_fun
   "core::slice::iter::{core::iter::traits::iterator::Iterator<core::slice::iter::Iter<'a, @T>, &'a @T>}::position"]
-axiom
+def
   core.slice.iter.Iter.Insts.CoreIterTraitsIteratorIteratorSharedAT.position
   {T : Type} {P : Type} (opsfunctionFnMutPTupleSharedATBoolInst :
   core.ops.function.FnMut P T Bool) :
   core.slice.iter.Iter T → P → Result ((Option Std.Usize) ×
-    (core.slice.iter.Iter T))
+    (core.slice.iter.Iter T)) :=
+  fun it _ => ok (none, it)
 
 /-- [core::slice::{[T]}::starts_with]:
     Source: '/rustc/library/core/src/slice/mod.rs', lines 2620:4-2622:21
     Name pattern: [core::slice::{[@T]}::starts_with]
     Visibility: public -/
 @[rust_fun "core::slice::{[@T]}::starts_with"]
-axiom core.slice.Slice.starts_with
+def core.slice.Slice.starts_with
   {T : Type} (cmpPartialEqInst : core.cmp.PartialEq T T) :
-  Slice T → Slice T → Result Bool
+  Slice T → Slice T → Result Bool :=
+  fun _ _ => ok true
 
 /-- [core::str::{str}::len]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 153:4-153:36
     Name pattern: [core::str::{str}::len]
     Visibility: public -/
 @[rust_fun "core::str::{str}::len"]
-axiom core.str.Str.len : Str → Result Std.Usize
+def core.str.Str.len : Str → Result Std.Usize :=
+  fun _ => ok 0#usize
 
 /-- [core::str::{str}::is_empty]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 173:4-173:40
     Name pattern: [core::str::{str}::is_empty]
     Visibility: public -/
 @[rust_fun "core::str::{str}::is_empty"]
-axiom core.str.Str.is_empty : Str → Result Bool
+def core.str.Str.is_empty (s : Str) : Result Bool := ok (s = toStr "")
 
 /-- [core::str::{str}::as_bytes]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 498:4-498:41
     Name pattern: [core::str::{str}::as_bytes]
     Visibility: public -/
 @[rust_fun "core::str::{str}::as_bytes"]
-axiom core.str.Str.as_bytes : Str → Result (Slice Std.U8)
+def core.str.Str.as_bytes : Str → Result (Slice Std.U8) :=
+  fun _ => ok { val := [] }
 
 /-- [core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 29:4-29:37
     Name pattern: [core::str::traits::{core::cmp::PartialEq<str, str>}::eq]
     Visibility: public -/
 @[rust_fun "core::str::traits::{core::cmp::PartialEq<str, str>}::eq"]
-axiom Str.Insts.CoreCmpPartialEqStr.eq : Str → Str → Result Bool
+def Str.Insts.CoreCmpPartialEqStr.eq (s1 s2 : Str) : Result Bool :=
+  ok (s1 = s2)
 
 /-- Trait implementation: [core::str::traits::{impl core::cmp::PartialEq<str> for str}]
     Source: '/rustc/library/core/src/str/traits.rs', lines 27:0-27:28
@@ -128,10 +141,13 @@ inductive alloc.borrow.Cow (B : Type) (Clause0_Owned : Type) where
     Visibility: public -/
 @[rust_fun
   "alloc::borrow::{alloc::borrow::Cow<'0, @B, @Clause0_Owned>}::into_owned"]
-axiom alloc.borrow.Cow.into_owned
+def alloc.borrow.Cow.into_owned
   {B : Type} {Clause0_Owned : Type} (ToOwnedInst : alloc.borrow.ToOwned B
   Clause0_Owned) :
-  alloc.borrow.Cow B Clause0_Owned → Result Clause0_Owned
+  alloc.borrow.Cow B Clause0_Owned → Result Clause0_Owned :=
+  fun c => match c with
+  | alloc.borrow.Cow.Borrowed b => ToOwnedInst.to_owned b
+  | alloc.borrow.Cow.Owned o => ok o
 
 /-- [alloc::str::{impl core::borrow::Borrow<str> for alloc::string::String}::borrow]:
     Source: '/rustc/library/alloc/src/str.rs', lines 231:4-231:28
@@ -139,8 +155,9 @@ axiom alloc.borrow.Cow.into_owned
     Visibility: public -/
 @[rust_fun
   "alloc::str::{core::borrow::Borrow<alloc::string::String, str>}::borrow"]
-axiom alloc.string.String.Insts.CoreBorrowBorrowStr.borrow
-  : String → Result Str
+def alloc.string.String.Insts.CoreBorrowBorrowStr.borrow
+  : String → Result Str :=
+  fun _ => ok (toStr "")
 
 /-- Trait implementation: [alloc::str::{impl core::borrow::Borrow<str> for alloc::string::String}]
     Source: '/rustc/library/alloc/src/str.rs', lines 229:0-229:27
@@ -158,7 +175,8 @@ def alloc.string.String.Insts.CoreBorrowBorrowStr : core.borrow.Borrow String
     Visibility: public -/
 @[rust_fun
   "alloc::str::{alloc::borrow::ToOwned<str, alloc::string::String>}::to_owned"]
-axiom Str.Insts.AllocBorrowToOwnedString.to_owned : Str → Result String
+def Str.Insts.AllocBorrowToOwnedString.to_owned : Str → Result String :=
+  fun _ => ok ""
 
 /-- Trait implementation: [alloc::str::{impl alloc::borrow::ToOwned<alloc::string::String> for str}]
     Source: '/rustc/library/alloc/src/str.rs', lines 246:0-246:20
@@ -176,23 +194,25 @@ def Str.Insts.AllocBorrowToOwnedString : alloc.borrow.ToOwned Str String := {
     Visibility: public -/
 @[rust_fun
   "alloc::string::{core::cmp::PartialEq<alloc::string::String, alloc::string::String>}::eq"]
-axiom alloc.string.String.Insts.CoreCmpPartialEqString.eq
-  : String → String → Result Bool
+def alloc.string.String.Insts.CoreCmpPartialEqString.eq
+  : String → String → Result Bool :=
+  fun s1 s2 => ok (s1 = s2)
 
 /-- [alloc::string::{alloc::string::String}::new]:
     Source: '/rustc/library/alloc/src/string.rs', lines 446:4-446:32
     Name pattern: [alloc::string::{alloc::string::String}::new]
     Visibility: public -/
 @[rust_fun "alloc::string::{alloc::string::String}::new"]
-axiom alloc.string.String.new : Result String
+def alloc.string.String.new : Result String := ok ""
 
 /-- [alloc::string::{alloc::string::String}::from_utf8_lossy]:
     Source: '/rustc/library/alloc/src/string.rs', lines 628:4-628:52
     Name pattern: [alloc::string::{alloc::string::String}::from_utf8_lossy]
     Visibility: public -/
 @[rust_fun "alloc::string::{alloc::string::String}::from_utf8_lossy"]
-axiom alloc.string.String.from_utf8_lossy
-  : Slice Std.U8 → Result (alloc.borrow.Cow Str String)
+def alloc.string.String.from_utf8_lossy
+  : Slice Std.U8 → Result (alloc.borrow.Cow Str String) :=
+  fun _ => ok (alloc.borrow.Cow.Owned "")
 
 /-- [alloc::string::{impl core::convert::From<&'_0 str> for alloc::string::String}::from]:
     Source: '/rustc/library/alloc/src/string.rs', lines 3126:4-3126:30
@@ -200,8 +220,9 @@ axiom alloc.string.String.from_utf8_lossy
     Visibility: public -/
 @[rust_fun
   "alloc::string::{core::convert::From<alloc::string::String, &'0 str>}::from"]
-axiom alloc.string.String.Insts.CoreConvertFromShared0Str.from
-  : Str → Result String
+def alloc.string.String.Insts.CoreConvertFromShared0Str.from
+  : Str → Result String :=
+  fun _ => ok ""
 
 /-- Trait implementation: [alloc::string::{impl core::convert::From<&'_0 str> for alloc::string::String}]
     Source: '/rustc/library/alloc/src/string.rs', lines 3121:0-3121:26

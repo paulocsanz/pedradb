@@ -157,6 +157,41 @@ fn test_pilar2_torn_sector_dual_boundary_heal() {
 }
 
 #[test]
+fn test_torn_sector_64bit_generation_and_try_encode_red() {
+    let mut page_buffer = [0u8; LOGICAL_PAGE_SIZE];
+    let payload = b"critical_data";
+
+    // 1. Generation > u32::MAX with upper 32-bit torn write mismatch
+    let gen_head = 0x0000_0002_0000_0005u64;
+    PageEnvelope::encode_page(42, gen_head, payload, &mut page_buffer);
+
+    // Corrupt only the upper 32 bits in tail generation (simulate stale tail from gen 0x0000_0001_0000_0005)
+    let mut torn_upper = page_buffer;
+    torn_upper[4076..4080].copy_from_slice(&1u32.to_le_bytes()); // stale upper bits
+    let err = PageEnvelope::verify_page(&torn_upper);
+    assert!(
+        matches!(err, Err(TornSectorViolation::BoundaryGenerationMismatch { .. })),
+        "Upper 32-bit generation mismatch must be detected as BoundaryGenerationMismatch"
+    );
+
+    // 2. try_encode_page must reject oversized payload > 4032 bytes
+    let oversized = vec![0xAA; 4033];
+    let err_over = PageEnvelope::try_encode_page(42, 100, &oversized, &mut page_buffer);
+    assert!(
+        matches!(err_over, Err(TornSectorViolation::PayloadTooLarge { length: 4033, max_capacity: 4032 })),
+        "try_encode_page must reject oversized payload"
+    );
+
+    // 3. try_encode_page must reject generation 0
+    let err_zero = PageEnvelope::try_encode_page(42, 0, payload, &mut page_buffer);
+    assert!(
+        matches!(err_zero, Err(TornSectorViolation::ZeroGeneration)),
+        "try_encode_page must reject generation 0"
+    );
+}
+
+
+#[test]
 fn test_pilar3_asymmetric_network_lease() {
     let mut net = DirectedNetworkMatrix::fully_connected(3);
     let mut tracker = LeaderLeaseTracker::new(3, 5_000_000, 200_000); // 5s lease, 200ms drift

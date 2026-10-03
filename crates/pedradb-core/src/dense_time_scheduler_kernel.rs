@@ -65,9 +65,43 @@ pub enum DenseScheduleViolation {
         /// Current timestamp.
         curr_nanos: u64,
     },
+    /// Epsilon window cannot be zero.
+    ZeroEpsilon,
+    /// Event ID cannot be zero.
+    ZeroEventId,
+    /// Duplicate event ID was scheduled.
+    DuplicateEventId {
+        /// The duplicated event ID.
+        event_id: u64,
+    },
 }
 
+impl std::fmt::Display for DenseScheduleViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnstableRaceDiscovered { event_a, event_b, delta_nanos } => {
+                write!(f, "Unstable race discovered between events {event_a} and {event_b} (delta: {delta_nanos}ns)")
+            }
+            Self::TimeWentBackwards { prev_nanos, curr_nanos } => {
+                write!(f, "Time went backwards: prev {prev_nanos}ns, curr {curr_nanos}ns")
+            }
+            Self::ZeroEpsilon => {
+                write!(f, "Epsilon window cannot be zero")
+            }
+            Self::ZeroEventId => {
+                write!(f, "Event ID cannot be zero")
+            }
+            Self::DuplicateEventId { event_id } => {
+                write!(f, "Duplicate event ID {event_id}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DenseScheduleViolation {}
+
 /// Deterministic dense-time scheduler capable of exploring \epsilon-perturbations.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DenseTimeScheduler {
     /// Epsilon window in nanoseconds (e.g. 10,000 ns = 10 µs).
     pub epsilon_nanos: u64,
@@ -76,6 +110,14 @@ pub struct DenseTimeScheduler {
 }
 
 impl DenseTimeScheduler {
+    /// Creates a new dense-time scheduler with specified \epsilon perturbation window, validating > 0.
+    pub fn try_new(epsilon_nanos: u64) -> Result<Self, DenseScheduleViolation> {
+        if epsilon_nanos == 0 {
+            return Err(DenseScheduleViolation::ZeroEpsilon);
+        }
+        Ok(Self::new(epsilon_nanos))
+    }
+
     /// Creates a new dense-time scheduler with specified \epsilon perturbation window.
     #[must_use]
     pub fn new(epsilon_nanos: u64) -> Self {
@@ -83,6 +125,23 @@ impl DenseTimeScheduler {
             epsilon_nanos,
             pending_events: BTreeMap::new(),
         }
+    }
+
+    /// Enqueues an event validating non-zero ID and no duplication.
+    pub fn try_schedule_event(
+        &mut self,
+        event_id: u64,
+        timestamp_nanos: u64,
+        event_type: ScheduledEventType,
+    ) -> Result<(), DenseScheduleViolation> {
+        if event_id == 0 {
+            return Err(DenseScheduleViolation::ZeroEventId);
+        }
+        if self.pending_events.contains_key(&event_id) {
+            return Err(DenseScheduleViolation::DuplicateEventId { event_id });
+        }
+        self.schedule_event(event_id, timestamp_nanos, event_type);
+        Ok(())
     }
 
     /// Enqueues an event at a given continuous timestamp.
@@ -155,5 +214,46 @@ impl DenseTimeScheduler {
         }
 
         (trace_ab, trace_ba)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dense_time_scheduler_bounds() {
+        assert_eq!(
+            DenseTimeScheduler::try_new(0),
+            Err(DenseScheduleViolation::ZeroEpsilon)
+        );
+
+        let mut sched = DenseTimeScheduler::try_new(10_000).expect("valid scheduler");
+
+        assert_eq!(
+            sched.try_schedule_event(0, 100, ScheduledEventType::TimerExpiry { timer_id: 1 }),
+            Err(DenseScheduleViolation::ZeroEventId)
+        );
+
+        sched
+            .try_schedule_event(1, 100, ScheduledEventType::TimerExpiry { timer_id: 1 })
+            .expect("schedule event 1");
+
+        assert_eq!(
+            sched.try_schedule_event(1, 150, ScheduledEventType::IoCompletion { io_id: 2 }),
+            Err(DenseScheduleViolation::DuplicateEventId { event_id: 1 })
+        );
+    }
+
+    #[test]
+    fn test_dense_schedule_violation_display() {
+        let err = DenseScheduleViolation::ZeroEpsilon;
+        assert_eq!(format!("{err}"), "Epsilon window cannot be zero");
+
+        let err2 = DenseScheduleViolation::ZeroEventId;
+        assert_eq!(format!("{err2}"), "Event ID cannot be zero");
+
+        let err3 = DenseScheduleViolation::DuplicateEventId { event_id: 42 };
+        assert_eq!(format!("{err3}"), "Duplicate event ID 42");
     }
 }

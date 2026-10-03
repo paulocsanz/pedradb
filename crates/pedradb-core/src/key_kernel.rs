@@ -174,16 +174,18 @@ impl PartialOrd for InternalKey {
 
 impl Ord for InternalKey {
     fn cmp(&self, other: &Self) -> Ordering {
-        match self.user_key.as_ref().cmp(other.user_key.as_ref()) {
-            Ordering::Equal => {}
-            ord => return ord,
-        }
-        match ikey_seq_cmp(self.sequence, other.sequence) {
-            Ordering::Equal => {}
-            ord => return ord,
-        }
-        // Kind descending.
-        other.kind.cmp(&self.kind)
+        let natural = match self.user_key.as_ref().cmp(other.user_key.as_ref()) {
+            Ordering::Equal => match ikey_seq_cmp(self.sequence, other.sequence) {
+                Ordering::Equal => other.kind.cmp(&self.kind),
+                ord => ord,
+            },
+            ord => ord,
+        };
+        crate::mutate_switch!(
+            crate::mutation_switch_kernel::MUTANT_INVERT_COMPARATOR,
+            natural,
+            natural.reverse()
+        )
     }
 }
 

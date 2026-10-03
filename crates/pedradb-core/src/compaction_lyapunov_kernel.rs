@@ -25,7 +25,47 @@ pub enum CompactionTerminationViolation {
         /// Stagnant energy level.
         stagnant_energy: u64,
     },
+    /// Provided levels profile slice cannot be empty.
+    EmptyLevels,
+    /// Target capacity for a level cannot be zero.
+    ZeroTargetCapacity {
+        /// Level index with zero target capacity.
+        level_idx: usize,
+    },
+    /// Level count mismatch between before and after profiles.
+    LevelCountMismatch {
+        /// Number of levels before.
+        before_count: usize,
+        /// Number of levels after.
+        after_count: usize,
+    },
 }
+
+impl std::fmt::Display for CompactionTerminationViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EnergyIncreased { energy_before, energy_after } => write!(
+                f,
+                "Compaction energy increased from {energy_before} to {energy_after} (divergence bug)"
+            ),
+            Self::ZeroProgressStep { stagnant_energy } => write!(
+                f,
+                "Compaction step made zero progress at energy {stagnant_energy} (potential liveloop)"
+            ),
+            Self::EmptyLevels => write!(f, "Levels profile slice cannot be empty"),
+            Self::ZeroTargetCapacity { level_idx } => write!(
+                f,
+                "Target capacity for level {level_idx} cannot be zero"
+            ),
+            Self::LevelCountMismatch { before_count, after_count } => write!(
+                f,
+                "Level count mismatch: before {before_count} != after {after_count}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CompactionTerminationViolation {}
 
 /// State representation of an LSM level for energy calculations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +81,24 @@ pub struct LevelDebtProfile {
 }
 
 impl LevelDebtProfile {
+    /// Creates a level debt profile with target capacity validation.
+    pub fn try_new(
+        level_idx: usize,
+        current_bytes: u64,
+        target_capacity_bytes: u64,
+        overlapping_runs: u64,
+    ) -> Result<Self, CompactionTerminationViolation> {
+        if target_capacity_bytes == 0 {
+            return Err(CompactionTerminationViolation::ZeroTargetCapacity { level_idx });
+        }
+        Ok(Self {
+            level_idx,
+            current_bytes,
+            target_capacity_bytes,
+            overlapping_runs,
+        })
+    }
+
     /// Calculates the non-negative debt contribution for this level.
     #[must_use]
     pub fn calculate_debt(&self) -> u64 {
@@ -86,6 +144,16 @@ impl LyapunovCompactionVerifier {
         levels_before: &[LevelDebtProfile],
         levels_after: &[LevelDebtProfile],
     ) -> Result<u64, CompactionTerminationViolation> {
+        if levels_before.is_empty() || levels_after.is_empty() {
+            return Err(CompactionTerminationViolation::EmptyLevels);
+        }
+        if levels_before.len() != levels_after.len() {
+            return Err(CompactionTerminationViolation::LevelCountMismatch {
+                before_count: levels_before.len(),
+                after_count: levels_after.len(),
+            });
+        }
+
         let energy_before = Self::compute_lyapunov_energy(levels_before);
         let energy_after = Self::compute_lyapunov_energy(levels_after);
 
@@ -109,5 +177,33 @@ impl LyapunovCompactionVerifier {
     #[must_use]
     pub fn is_quiescent(levels: &[LevelDebtProfile]) -> bool {
         Self::compute_lyapunov_energy(levels) == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compaction_lyapunov_bounds_red_to_green() {
+        assert_eq!(
+            LevelDebtProfile::try_new(0, 100, 0, 1).err(),
+            Some(CompactionTerminationViolation::ZeroTargetCapacity { level_idx: 0 })
+        );
+
+        assert_eq!(
+            LyapunovCompactionVerifier::verify_compaction_step(&[], &[]).err(),
+            Some(CompactionTerminationViolation::EmptyLevels)
+        );
+
+        let p1 = LevelDebtProfile::try_new(0, 100, 50, 1).unwrap();
+        let p2 = LevelDebtProfile::try_new(1, 200, 100, 1).unwrap();
+        assert_eq!(
+            LyapunovCompactionVerifier::verify_compaction_step(&[p1], &[p1, p2]).err(),
+            Some(CompactionTerminationViolation::LevelCountMismatch {
+                before_count: 1,
+                after_count: 2,
+            })
+        );
     }
 }

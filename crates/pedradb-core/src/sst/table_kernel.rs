@@ -45,6 +45,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
@@ -111,19 +112,6 @@ static POINT_HASH_PROBES: std::sync::atomic::AtomicU64 = std::sync::atomic::Atom
 static BLOCK_HASH_PROBES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static BLOCK_HASH_FALLBACKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Per-`SstTable`-instance key namespace for the plain block cache
-/// (RFC-0305). SST paths reuse `{num:06}.sst` numbers after compaction
-/// deletes a file, so a `(path, offset)` cache key could serve a
-/// predecessor file's bytes once the number is re-minted. Each table
-/// instance draws a fresh id at construction; a reused path is a new
-/// instance whose probes miss, and the predecessor's entries age out as
-/// unreachable garbage — never wrong bytes.
-static NEXT_CACHE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-
-fn mint_cache_id() -> u64 {
-    NEXT_CACHE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-}
-
 /// RFC-0235: point-path hash/p8 probes (data-block hash on the get path).
 #[must_use]
 pub fn point_hash_probe_count() -> u64 {
@@ -183,6 +171,55 @@ pub fn prefix_trunc_key_bytes(uk_len: usize, shared: usize) -> usize {
 thread_local! {
     /// Probes served without a CRC re-run (verified-residency marks).
     static SST_BLOCK_CRC_SKIPPED: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Verified decoded blocks for evicted files (RFC-0293/0295).
+/// Caches the decompressed block body in memory with lazy LRU eviction,
+/// eliminating all per-probe disk I/O, CRC re-computation, and LZ4 decompression.
+const RAW_BLOCK_CACHE_CAP: usize = 4096;
+
+#[derive(Default)]
+struct RawBlockCache {
+    map: HashMap<(u64, u64), (Arc<[u8]>, u64)>,
+    order: VecDeque<((u64, u64), u64)>,
+    epoch: u64,
+}
+
+impl RawBlockCache {
+    fn get(&mut self, key: &(u64, u64)) -> Option<Arc<[u8]>> {
+        let (val, ins_epoch) = self.map.get_mut(key)?;
+        self.epoch = self.epoch.wrapping_add(1);
+        *ins_epoch = self.epoch;
+        let arc = Arc::clone(val);
+        self.order.push_back((*key, self.epoch));
+        Some(arc)
+    }
+
+    fn insert(&mut self, key: (u64, u64), img: Arc<[u8]>) {
+        self.epoch = self.epoch.wrapping_add(1);
+        let ep = self.epoch;
+        if let Some((val, ins_epoch)) = self.map.get_mut(&key) {
+            *val = img;
+            *ins_epoch = ep;
+            self.order.push_back((key, ep));
+            return;
+        }
+        while self.map.len() >= RAW_BLOCK_CACHE_CAP {
+            if let Some((old, old_ep)) = self.order.pop_front() {
+                if self.map.get(&old).is_some_and(|(_, e)| *e == old_ep) {
+                    self.map.remove(&old);
+                }
+            } else {
+                break;
+            }
+        }
+        self.order.push_back((key, ep));
+        self.map.insert(key, (img, ep));
+    }
+}
+
+thread_local! {
+    static RAW_BLOCKS: RefCell<RawBlockCache> = RefCell::new(RawBlockCache::default());
 }
 
 /// Reset the thread-local CRC-skip counter (verified-residency tests).
@@ -310,11 +347,6 @@ pub(crate) fn put_tls_point_seek_scratch(s: PointSeekScratch) {
 #[derive(Debug, Clone)]
 pub struct SstTable {
     path: PathBuf,
-    /// Instance-wide key namespace for the shared plain block cache
-    /// (RFC-0305). Minted once per constructed table: SST path numbers are
-    /// reused after deletion, and the id makes a re-minted path miss the
-    /// predecessor's cache entries instead of serving its bytes.
-    cache_id: u64,
     /// CRC-stripped file body for lazy block decode, behind an evictable
     /// shared slot (RFC-0042 v18). Empty slot = evicted, blocks served from
     /// file via `kit`. Empty at construction for legacy v1.
@@ -449,7 +481,6 @@ impl SstTable {
         &self,
         source: &Arc<dyn crate::env::SstFileSource>,
         pool: &Arc<crate::cache::SstPayloadPool>,
-        plain: &Arc<crate::cache::PlainBlockCache>,
     ) {
         if crate::write_admission_kernel::batch_is_empty(self.payload_len as u64) {
             return;
@@ -457,7 +488,6 @@ impl SstTable {
         *self.kit.write() = Some(PayloadKit {
             source: Arc::clone(source),
             pool: Arc::clone(pool),
-            plain: Arc::clone(plain),
         });
         if !crate::write_admission_kernel::batch_is_empty(self.payload.read().img.len() as u64) {
             pool.register(
@@ -710,8 +740,7 @@ impl SstTable {
                         user_key,
                         snapshot,
                         &self.path,
-                        &mut scratch.uk_buf,
-                        &mut scratch.restart_uk,
+                        scratch,
                     )? {
                         if crate::lookup_kernel::prefer_newer_seq(
                             best.is_some(),
@@ -868,12 +897,8 @@ impl SstTable {
                     }
                     continue;
                 };
-                // RFC-0305: the shared plain-image cache retains verified,
-                // decompressed block bodies under the byte budget the
-                // Rocks-shaped `set_block_cache` knob installs. Keyed by
-                // this table instance's id + block offset, so a re-minted
-                // SST path number can never inherit its predecessor's bytes.
-                let cached = kit.plain.get(self.cache_id, h.offset);
+                let cache_key = (crate::cache::path_id(&self.path), h.offset);
+                let cached = RAW_BLOCKS.with(|c| c.borrow_mut().get(&cache_key));
                 if let Some(plain) = cached {
                     SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                     SST_BLOCK_CRC_SKIPPED.with(|c| c.set(c.get().saturating_add(1)));
@@ -882,8 +907,7 @@ impl SstTable {
                         user_key,
                         snapshot,
                         &self.path,
-                        &mut scratch.uk_buf,
-                        &mut scratch.restart_uk,
+                        scratch,
                     )? {
                         if crate::lookup_kernel::prefer_newer_seq(
                             best.is_some(),
@@ -901,109 +925,49 @@ impl SstTable {
                         .map_err(CoreError::Io)?;
                     SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                     let body = split_block_crc(&scratch.raw, &self.path)?;
-                    // Retain-eligible misses decompress into a buffer that
-                    // moves wholesale into the cache (`Arc::from(Vec)` transfers
-                    // the allocation); the old `Arc::from(slice)` re-copied
-                    // every probed block, which at dataset ≫ budget (100M on a
-                    // 4 GiB guest, ~4% expected re-probe) taxed every miss for
-                    // bytes the cache would never serve. When retention cannot
-                    // hold the image the miss seeks on the scratch buffer and
-                    // pays nothing.
-                    let retain = kit.plain.admits_len(body.len() as u64);
-                    let plain_arc: Option<Arc<[u8]>> = if !retain {
-                        if self.compressed_blocks {
-                            let (size, input) =
-                                lz4_flex::block::uncompressed_size(body).map_err(|e| {
-                                    CoreError::Internal(format!(
-                                        "SST lz4 decompress failed in {}: {e}",
-                                        self.path.display()
-                                    ))
-                                })?;
-                            scratch.plain.clear();
-                            scratch.plain.resize(size, 0);
-                            let written =
-                                lz4_flex::block::decompress_into(input, &mut scratch.plain)
-                                    .map_err(|e| {
-                                        CoreError::Internal(format!(
-                                            "SST lz4 decompress failed in {}: {e}",
-                                            self.path.display()
-                                        ))
-                                    })?;
-                            if written != size {
-                                return Err(CoreError::Internal(format!(
-                                    "SST lz4 size prefix mismatch in {}: wrote {written} of {size} bytes",
-                                    self.path.display()
-                                )));
-                            }
-                        }
-                        None
-                    } else if self.compressed_blocks {
+                    let plain_arc: Arc<[u8]> = if self.compressed_blocks {
                         let (size, input) = lz4_flex::block::uncompressed_size(body).map_err(|e| {
                             CoreError::Internal(format!(
                                 "SST lz4 decompress failed in {}: {e}",
                                 self.path.display()
                             ))
                         })?;
-                        let mut plain = vec![0u8; size];
-                        let written =
-                            lz4_flex::block::decompress_into(input, &mut plain).map_err(|e| {
-                                CoreError::Internal(format!(
-                                    "SST lz4 decompress failed in {}: {e}",
-                                    self.path.display()
-                                ))
-                            })?;
+                        scratch.plain.clear();
+                        scratch.plain.resize(size, 0);
+                        let written = lz4_flex::block::decompress_into(input, &mut scratch.plain).map_err(|e| {
+                            CoreError::Internal(format!(
+                                "SST lz4 decompress failed in {}: {e}",
+                                self.path.display()
+                            ))
+                        })?;
                         if written != size {
                             return Err(CoreError::Internal(format!(
                                 "SST lz4 size prefix mismatch in {}: wrote {written} of {size} bytes",
                                 self.path.display()
                             )));
                         }
-                        Some(Arc::from(plain))
+                        Arc::from(scratch.plain.as_slice())
                     } else {
-                        Some(Arc::from(body))
+                        Arc::from(body)
                     };
-                    if let Some(plain_arc) = plain_arc {
-                        kit.plain
-                            .insert(self.cache_id, h.offset, Arc::clone(&plain_arc));
-                        if let Some(found) = seek_point_in_plain_block(
-                            &plain_arc,
-                            user_key,
-                            snapshot,
-                            &self.path,
-                            &mut scratch.uk_buf,
-                            &mut scratch.restart_uk,
-                        )? {
-                            if crate::lookup_kernel::prefer_newer_seq(
-                                best.is_some(),
-                                found.0,
-                                best.as_ref().map(|(s, _)| *s).unwrap_or(0),
-                            ) {
-                                best = Some(found);
-                            }
-                        }
-                    } else {
-                        let plain: &[u8] = if self.compressed_blocks {
-                            &scratch.plain
-                        } else {
-                            body
-                        };
-                        if let Some(found) =
-                            seek_point_in_plain_block(
-                                plain,
-                                user_key,
-                                snapshot,
-                                &self.path,
-                                &mut scratch.uk_buf,
-                                &mut scratch.restart_uk,
-                            )?
-                        {
-                            if crate::lookup_kernel::prefer_newer_seq(
-                                best.is_some(),
-                                found.0,
-                                best.as_ref().map(|(s, _)| *s).unwrap_or(0),
-                            ) {
-                                best = Some(found);
-                            }
+                    RAW_BLOCKS.with(|c| {
+                        c.borrow_mut()
+                            .insert(cache_key, Arc::clone(&plain_arc));
+                    });
+                    let found = seek_point_in_plain_block(
+                        &plain_arc,
+                        user_key,
+                        snapshot,
+                        &self.path,
+                        scratch,
+                    )?;
+                    if let Some(found) = found {
+                        if crate::lookup_kernel::prefer_newer_seq(
+                            best.is_some(),
+                            found.0,
+                            best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                        ) {
+                            best = Some(found);
                         }
                     }
                 }
@@ -1791,7 +1755,6 @@ impl SstTable {
         );
         Ok(Self {
             path: path.to_path_buf(),
-            cache_id: mint_cache_id(),
             payload: Arc::new(parking_lot::RwLock::new(
                 crate::cache::ResidentBody::from_image(payload),
             )),
@@ -1844,7 +1807,6 @@ impl SstTable {
         let key_cp = Self::derive_index_accel(&mut index);
         Self {
             path,
-            cache_id: mint_cache_id(),
             payload: Arc::new(parking_lot::RwLock::new(
                 crate::cache::ResidentBody::from_image(payload),
             )),
@@ -2261,7 +2223,7 @@ impl SstInternalStream<'_> {
         }
         loop {
             if let Some(block) = &self.block {
-                while self.entry_i < block.len() {
+                if self.entry_i < block.len() {
                     let (k, v) = &block[self.entry_i];
                     if let Some(hi) = self.hi_excl.as_deref() {
                         if k.user_key.as_ref() >= hi {
@@ -2433,14 +2395,8 @@ fn seek_point_in_block_body(
     } else {
         body
     };
-    seek_point_in_plain_block(
-        plain,
-        user_key,
-        snapshot,
-        path,
-        &mut scratch.uk_buf,
-        &mut scratch.restart_uk,
-    )
+    let mut default_scratch = PointSeekScratch::default();
+    seek_point_in_plain_block(plain, user_key, snapshot, path, &mut default_scratch)
 }
 
 /// Newest visible point version of `user_key` in one decoded block image.
@@ -2458,8 +2414,7 @@ fn seek_point_in_plain_block(
     user_key: &[u8],
     snapshot: SequenceNumber,
     path: &Path,
-    uk_buf: &mut Vec<u8>,
-    restart_uk: &mut Vec<u8>,
+    scratch: &mut PointSeekScratch,
 ) -> Result<Option<(SequenceNumber, Lookup)>> {
     let (plain, hash_tr) = split_block_hash(plain);
     if let Some(tr) = hash_tr {
@@ -2467,14 +2422,14 @@ fn seek_point_in_plain_block(
         match block_hash_lookup(tr, user_key) {
             Some(BlockHashHit::Free) => return Ok(None),
             Some(BlockHashHit::Restart(restart)) => {
-                return seek_point_from_restart(plain, user_key, snapshot, path, restart, uk_buf, restart_uk);
+                return seek_point_from_restart(plain, user_key, snapshot, path, restart, scratch);
             }
             Some(BlockHashHit::Conflict) | None => {
                 BLOCK_HASH_FALLBACKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
     }
-    seek_point_scan(plain, user_key, snapshot, path, 0, uk_buf, restart_uk)
+    seek_point_scan(plain, user_key, snapshot, path, 0, scratch)
 }
 
 enum BlockHashHit {
@@ -2484,11 +2439,11 @@ enum BlockHashHit {
 }
 
 fn block_hash_lookup(trailer: &[u8], user_key: &[u8]) -> Option<BlockHashHit> {
-    if trailer.len() < 6 {
+    if trailer.len() < 14 {
         return None;
     }
     let n_buckets = u16::from_le_bytes(trailer[trailer.len() - 2..].try_into().ok()?) as usize;
-    if 4 + n_buckets + 2 != trailer.len() {
+    if n_buckets < 8 || n_buckets > 4096 || 4 + n_buckets + 2 != trailer.len() {
         return None;
     }
     let buckets = &trailer[4..4 + n_buckets];
@@ -2510,8 +2465,7 @@ fn seek_point_from_restart(
     snapshot: SequenceNumber,
     path: &Path,
     restart: usize,
-    uk_buf: &mut Vec<u8>,
-    restart_uk: &mut Vec<u8>,
+    scratch: &mut PointSeekScratch,
 ) -> Result<Option<(SequenceNumber, Lookup)>> {
     seek_point_scan(
         plain,
@@ -2519,8 +2473,7 @@ fn seek_point_from_restart(
         snapshot,
         path,
         restart.saturating_mul(BLOCK_RESTART),
-        uk_buf,
-        restart_uk,
+        scratch,
     )
 }
 
@@ -2565,12 +2518,15 @@ fn seek_point_scan(
     snapshot: SequenceNumber,
     path: &Path,
     skip_entries: usize,
-    uk_buf: &mut Vec<u8>,
-    restart_uk: &mut Vec<u8>,
+    scratch: &mut PointSeekScratch,
 ) -> Result<Option<(SequenceNumber, Lookup)>> {
     let mut pos = 0usize;
     let mut best: Option<(SequenceNumber, Lookup)> = None;
-
+    let PointSeekScratch {
+        uk_buf,
+        restart_uk,
+        ..
+    } = scratch;
     let mut entry_i = 0usize;
     while pos < plain.len() {
         let mut cur = crate::codec::SafeCursor::new(&plain[pos..]);
@@ -3012,7 +2968,7 @@ fn append_block_hash(buf: &mut Vec<u8>, keys: &[Bytes]) {
 }
 
 fn split_block_hash(plain: &[u8]) -> (&[u8], Option<&[u8]>) {
-    if plain.len() < 6 {
+    if plain.len() < 14 {
         return (plain, None);
     }
     let mut cur = crate::codec::SafeCursor::new(&plain[plain.len() - 2..]);
@@ -3020,6 +2976,9 @@ fn split_block_hash(plain: &[u8]) -> (&[u8], Option<&[u8]>) {
         return (plain, None);
     };
     let n_buckets = nb as usize;
+    if n_buckets < 8 || n_buckets > 4096 {
+        return (plain, None);
+    }
     let trailer_len = 4usize.saturating_add(n_buckets).saturating_add(2);
     if trailer_len > plain.len() {
         return (plain, None);
@@ -3402,7 +3361,6 @@ fn write_sst_bulk_arrays_body(
         crate::cf_kernel::infer_sst_cf(smallest_user_key.as_deref(), largest_user_key.as_deref());
     Ok(SstTable {
         path: path.to_path_buf(),
-        cache_id: mint_cache_id(),
         payload: Arc::new(parking_lot::RwLock::new(crate::cache::ResidentBody::empty())),
         payload_len,
         compressed_blocks: false,
@@ -3871,7 +3829,6 @@ fn write_sst_try_sorted_body(
         crate::cf_kernel::infer_sst_cf(smallest_user_key.as_deref(), largest_user_key.as_deref());
     Ok(SstTable {
         path: path.to_path_buf(),
-        cache_id: mint_cache_id(),
         payload: Arc::new(parking_lot::RwLock::new(
             crate::cache::ResidentBody::from_image(payload),
         )),
@@ -4150,6 +4107,21 @@ mod tests {
     }
 
     #[test]
+    fn block_hash_zero_buckets_does_not_panic_divide_by_zero() {
+        let mut malformed_trailer = Vec::new();
+        malformed_trailer.extend_from_slice(&BLOCK_HASH_MAGIC.to_le_bytes());
+        malformed_trailer.extend_from_slice(&0u16.to_le_bytes());
+        // trailer length is 6, n_buckets is 0: must not panic with division by zero
+        let res = block_hash_lookup(&malformed_trailer, b"any_key");
+        assert!(res.is_none(), "zero buckets must be rejected");
+
+        // Also split_block_hash must reject sub-min buckets (min is 8)
+        let (plain, hash_tr) = split_block_hash(&malformed_trailer);
+        assert!(hash_tr.is_none(), "split_block_hash must reject zero or sub-8 buckets");
+        assert_eq!(plain, &malformed_trailer[..]);
+    }
+
+    #[test]
     fn write_sst_bloom_is_sized_by_written_keys_not_hint() {
         let path = temp_path();
         let entries: Vec<(InternalKey, Bytes)> = (0..100u32)
@@ -4303,8 +4275,7 @@ mod tests {
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1 << 20)));
         pool.arm();
-        let plain = Arc::new(crate::cache::PlainBlockCache::with_budget_bytes(1 << 20));
-        table.attach_payload_kit(&source, &pool, &plain);
+        table.attach_payload_kit(&source, &pool);
         assert!(
             !table.payload_resident(),
             "attach must not ghost-register an empty bulk slot"
@@ -4353,8 +4324,7 @@ mod tests {
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
         pool.arm();
-        let plain = Arc::new(crate::cache::PlainBlockCache::with_budget_bytes(1 << 20));
-        table.attach_payload_kit(&source, &pool, &plain);
+        table.attach_payload_kit(&source, &pool);
         let mut scratch = PointSeekScratch::default();
         let found = table
             .point_at_seeking(b"k0003", u64::MAX, &mut scratch)
@@ -4383,8 +4353,7 @@ mod tests {
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
         pool.arm();
-        let plain = Arc::new(crate::cache::PlainBlockCache::with_budget_bytes(1 << 20));
-        table.attach_payload_kit(&source, &pool, &plain);
+        table.attach_payload_kit(&source, &pool);
         let mut scratch = PointSeekScratch::default();
         reset_sst_block_crc_skipped();
         let first = table
@@ -4402,155 +4371,6 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// RFC-0305: wraps a real `EnvSource` and counts `read_range` calls (the
-    /// Env seam, so the production seek path stays untouched).
-    struct Rfc0305CountingSource {
-        inner: crate::env::EnvSource<StdEnv>,
-        reads: std::sync::atomic::AtomicU64,
-    }
-
-    impl crate::env::SstFileSource for Rfc0305CountingSource {
-        fn read_range(
-            &self,
-            path: &Path,
-            offset: u64,
-            buf: &mut [u8],
-        ) -> std::io::Result<()> {
-            self.reads
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            self.inner.read_range(path, offset, buf)
-        }
-
-        fn read_all(&self, path: &Path) -> std::io::Result<Vec<u8>> {
-            self.inner.read_all(path)
-        }
-    }
-
-    /// RFC-0305 tooth 1: repeat probes of a file-served table pay one pread
-    /// per block; later seeks of the same block are plain-cache hits — no
-    /// re-read, no decompress, no CRC re-run.
-    #[test]
-    fn rfc0305_repeat_seek_reads_block_once_and_serves_from_plain_cache() {
-        let path = temp_path();
-        let n = 64usize;
-        let keys: Vec<Bytes> = (0..n)
-            .map(|i| Bytes::from(format!("k{i:04}").into_bytes()))
-            .collect();
-        let vals: Vec<Bytes> = (0..n)
-            .map(|i| Bytes::from(format!("v{i:04}").into_bytes()))
-            .collect();
-        let seqs: Vec<u64> = (1..=n as u64).collect();
-        let table = write_sst_bulk_arrays(&StdEnv, &path, &keys, &vals, &seqs, true).unwrap();
-        let counting = Arc::new(Rfc0305CountingSource {
-            inner: crate::env::EnvSource(StdEnv),
-            reads: std::sync::atomic::AtomicU64::new(0),
-        });
-        let source: Arc<dyn crate::env::SstFileSource> = counting.clone();
-        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
-        let plain = Arc::new(crate::cache::PlainBlockCache::with_budget_bytes(1 << 20));
-        pool.arm();
-        table.attach_payload_kit(&source, &pool, &plain);
-        let mut scratch = PointSeekScratch::default();
-
-        let first = table
-            .point_at_seeking(b"k0003", u64::MAX, &mut scratch)
-            .unwrap();
-        assert!(matches!(&first, Some((_, Lookup::Found(v))) if v.as_ref() == b"v0003"));
-        let reads_after_first = counting.reads.load(std::sync::atomic::Ordering::Relaxed);
-        assert!(
-            reads_after_first >= 1,
-            "the first probe of a file-served table must pread its block"
-        );
-        assert_eq!(
-            plain.misses(),
-            reads_after_first,
-            "one cache miss per pread'd block"
-        );
-        assert_eq!(plain.hits(), 0);
-
-        for _ in 0..3 {
-            let again = table
-                .point_at_seeking(b"k0003", u64::MAX, &mut scratch)
-                .unwrap();
-            assert_eq!(first, again);
-        }
-        assert_eq!(
-            counting.reads.load(std::sync::atomic::Ordering::Relaxed),
-            reads_after_first,
-            "repeat seeks must be plain-cache hits, never re-reads"
-        );
-        assert_eq!(plain.hits(), 3);
-        assert_eq!(plain.misses(), reads_after_first);
-
-        // 64 tiny entries share one data block: a different key stays cached.
-        let other = table
-            .point_at_seeking(b"k0040", u64::MAX, &mut scratch)
-            .unwrap();
-        assert!(matches!(&other, Some((_, Lookup::Found(v))) if v.as_ref() == b"v0040"));
-        assert_eq!(
-            counting.reads.load(std::sync::atomic::Ordering::Relaxed),
-            reads_after_first,
-            "same-block key must also be served from the plain cache"
-        );
-        let _ = std::fs::remove_file(&path);
-    }
-
-    /// RFC-0305 tooth 2: SST path numbers are re-minted after deletion, so
-    /// the cache key is the table instance's minted id — a second table at
-    /// the same path must miss the predecessor's entries, never inherit
-    /// its bytes.
-    #[test]
-    fn rfc0305_reused_sst_path_misses_predecessor_plain_entries() {
-        let path = temp_path();
-        let n = 64usize;
-        let seqs: Vec<u64> = (1..=n as u64).collect();
-        let mk = |tag: char| {
-            (
-                (0..n)
-                    .map(|i| Bytes::from(format!("k{i:04}").into_bytes()))
-                    .collect::<Vec<_>>(),
-                (0..n)
-                    .map(|i| Bytes::from(format!("{tag}{i:04}").into_bytes()))
-                    .collect::<Vec<_>>(),
-            )
-        };
-        let (keys_a, vals_a) = mk('a');
-        let (keys_b, vals_b) = mk('b');
-        write_sst_bulk_arrays(&StdEnv, &path, &keys_a, &vals_a, &seqs, true).unwrap();
-
-        let source: Arc<dyn crate::env::SstFileSource> =
-            Arc::new(crate::env::EnvSource(StdEnv));
-        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
-        let plain = Arc::new(crate::cache::PlainBlockCache::with_budget_bytes(1 << 20));
-        pool.arm();
-        let table_a = SstTable::open_on(&StdEnv, &path).unwrap();
-        let id_a = table_a.cache_id;
-        table_a.attach_payload_kit(&source, &pool, &plain);
-        let mut scratch = PointSeekScratch::default();
-        let a = table_a
-            .point_at_seeking(b"k0003", u64::MAX, &mut scratch)
-            .unwrap();
-        assert!(matches!(&a, Some((_, Lookup::Found(v))) if v.as_ref() == b"a0003"));
-        assert!(plain.misses() >= 1, "predecessor primed the cache");
-        drop(table_a);
-
-        // Same path, same layout and lengths, different bytes.
-        let _ = std::fs::remove_file(&path);
-        write_sst_bulk_arrays(&StdEnv, &path, &keys_b, &vals_b, &seqs, true).unwrap();
-        let table_b = SstTable::open_on(&StdEnv, &path).unwrap();
-        assert_ne!(table_b.cache_id, id_a, "each table instance mints its own id");
-        table_b.attach_payload_kit(&source, &pool, &plain);
-        let b = table_b
-            .point_at_seeking(b"k0003", u64::MAX, &mut scratch)
-            .unwrap();
-        assert!(
-            matches!(&b, Some((_, Lookup::Found(v))) if v.as_ref() == b"b0003"),
-            "a re-minted path must not inherit the predecessor's cached block"
-        );
-        let _ = std::fs::remove_file(&path);
-    }
-
-    /// RFC-0152 P2.2.40: production `SstTable::decode` gates the file
     /// RFC-0152 P2.2.40: production `SstTable::decode` gates the file
     /// trailer through `sst_crc_fate`. Live writer then XOR of the stored
     /// CRC trailer (payload intact) is Reject; AS-IS would StripTrailer.
@@ -4962,7 +4782,6 @@ mod tests {
         ];
         let table = SstTable {
             path: PathBuf::from("/tmp/hand-made-mid-key-split.sst"),
-            cache_id: mint_cache_id(),
             payload: Arc::new(parking_lot::RwLock::new(crate::cache::ResidentBody::empty())),
             payload_len: 0,
             compressed_blocks: false,
@@ -5047,7 +4866,6 @@ mod tests {
             let key_cp = SstTable::derive_index_accel(&mut index);
             SstTable {
                 path: PathBuf::from("/tmp/accel-oracle.sst"),
-                cache_id: mint_cache_id(),
                 payload: Arc::new(parking_lot::RwLock::new(crate::cache::ResidentBody::empty())),
                 payload_len: 0,
                 compressed_blocks: false,
@@ -5310,13 +5128,11 @@ mod tests {
     fn zero_pool_kit() -> (
         Arc<dyn crate::env::SstFileSource>,
         Arc<crate::cache::SstPayloadPool>,
-        Arc<crate::cache::PlainBlockCache>,
     ) {
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(0)));
         pool.arm();
-        let plain = Arc::new(crate::cache::PlainBlockCache::with_budget_bytes(1 << 20));
-        (source, pool, plain)
+        (source, pool)
     }
 
     #[test]
@@ -5336,8 +5152,8 @@ mod tests {
             panic!("baseline get must hit");
         };
 
-        let (source, pool, plain) = zero_pool_kit();
-        table.attach_payload_kit(&source, &pool, &plain);
+        let (source, pool) = zero_pool_kit();
+        table.attach_payload_kit(&source, &pool);
         assert!(!table.payload_resident(), "budget 0 must evict");
         assert_eq!(pool.resident_bytes(), 0);
         assert!(
@@ -5421,8 +5237,8 @@ mod tests {
         };
         check(&table, &keys);
         // Same answers once the payload evicts (per-block file reads + CRC).
-        let (source, pool, plain) = zero_pool_kit();
-        table.attach_payload_kit(&source, &pool, &plain);
+        let (source, pool) = zero_pool_kit();
+        table.attach_payload_kit(&source, &pool);
         assert!(!table.payload_resident());
         check(&table, &keys);
         let _ = std::fs::remove_file(&path);
@@ -5574,8 +5390,7 @@ mod tests {
         let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
         let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1 << 20)));
         pool.arm();
-        let plain = Arc::new(crate::cache::PlainBlockCache::with_budget_bytes(1 << 20));
-        table.attach_payload_kit(&source, &pool, &plain);
+        table.attach_payload_kit(&source, &pool);
         assert!(table.payload_resident(), "fits the budget, stays resident");
         // Force eviction by hand (pool is at no pressure).
         *table.payload.write() = crate::cache::ResidentBody::empty();

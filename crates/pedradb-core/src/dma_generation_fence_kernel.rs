@@ -21,6 +21,21 @@ pub struct FileGenerationToken {
 }
 
 impl FileGenerationToken {
+    /// Creates a validated file generation token.
+    pub fn try_new(file_uuid: [u8; 16], generation_id: u64, file_number: u64) -> Result<Self, FenceRejection> {
+        if file_uuid == [0u8; 16] || generation_id == 0 {
+            return Err(FenceRejection::InvalidToken);
+        }
+        if file_number == 0 {
+            return Err(FenceRejection::ZeroFileNumber);
+        }
+        Ok(Self {
+            file_uuid,
+            generation_id,
+            file_number,
+        })
+    }
+
     /// Creates a new file generation token.
     #[must_use]
     pub fn new(file_uuid: [u8; 16], generation_id: u64, file_number: u64) -> Self {
@@ -29,6 +44,12 @@ impl FileGenerationToken {
             generation_id,
             file_number,
         }
+    }
+
+    /// Verifies that the token contains a non-nil UUID and non-zero generation.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        self.file_uuid != [0u8; 16] && self.generation_id > 0
     }
 }
 
@@ -57,6 +78,14 @@ pub enum FenceRejection {
         expected: u32,
         calculated: u32,
     },
+    /// Token contains a null/uninitialized UUID or generation 0.
+    InvalidToken,
+    /// Header is completely zeroed out (unallocated NVMe block / disk hole).
+    ZeroGhostHeader,
+    /// Payload has zero bytes (empty ghost block).
+    EmptyPayload,
+    /// File number cannot be zero.
+    ZeroFileNumber,
 }
 
 impl fmt::Display for FenceRejection {
@@ -77,6 +106,18 @@ impl fmt::Display for FenceRejection {
             Self::ChecksumMismatch { expected, calculated } => {
                 write!(f, "DMA CRC32C mismatch: expected 0x{expected:08x}, calculated 0x{calculated:08x}")
             }
+            Self::InvalidToken => {
+                write!(f, "DMA rejected invalid token: nil UUID or generation zero")
+            }
+            Self::ZeroGhostHeader => {
+                write!(f, "DMA rejected zero-ghost header: block is unallocated NVMe zero hole")
+            }
+            Self::EmptyPayload => {
+                write!(f, "DMA rejected empty payload: zero-length block")
+            }
+            Self::ZeroFileNumber => {
+                write!(f, "DMA file number cannot be zero")
+            }
         }
     }
 }
@@ -87,6 +128,21 @@ impl std::error::Error for FenceRejection {}
 pub struct DmaGenerationFence;
 
 impl DmaGenerationFence {
+    /// Encapsulates a payload slice validating token and non-empty payload.
+    pub fn try_seal_dma_block(
+        token: &FileGenerationToken,
+        block_idx: u32,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, FenceRejection> {
+        if !token.is_valid() || token.file_number == 0 {
+            return Err(FenceRejection::InvalidToken);
+        }
+        if payload.is_empty() {
+            return Err(FenceRejection::EmptyPayload);
+        }
+        Ok(Self::seal_dma_block(token, block_idx, payload))
+    }
+
     /// Encapsulates a payload slice into an authoritative DMA block buffer with header.
     #[must_use]
     pub fn seal_dma_block(
@@ -111,14 +167,37 @@ impl DmaGenerationFence {
         buf
     }
 
-    /// Verifies and unpacks an incoming raw Direct I/O DMA buffer against the active token.
-    /// Returns the verified payload or an explicit rejection reason.
-    pub fn verify_dma_block(
+    /// Verifies and unpacks an incoming Direct I/O DMA buffer with exact payload length.
+    ///
+    /// This allows zero-copy validation of blocks embedded in sector-aligned DMA buffers
+    /// (e.g. 4096-byte Direct I/O sectors) without trailing zeroes corrupting CRC calculation.
+    pub fn verify_dma_block_with_len<'a>(
         token: &FileGenerationToken,
         expected_block_idx: u32,
-        raw_block: &[u8],
-    ) -> Result<Vec<u8>, FenceRejection> {
+        raw_block: &'a [u8],
+        exact_payload_len: usize,
+    ) -> Result<&'a [u8], FenceRejection> {
+        if !token.is_valid() {
+            return Err(FenceRejection::InvalidToken);
+        }
+
         if raw_block.len() < DMA_HEADER_SIZE {
+            return Err(FenceRejection::BufferUnderflow {
+                actual_len: raw_block.len(),
+            });
+        }
+
+        // Check for NVMe unallocated zero hole in header
+        if raw_block[0..DMA_HEADER_SIZE].iter().all(|&b| b == 0) {
+            return Err(FenceRejection::ZeroGhostHeader);
+        }
+
+        if exact_payload_len == 0 {
+            return Err(FenceRejection::EmptyPayload);
+        }
+
+        let required_len = DMA_HEADER_SIZE.saturating_add(exact_payload_len);
+        if raw_block.len() < required_len {
             return Err(FenceRejection::BufferUnderflow {
                 actual_len: raw_block.len(),
             });
@@ -157,7 +236,7 @@ impl DmaGenerationFence {
         crc_bytes.copy_from_slice(&raw_block[28..32]);
         let expected_crc = u32::from_le_bytes(crc_bytes);
 
-        let payload = &raw_block[32..];
+        let payload = &raw_block[DMA_HEADER_SIZE..required_len];
         let calculated_crc = crc32c::crc32c(payload);
         if calculated_crc != expected_crc {
             return Err(FenceRejection::ChecksumMismatch {
@@ -166,6 +245,105 @@ impl DmaGenerationFence {
             });
         }
 
-        Ok(payload.to_vec())
+        Ok(payload)
+    }
+
+    /// Zero-copy verification of an unpadded DMA block buffer.
+    pub fn verify_dma_block_slice<'a>(
+        token: &FileGenerationToken,
+        expected_block_idx: u32,
+        raw_block: &'a [u8],
+    ) -> Result<&'a [u8], FenceRejection> {
+        if !token.is_valid() {
+            return Err(FenceRejection::InvalidToken);
+        }
+
+        if raw_block.len() < DMA_HEADER_SIZE {
+            return Err(FenceRejection::BufferUnderflow {
+                actual_len: raw_block.len(),
+            });
+        }
+
+        if raw_block[0..DMA_HEADER_SIZE].iter().all(|&b| b == 0) {
+            return Err(FenceRejection::ZeroGhostHeader);
+        }
+
+        if raw_block.len() == DMA_HEADER_SIZE {
+            return Err(FenceRejection::EmptyPayload);
+        }
+
+        let exact_payload_len = raw_block.len() - DMA_HEADER_SIZE;
+        Self::verify_dma_block_with_len(token, expected_block_idx, raw_block, exact_payload_len)
+    }
+
+    /// Verifies and unpacks an incoming raw Direct I/O DMA buffer against the active token.
+    /// Returns the verified payload as an owned `Vec<u8>`.
+    pub fn verify_dma_block(
+        token: &FileGenerationToken,
+        expected_block_idx: u32,
+        raw_block: &[u8],
+    ) -> Result<Vec<u8>, FenceRejection> {
+        Self::verify_dma_block_slice(token, expected_block_idx, raw_block).map(|s| s.to_vec())
+    }
+
+    /// Validates an entire contiguous extent of DMA blocks.
+    pub fn verify_dma_extent<'a>(
+        token: &FileGenerationToken,
+        start_block_idx: u32,
+        blocks: &'a [&'a [u8]],
+    ) -> Result<Vec<&'a [u8]>, FenceRejection> {
+        let mut verified = Vec::with_capacity(blocks.len());
+        for (i, block) in blocks.iter().enumerate() {
+            let expected_idx = start_block_idx.saturating_add(i as u32);
+            let payload = Self::verify_dma_block_slice(token, expected_idx, block)?;
+            verified.push(payload);
+        }
+        Ok(verified)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dma_token_bounds() {
+        assert_eq!(
+            FileGenerationToken::try_new([0u8; 16], 1, 1),
+            Err(FenceRejection::InvalidToken)
+        );
+        assert_eq!(
+            FileGenerationToken::try_new([1u8; 16], 0, 1),
+            Err(FenceRejection::InvalidToken)
+        );
+        assert_eq!(
+            FileGenerationToken::try_new([1u8; 16], 1, 0),
+            Err(FenceRejection::ZeroFileNumber)
+        );
+
+        let token = FileGenerationToken::try_new([2u8; 16], 10, 42).expect("valid token");
+        assert_eq!(token.file_number, 42);
+
+        // Try seal empty payload
+        assert_eq!(
+            DmaGenerationFence::try_seal_dma_block(&token, 0, &[]),
+            Err(FenceRejection::EmptyPayload)
+        );
+
+        let sealed = DmaGenerationFence::try_seal_dma_block(&token, 0, b"hello dma").expect("sealed");
+        let verified = DmaGenerationFence::verify_dma_block(&token, 0, &sealed).expect("verified");
+        assert_eq!(verified, b"hello dma");
+    }
+
+    #[test]
+    fn test_dma_fence_rejection_display() {
+        let err = FenceRejection::ZeroFileNumber;
+        assert_eq!(format!("{err}"), "DMA file number cannot be zero");
+
+        let err2 = FenceRejection::InvalidToken;
+        assert_eq!(
+            format!("{err2}"),
+            "DMA rejected invalid token: nil UUID or generation zero"
+        );
     }
 }

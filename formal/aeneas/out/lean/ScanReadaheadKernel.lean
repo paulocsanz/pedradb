@@ -143,14 +143,14 @@ def ScanReadaheadWindow.Insts.CoreDefaultDefault : core.default.Default
 }
 
 /-- [pedra_aeneas_scan_readahead_kernel::{pedra_aeneas_scan_readahead_kernel::ScanReadaheadWindow}::NONE]
-    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 46:4-50:6
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 45:4-49:6
     Visibility: public -/
 @[global_simps, irreducible]
 def ScanReadaheadWindow.NONE : ScanReadaheadWindow :=
   { offset := 0#u64, len := 0#u64, blocks := 0#u32 }
 
 /-- [pedra_aeneas_scan_readahead_kernel::scan_readahead_window]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 1:0-103:5
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 1:0-102:5
     Visibility: public -/
 @[rust_loop_body]
 def scan_readahead_window_loop.body
@@ -184,7 +184,7 @@ def scan_readahead_window_loop.body
   else ok (done (i, i1))
 
 /-- [pedra_aeneas_scan_readahead_kernel::scan_readahead_window]: loop 0:
-    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 1:0-103:5
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 1:0-102:5
     Visibility: public -/
 @[rust_loop]
 def scan_readahead_window_loop
@@ -198,7 +198,7 @@ def scan_readahead_window_loop
     (i, i1, expected_off, k)
 
 /-- [pedra_aeneas_scan_readahead_kernel::scan_readahead_window]:
-    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 63:0-108:1
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 62:0-107:1
     Visibility: public -/
 def scan_readahead_window
   (blocks : Slice (Std.U64 × Std.U64)) (at1 : Std.Usize)
@@ -234,7 +234,7 @@ def scan_readahead_window
   else ok ScanReadaheadWindow.NONE
 
 /-- [pedra_aeneas_scan_readahead_kernel::scan_readahead_window_as_is]:
-    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 113:0-119:1
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 112:0-118:1
     Visibility: public -/
 def scan_readahead_window_as_is
   (_blocks : Slice (Std.U64 × Std.U64)) (_at : Std.Usize)
@@ -244,16 +244,453 @@ def scan_readahead_window_as_is
   ok ScanReadaheadWindow.NONE
 
 /-- [pedra_aeneas_scan_readahead_kernel::scan_readahead_bounded]:
-    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 125:0-127:1
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 124:0-126:1
     Visibility: public -/
 def scan_readahead_bounded
   (sst_bytes : Std.U64) (warm_cap : Std.U64) : Result Bool := do
   ok (sst_bytes > warm_cap)
 
 /-- [pedra_aeneas_scan_readahead_kernel::scan_readahead_pair_budget]:
-    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 132:0-134:1
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 131:0-133:1
     Visibility: public -/
 def scan_readahead_pair_budget : Result Std.Usize := do
   ok MAX_WINDOW_PAIRS
+
+/-- [pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline]
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 140:0-151:1
+    Visibility: public -/
+structure AsyncReadaheadPipeline where
+  capacity_bytes : Std.U64
+  active_window : ScanReadaheadWindow
+  pending_window : ScanReadaheadWindow
+  consumed_bytes : Std.U64
+  double_buffered : Bool
+
+/-- [pedra_aeneas_scan_readahead_kernel::{impl core::fmt::Debug for pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}::fmt]:
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 139:9-139:14
+    Visibility: public -/
+def AsyncReadaheadPipeline.Insts.CoreFmtDebug.fmt
+  (self : AsyncReadaheadPipeline) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  let dyn := Dyn.mk _ core.fmt.DebugU64 self.capacity_bytes
+  let dyn1 :=
+    Dyn.mk _ ScanReadaheadWindow.Insts.CoreFmtDebug self.active_window
+  let dyn2 :=
+    Dyn.mk _ ScanReadaheadWindow.Insts.CoreFmtDebug self.pending_window
+  let dyn3 := Dyn.mk _ core.fmt.DebugU64 self.consumed_bytes
+  let dyn4 :=
+    Dyn.mk _ (core.fmt.DebugShared core.fmt.DebugBool) self.double_buffered
+  core.fmt.Formatter.debug_struct_field5_finish f (toStr
+    "AsyncReadaheadPipeline") (toStr "capacity_bytes") dyn (toStr
+    "active_window") dyn1 (toStr "pending_window") dyn2 (toStr
+    "consumed_bytes") dyn3 (toStr "double_buffered") dyn4
+
+/-- Trait implementation: [pedra_aeneas_scan_readahead_kernel::{impl core::fmt::Debug for pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}]
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 139:9-139:14 -/
+@[reducible]
+def AsyncReadaheadPipeline.Insts.CoreFmtDebug : core.fmt.Debug
+  AsyncReadaheadPipeline := {
+  fmt := AsyncReadaheadPipeline.Insts.CoreFmtDebug.fmt
+}
+
+/-- [pedra_aeneas_scan_readahead_kernel::{impl core::clone::Clone for pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}::clone]:
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 139:16-139:21
+    Visibility: public -/
+def AsyncReadaheadPipeline.Insts.CoreCloneClone.clone
+  (self : AsyncReadaheadPipeline) : Result AsyncReadaheadPipeline := do
+  let i ← lift (core.clone.impls.CloneU64.clone self.capacity_bytes)
+  let srw ← ScanReadaheadWindow.Insts.CoreCloneClone.clone self.active_window
+  let srw1 ←
+    ScanReadaheadWindow.Insts.CoreCloneClone.clone self.pending_window
+  let i1 ← lift (core.clone.impls.CloneU64.clone self.consumed_bytes)
+  let b ← lift (core.clone.impls.CloneBool.clone self.double_buffered)
+  ok
+    {
+      capacity_bytes := i,
+      active_window := srw,
+      pending_window := srw1,
+      consumed_bytes := i1,
+      double_buffered := b
+    }
+
+/-- Trait implementation: [pedra_aeneas_scan_readahead_kernel::{impl core::clone::Clone for pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}]
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 139:16-139:21 -/
+@[reducible]
+def AsyncReadaheadPipeline.Insts.CoreCloneClone : core.clone.Clone
+  AsyncReadaheadPipeline := {
+  clone := AsyncReadaheadPipeline.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_scan_readahead_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}]
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 139:23-139:32 -/
+@[reducible]
+def AsyncReadaheadPipeline.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq AsyncReadaheadPipeline := {
+}
+
+/-- [pedra_aeneas_scan_readahead_kernel::{impl core::cmp::PartialEq<pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline> for pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}::eq]:
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 139:23-139:32
+    Visibility: public -/
+def AsyncReadaheadPipeline.Insts.CoreCmpPartialEqAsyncReadaheadPipeline.eq
+  (self : AsyncReadaheadPipeline) (other : AsyncReadaheadPipeline) :
+  Result Bool
+  := do
+  if self.capacity_bytes = other.capacity_bytes
+  then
+    if self.consumed_bytes = other.consumed_bytes
+    then
+      if self.double_buffered = other.double_buffered
+      then
+        let b ←
+          ScanReadaheadWindow.Insts.CoreCmpPartialEqScanReadaheadWindow.eq
+            self.active_window other.active_window
+        if b
+        then
+          ScanReadaheadWindow.Insts.CoreCmpPartialEqScanReadaheadWindow.eq
+            self.pending_window other.pending_window
+        else ok false
+      else ok false
+    else ok false
+  else ok false
+
+/-- Trait implementation: [pedra_aeneas_scan_readahead_kernel::{impl core::cmp::PartialEq<pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline> for pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}]
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 139:23-139:32 -/
+@[reducible]
+def AsyncReadaheadPipeline.Insts.CoreCmpPartialEqAsyncReadaheadPipeline :
+  core.cmp.PartialEq AsyncReadaheadPipeline AsyncReadaheadPipeline := {
+  eq := AsyncReadaheadPipeline.Insts.CoreCmpPartialEqAsyncReadaheadPipeline.eq
+}
+
+/-- [pedra_aeneas_scan_readahead_kernel::{impl core::cmp::Eq for pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 139:34-139:36
+    Visibility: public -/
+def AsyncReadaheadPipeline.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : AsyncReadaheadPipeline) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_scan_readahead_kernel::{impl core::cmp::Eq for pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}]
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 139:34-139:36 -/
+@[reducible]
+def AsyncReadaheadPipeline.Insts.CoreCmpEq : core.cmp.Eq AsyncReadaheadPipeline
+  := {
+  partialEqInst :=
+    AsyncReadaheadPipeline.Insts.CoreCmpPartialEqAsyncReadaheadPipeline
+  assert_fields_are_eq :=
+    AsyncReadaheadPipeline.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_scan_readahead_kernel::{pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}::new]:
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 156:4-164:5
+    Visibility: public -/
+def AsyncReadaheadPipeline.new
+  (capacity_bytes : Std.U64) : Result AsyncReadaheadPipeline := do
+  ok
+    {
+      capacity_bytes,
+      active_window := ScanReadaheadWindow.NONE,
+      pending_window := ScanReadaheadWindow.NONE,
+      consumed_bytes := 0#u64,
+      double_buffered := true
+    }
+
+/-- [pedra_aeneas_scan_readahead_kernel::{pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}::standard]:
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 168:4-170:5
+    Visibility: public -/
+def AsyncReadaheadPipeline.standard : Result AsyncReadaheadPipeline := do
+  let i ← SCAN_READAHEAD_CAP_BYTES
+  AsyncReadaheadPipeline.new i
+
+/-- [pedra_aeneas_scan_readahead_kernel::{pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}::is_prefetched]:
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 174:4-182:5
+    Visibility: public -/
+def AsyncReadaheadPipeline.is_prefetched
+  (self : AsyncReadaheadPipeline) (offset : Std.U64) : Result Bool := do
+  let in_active ←
+    if self.active_window.len > 0#u64
+    then
+      if offset >= self.active_window.offset
+      then
+        do
+        let i ←
+          lift (core.num.U64.saturating_add self.active_window.offset
+            self.active_window.len)
+        ok (offset < i)
+      else ok false
+    else ok false
+  let in_pending ←
+    if self.pending_window.len > 0#u64
+    then
+      if offset >= self.pending_window.offset
+      then
+        do
+        let i ←
+          lift (core.num.U64.saturating_add self.pending_window.offset
+            self.pending_window.len)
+        ok (offset < i)
+      else ok false
+    else ok false
+  if in_active
+  then ok true
+  else ok in_pending
+
+/-- [pedra_aeneas_scan_readahead_kernel::{pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}::advance]:
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 186:4-224:5
+    Visibility: public -/
+def AsyncReadaheadPipeline.advance
+  (self : AsyncReadaheadPipeline) (blocks : Slice (Std.U64 × Std.U64))
+  (cursor : Std.Usize) (bounded_cache : Bool) :
+  Result ((Option ScanReadaheadWindow) × AsyncReadaheadPipeline)
+  := do
+  if bounded_cache
+  then
+    if self.active_window.len = 0#u64
+    then
+      if self.pending_window.len > 0#u64
+      then
+        if self.double_buffered
+        then
+          if ScanReadaheadWindow.NONE.len = 0#u64
+          then
+            let i ← self.pending_window.len / 2#u64
+            if 0#u64 >= i
+            then
+              let i1 ← lift (UScalar.cast .Usize self.pending_window.blocks)
+              let next_cursor ←
+                lift (core.num.Usize.saturating_add cursor i1)
+              let next_w ← scan_readahead_window blocks next_cursor true
+              if next_w.len > 0#u64
+              then
+                if next_w.offset != self.pending_window.offset
+                then
+                  ok (some next_w,
+                    {
+                      self
+                        with
+                        active_window := self.pending_window,
+                        pending_window := next_w,
+                        consumed_bytes := 0#u64
+                    })
+                else
+                  ok (none,
+                    {
+                      self
+                        with
+                        active_window := self.pending_window,
+                        pending_window := ScanReadaheadWindow.NONE,
+                        consumed_bytes := 0#u64
+                    })
+              else
+                ok (none,
+                  {
+                    self
+                      with
+                      active_window := self.pending_window,
+                      pending_window := ScanReadaheadWindow.NONE,
+                      consumed_bytes := 0#u64
+                  })
+            else
+              ok (none,
+                {
+                  self
+                    with
+                    active_window := self.pending_window,
+                    pending_window := ScanReadaheadWindow.NONE,
+                    consumed_bytes := 0#u64
+                })
+          else
+            ok (none,
+              {
+                self
+                  with
+                  active_window := self.pending_window,
+                  pending_window := ScanReadaheadWindow.NONE,
+                  consumed_bytes := 0#u64
+              })
+        else
+          ok (none,
+            {
+              self
+                with
+                active_window := self.pending_window,
+                pending_window := ScanReadaheadWindow.NONE,
+                consumed_bytes := 0#u64
+            })
+      else
+        let w ← scan_readahead_window blocks cursor true
+        if w.len > 0#u64
+        then
+          ok (some w,
+            { self with active_window := w, consumed_bytes := 0#u64 })
+        else
+          if self.double_buffered
+          then
+            if self.pending_window.len = 0#u64
+            then
+              let i ← self.active_window.len / 2#u64
+              if self.consumed_bytes >= i
+              then
+                let i1 ← lift (UScalar.cast .Usize self.active_window.blocks)
+                let next_cursor ←
+                  lift (core.num.Usize.saturating_add cursor i1)
+                let next_w ← scan_readahead_window blocks next_cursor true
+                if next_w.len > 0#u64
+                then
+                  if next_w.offset != self.active_window.offset
+                  then ok (some next_w, { self with pending_window := next_w })
+                  else ok (none, self)
+                else ok (none, self)
+              else ok (none, self)
+            else ok (none, self)
+          else ok (none, self)
+    else
+      if self.consumed_bytes >= self.active_window.len
+      then
+        if self.pending_window.len > 0#u64
+        then
+          if self.double_buffered
+          then
+            if ScanReadaheadWindow.NONE.len = 0#u64
+            then
+              let i ← self.pending_window.len / 2#u64
+              if 0#u64 >= i
+              then
+                let i1 ←
+                  lift (UScalar.cast .Usize self.pending_window.blocks)
+                let next_cursor ←
+                  lift (core.num.Usize.saturating_add cursor i1)
+                let next_w ← scan_readahead_window blocks next_cursor true
+                if next_w.len > 0#u64
+                then
+                  if next_w.offset != self.pending_window.offset
+                  then
+                    ok (some next_w,
+                      {
+                        self
+                          with
+                          active_window := self.pending_window,
+                          pending_window := next_w,
+                          consumed_bytes := 0#u64
+                      })
+                  else
+                    ok (none,
+                      {
+                        self
+                          with
+                          active_window := self.pending_window,
+                          pending_window := ScanReadaheadWindow.NONE,
+                          consumed_bytes := 0#u64
+                      })
+                else
+                  ok (none,
+                    {
+                      self
+                        with
+                        active_window := self.pending_window,
+                        pending_window := ScanReadaheadWindow.NONE,
+                        consumed_bytes := 0#u64
+                    })
+              else
+                ok (none,
+                  {
+                    self
+                      with
+                      active_window := self.pending_window,
+                      pending_window := ScanReadaheadWindow.NONE,
+                      consumed_bytes := 0#u64
+                  })
+            else
+              ok (none,
+                {
+                  self
+                    with
+                    active_window := self.pending_window,
+                    pending_window := ScanReadaheadWindow.NONE,
+                    consumed_bytes := 0#u64
+                })
+          else
+            ok (none,
+              {
+                self
+                  with
+                  active_window := self.pending_window,
+                  pending_window := ScanReadaheadWindow.NONE,
+                  consumed_bytes := 0#u64
+              })
+        else
+          let w ← scan_readahead_window blocks cursor true
+          if w.len > 0#u64
+          then
+            ok (some w,
+              { self with active_window := w, consumed_bytes := 0#u64 })
+          else
+            if self.double_buffered
+            then
+              if self.pending_window.len = 0#u64
+              then
+                let i ← self.active_window.len / 2#u64
+                if self.consumed_bytes >= i
+                then
+                  let i1 ←
+                    lift (UScalar.cast .Usize self.active_window.blocks)
+                  let next_cursor ←
+                    lift (core.num.Usize.saturating_add cursor i1)
+                  let next_w ← scan_readahead_window blocks next_cursor true
+                  if next_w.len > 0#u64
+                  then
+                    if next_w.offset != self.active_window.offset
+                    then
+                      ok (some next_w, { self with pending_window := next_w })
+                    else ok (none, self)
+                  else ok (none, self)
+                else ok (none, self)
+              else ok (none, self)
+            else ok (none, self)
+      else
+        if self.double_buffered
+        then
+          if self.pending_window.len = 0#u64
+          then
+            let i ← self.active_window.len / 2#u64
+            if self.consumed_bytes >= i
+            then
+              let i1 ← lift (UScalar.cast .Usize self.active_window.blocks)
+              let next_cursor ←
+                lift (core.num.Usize.saturating_add cursor i1)
+              let next_w ← scan_readahead_window blocks next_cursor true
+              if next_w.len > 0#u64
+              then
+                if next_w.offset != self.active_window.offset
+                then ok (some next_w, { self with pending_window := next_w })
+                else ok (none, self)
+              else ok (none, self)
+            else ok (none, self)
+          else ok (none, self)
+        else ok (none, self)
+  else ok (none, self)
+
+/-- [pedra_aeneas_scan_readahead_kernel::{pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}::record_consumed]:
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 227:4-229:5
+    Visibility: public -/
+def AsyncReadaheadPipeline.record_consumed
+  (self : AsyncReadaheadPipeline) (bytes : Std.U64) :
+  Result AsyncReadaheadPipeline
+  := do
+  let i ← lift (core.num.U64.saturating_add self.consumed_bytes bytes)
+  ok { self with consumed_bytes := i }
+
+/-- [pedra_aeneas_scan_readahead_kernel::{pedra_aeneas_scan_readahead_kernel::AsyncReadaheadPipeline}::reset]:
+    Source: '../../../crates/pedradb-core/src/scan_readahead_kernel.rs', lines 232:4-236:5
+    Visibility: public -/
+def AsyncReadaheadPipeline.reset
+  (self : AsyncReadaheadPipeline) : Result AsyncReadaheadPipeline := do
+  ok
+    {
+      self
+        with
+        active_window := ScanReadaheadWindow.NONE,
+        pending_window := ScanReadaheadWindow.NONE,
+        consumed_bytes := 0#u64
+    }
 
 end pedra_aeneas_scan_readahead_kernel

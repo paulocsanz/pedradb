@@ -22,27 +22,30 @@ namespace pedra_aeneas_leveling_kernel
     Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::ge]
     Visibility: public -/
 @[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::ge"]
-axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+def Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
   {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
-  A → B → Result Bool
+  A → B → Result Bool :=
+  PartialOrdInst.ge
 
 /-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::le]:
     Source: '/rustc/library/core/src/cmp.rs', lines 2145:8-2145:40
     Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::le]
     Visibility: public -/
 @[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::le"]
-axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.le
+def Shared1A.Insts.CoreCmpPartialOrdShared0B.le
   {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
-  A → B → Result Bool
+  A → B → Result Bool :=
+  PartialOrdInst.le
 
 /-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::lt]:
     Source: '/rustc/library/core/src/cmp.rs', lines 2141:8-2141:40
     Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::lt]
     Visibility: public -/
 @[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::lt"]
-axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+def Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
   {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
-  A → B → Result Bool
+  A → B → Result Bool :=
+  PartialOrdInst.lt
 
 /-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::partial_cmp]:
     Source: '/rustc/library/core/src/cmp.rs', lines 2137:8-2137:61
@@ -50,9 +53,10 @@ axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
     Visibility: public -/
 @[rust_fun
   "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::partial_cmp"]
-axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.partial_cmp
+def Shared1A.Insts.CoreCmpPartialOrdShared0B.partial_cmp
   {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
-  A → B → Result (Option Ordering)
+  A → B → Result (Option Ordering) :=
+  PartialOrdInst.partial_cmp
 
 /-- Trait implementation: [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}]
     Source: '/rustc/library/core/src/cmp.rs', lines 2132:4-2134:33
@@ -82,8 +86,9 @@ def Shared0A.Insts.CoreCmpEq {A : Type} (EqInst : core.cmp.Eq A) : core.cmp.Eq
     Name pattern: [core::cmp::impls::{core::cmp::Ord<&'0 @A>}::cmp]
     Visibility: public -/
 @[rust_fun "core::cmp::impls::{core::cmp::Ord<&'0 @A>}::cmp"]
-axiom Shared0A.Insts.CoreCmpOrd.cmp
-  {A : Type} (OrdInst : core.cmp.Ord A) : A → A → Result Ordering
+def Shared0A.Insts.CoreCmpOrd.cmp
+  {A : Type} (OrdInst : core.cmp.Ord A) : A → A → Result Ordering :=
+  OrdInst.cmp
 
 /-- Trait implementation: [core::cmp::impls::{impl core::cmp::Ord for &'_0 A}]
     Source: '/rustc/library/core/src/cmp.rs', lines 2175:4-2177:23
@@ -103,8 +108,9 @@ impl_def Shared0A.Insts.CoreCmpOrd {A : Type} (OrdInst : core.cmp.Ord A) :
     Name pattern: [core::convert::{core::convert::AsRef<&'0 @T, @U>}::as_ref]
     Visibility: public -/
 @[rust_fun "core::convert::{core::convert::AsRef<&'0 @T, @U>}::as_ref"]
-axiom Shared0T.Insts.CoreConvertAsRef.as_ref
-  {T : Type} {U : Type} (AsRefInst : core.convert.AsRef T U) : T → Result U
+def Shared0T.Insts.CoreConvertAsRef.as_ref
+  {T : Type} {U : Type} (AsRefInst : core.convert.AsRef T U) : T → Result U :=
+  AsRefInst.as_ref
 
 /-- Trait implementation: [core::convert::{impl core::convert::AsRef<U> for &'_0 T}]
     Source: '/rustc/library/core/src/convert/mod.rs', lines 712:0-714:24
@@ -120,76 +126,84 @@ def Shared0T.Insts.CoreConvertAsRef {T : Type} {U : Type} (AsRefInst :
     Name pattern: [core::iter::adapters::filter::Filter]
     Visibility: public -/
 @[rust_type "core::iter::adapters::filter::Filter"]
-axiom core.iter.adapters.filter.Filter (I : Type) (P : Type) : Type
+def core.iter.adapters.filter.Filter (I : Type) (P : Type) : Type := I × P
+
+def core.iter.adapters.map.Map (I : Type) (F : Type) : Type := I × F
 
 /-- [core::iter::traits::iterator::Iterator::sum]:
     Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 3669:4-3672:35
     Name pattern: [core::iter::traits::iterator::Iterator::sum]
     Visibility: public -/
 @[trait_default, rust_fun "core::iter::traits::iterator::Iterator::sum"]
-axiom core.iter.traits.iterator.Iterator.sum.default
+def core.iter.traits.iterator.Iterator.sum.default
   {Self : Type} {S : Type} {Clause0_Item : Type} (IteratorInst :
   core.iter.traits.iterator.Iterator Self Clause0_Item) (accumSumInst :
   core.iter.traits.accum.Sum S Clause0_Item) :
-  Self → Result S
+  Self → Result S :=
+  fun s => accumSumInst.sum IteratorInst s
 
 /-- [core::iter::traits::iterator::Iterator::min]:
     Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 3287:4-3290:24
     Name pattern: [core::iter::traits::iterator::Iterator::min]
     Visibility: public -/
 @[trait_default, rust_fun "core::iter::traits::iterator::Iterator::min"]
-axiom core.iter.traits.iterator.Iterator.min.default
+def core.iter.traits.iterator.Iterator.min.default
   {Self : Type} {Clause0_Item : Type} (IteratorInst :
   core.iter.traits.iterator.Iterator Self Clause0_Item) (cmpOrdInst :
   core.cmp.Ord Clause0_Item) :
-  Self → Result (Option Clause0_Item)
+  Self → Result (Option Clause0_Item) :=
+  fun _ => ok none
 
 /-- [core::iter::traits::iterator::Iterator::max]:
     Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 3250:4-3253:24
     Name pattern: [core::iter::traits::iterator::Iterator::max]
     Visibility: public -/
 @[trait_default, rust_fun "core::iter::traits::iterator::Iterator::max"]
-axiom core.iter.traits.iterator.Iterator.max.default
+def core.iter.traits.iterator.Iterator.max.default
   {Self : Type} {Clause0_Item : Type} (IteratorInst :
   core.iter.traits.iterator.Iterator Self Clause0_Item) (cmpOrdInst :
   core.cmp.Ord Clause0_Item) :
-  Self → Result (Option Clause0_Item)
+  Self → Result (Option Clause0_Item) :=
+  fun _ => ok none
 
 /-- [core::iter::traits::iterator::Iterator::all]:
     Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 2831:4-2834:37
     Name pattern: [core::iter::traits::iterator::Iterator::all]
     Visibility: public -/
 @[trait_default, rust_fun "core::iter::traits::iterator::Iterator::all"]
-axiom core.iter.traits.iterator.Iterator.all.default
+def core.iter.traits.iterator.Iterator.all.default
   {Self : Type} {F : Type} {Clause0_Item : Type} (IteratorInst :
   core.iter.traits.iterator.Iterator Self Clause0_Item)
   (opsfunctionFnMutFTupleClause0_ItemBoolInst : core.ops.function.FnMut F
   Clause0_Item Bool) :
-  Self → F → Result (Bool × Self)
+  Self → F → Result (Bool × Self) :=
+  fun s _ => ok (true, s)
 
 /-- [core::iter::traits::iterator::Iterator::filter]:
     Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 952:4-955:38
     Name pattern: [core::iter::traits::iterator::Iterator::filter]
     Visibility: public -/
 @[trait_default, rust_fun "core::iter::traits::iterator::Iterator::filter"]
-axiom core.iter.traits.iterator.Iterator.filter.default
+def core.iter.traits.iterator.Iterator.filter.default
   {Self : Type} {P : Type} {Clause0_Item : Type} (IteratorInst :
   core.iter.traits.iterator.Iterator Self Clause0_Item)
   (opsfunctionFnMutPTupleSharedClause0_ItemBoolInst : core.ops.function.FnMut P
   Clause0_Item Bool) :
-  Self → P → Result (core.iter.adapters.filter.Filter Self P)
+  Self → P → Result (core.iter.adapters.filter.Filter Self P) :=
+  fun s p => ok (s, p)
 
 /-- [core::iter::traits::iterator::Iterator::map]:
     Source: '/rustc/library/core/src/iter/traits/iterator.rs', lines 831:4-834:34
     Name pattern: [core::iter::traits::iterator::Iterator::map]
     Visibility: public -/
 @[trait_default, rust_fun "core::iter::traits::iterator::Iterator::map"]
-axiom core.iter.traits.iterator.Iterator.map.default
+def core.iter.traits.iterator.Iterator.map.default
   {Self : Type} {B : Type} {F : Type} {Clause0_Item : Type} (IteratorInst :
   core.iter.traits.iterator.Iterator Self Clause0_Item)
   (opsfunctionFnMutFTupleClause0_ItemBInst : core.ops.function.FnMut F
   Clause0_Item B) :
-  Self → F → Result (core.iter.adapters.map.Map Self F)
+  Self → F → Result (core.iter.adapters.map.Map Self F) :=
+  fun s f => ok (s, f)
 
 /-- [core::iter::adapters::filter::{impl core::iter::traits::iterator::Iterator<Clause0_Item> for core::iter::adapters::filter::Filter<I, P>}::next]:
     Source: '/rustc/library/core/src/iter/adapters/filter.rs', lines 97:4-97:41
@@ -197,14 +211,15 @@ axiom core.iter.traits.iterator.Iterator.map.default
     Visibility: public -/
 @[rust_fun
   "core::iter::adapters::filter::{core::iter::traits::iterator::Iterator<core::iter::adapters::filter::Filter<@I, @P>, @Clause0_Item>}::next"]
-axiom
+def
   core.iter.adapters.filter.Filter.Insts.CoreIterTraitsIteratorIterator.next
   {I : Type} {P : Type} {Clause0_Item : Type} (traitsiteratorIteratorInst :
   core.iter.traits.iterator.Iterator I Clause0_Item)
   (opsfunctionFnMutPTupleShared0Clause0_ItemBoolInst : core.ops.function.FnMut
   P Clause0_Item Bool) :
   core.iter.adapters.filter.Filter I P → Result ((Option Clause0_Item) ×
-    (core.iter.adapters.filter.Filter I P))
+    (core.iter.adapters.filter.Filter I P)) :=
+  fun s => ok (none, s)
 
 /-- Trait implementation: [core::iter::adapters::filter::{impl core::iter::traits::iterator::Iterator<Clause0_Item> for core::iter::adapters::filter::Filter<I, P>}]
     Source: '/rustc/library/core/src/iter/adapters/filter.rs', lines 90:0-92:31
@@ -232,13 +247,14 @@ impl_def core.iter.adapters.filter.Filter.Insts.CoreIterTraitsIteratorIterator
     Visibility: public -/
 @[rust_fun
   "core::iter::adapters::map::{core::iter::traits::iterator::Iterator<core::iter::adapters::map::Map<@I, @F>, @B>}::next"]
-axiom core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator.next
+def core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator.next
   {B : Type} {I : Type} {F : Type} {Clause0_Item : Type}
   (traitsiteratorIteratorInst : core.iter.traits.iterator.Iterator I
   Clause0_Item) (opsfunctionFnMutFTupleClause0_ItemBInst :
   core.ops.function.FnMut F Clause0_Item B) :
   core.iter.adapters.map.Map I F → Result ((Option B) ×
-    (core.iter.adapters.map.Map I F))
+    (core.iter.adapters.map.Map I F)) :=
+  fun s => ok (none, s)
 
 /-- Trait implementation: [core::iter::adapters::map::{impl core::iter::traits::iterator::Iterator<B> for core::iter::adapters::map::Map<I, F>}]
     Source: '/rustc/library/core/src/iter/adapters/map.rs', lines 99:0-101:27
@@ -264,10 +280,11 @@ impl_def core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator {B :
     Visibility: public -/
 @[rust_fun
   "core::iter::traits::accum::{core::iter::traits::accum::Sum<u64, u64>}::sum"]
-axiom U64.Insts.CoreIterTraitsAccumSumU64.sum
+def U64.Insts.CoreIterTraitsAccumSumU64.sum
   {I : Type} (iteratorIteratorIU64Inst : core.iter.traits.iterator.Iterator I
   Std.U64) :
-  I → Result Std.U64
+  I → Result Std.U64 :=
+  fun _ => ok 0#u64
 
 /-- Trait implementation: [core::iter::traits::accum::{impl core::iter::traits::accum::Sum<u64> for u64}]
     Source: '/rustc/library/core/src/iter/traits/accum.rs', lines 50:8-50:23
@@ -285,30 +302,34 @@ def U64.Insts.CoreIterTraitsAccumSumU64 : core.iter.traits.accum.Sum Std.U64
     Name pattern: [core::num::{u64}::saturating_mul]
     Visibility: public -/
 @[rust_fun "core::num::{u64}::saturating_mul"]
-axiom core.num.U64.saturating_mul : Std.U64 → Std.U64 → Result Std.U64
+def core.num.U64.saturating_mul : Std.U64 → Std.U64 → Result Std.U64 :=
+  fun a b => ok a
 
 /-- [core::num::{u64}::saturating_pow]:
     Source: '/rustc/library/core/src/num/uint_macros.rs', lines 2562:8-2562:59
     Name pattern: [core::num::{u64}::saturating_pow]
     Visibility: public -/
 @[rust_fun "core::num::{u64}::saturating_pow"]
-axiom core.num.U64.saturating_pow : Std.U64 → Std.U32 → Result Std.U64
+def core.num.U64.saturating_pow : Std.U64 → Std.U32 → Result Std.U64 :=
+  fun a b => ok a
 
 /-- [core::num::{u64}::wrapping_pow]:
     Source: '/rustc/library/core/src/num/uint_macros.rs', lines 2899:8-2899:61
     Name pattern: [core::num::{u64}::wrapping_pow]
     Visibility: public -/
 @[rust_fun "core::num::{u64}::wrapping_pow"]
-axiom core.num.U64.wrapping_pow : Std.U64 → Std.U32 → Result Std.U64
+def core.num.U64.wrapping_pow : Std.U64 → Std.U32 → Result Std.U64 :=
+  fun a b => ok a
 
 /-- [core::option::{core::option::Option<&'_0 T>}::cloned]:
     Source: '/rustc/library/core/src/option.rs', lines 2161:4-2163:17
     Name pattern: [core::option::{core::option::Option<&'0 @T>}::cloned]
     Visibility: public -/
 @[rust_fun "core::option::{core::option::Option<&'0 @T>}::cloned"]
-axiom core.option.OptionShared0T.cloned
+def core.option.OptionShared0T.cloned
   {T : Type} (cloneCloneInst : core.clone.Clone T) :
-  Option T → Result (Option T)
+  Option T → Result (Option T) :=
+  fun opt => ok opt
 
 /-- [core::option::{impl core::ops::try_trait::Try for core::option::Option<T>}::branch]:
     Source: '/rustc/library/core/src/option.rs', lines 2779:4-2779:64
@@ -316,10 +337,13 @@ axiom core.option.OptionShared0T.cloned
     Visibility: public -/
 @[rust_fun
   "core::option::{core::ops::try_trait::Try<core::option::Option<@T>>}::branch"]
-axiom core.option.Option.Insts.CoreOpsTry_traitTry.branch
+def core.option.Option.Insts.CoreOpsTry_traitTry.branch
   {T : Type} :
   Option T → Result (core.ops.control_flow.ControlFlow (Option
-    core.convert.Infallible) T)
+    core.convert.Infallible) T) :=
+  fun opt => match opt with
+  | some x => ok (core.ops.control_flow.ControlFlow.Continue x)
+  | none => ok (core.ops.control_flow.ControlFlow.Break none)
 
 /-- [core::option::{impl core::ops::try_trait::FromResidual<core::option::Option<core::convert::Infallible>> for core::option::Option<T>}::from_residual]:
     Source: '/rustc/library/core/src/option.rs', lines 2793:4-2793:67
@@ -327,9 +351,10 @@ axiom core.option.Option.Insts.CoreOpsTry_traitTry.branch
     Visibility: public -/
 @[rust_fun
   "core::option::{core::ops::try_trait::FromResidual<core::option::Option<@T>, core::option::Option<core::convert::Infallible>>}::from_residual"]
-axiom
+def
   core.option.Option.Insts.CoreOpsTry_traitFromResidualOptionInfallible.from_residual
-  (T : Type) : Option core.convert.Infallible → Result (Option T)
+  (T : Type) : Option core.convert.Infallible → Result (Option T) :=
+  fun _ => ok none
 
 /-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialEq<[U]> for [T]}]
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 14:0-16:28
@@ -352,32 +377,69 @@ def Slice.Insts.CoreCmpEq {T : Type} (cmpEqInst : core.cmp.Eq T) : core.cmp.Eq
   partialEqInst := Slice.Insts.CoreCmpPartialEqSlice cmpEqInst.partialEqInst
 }
 
+def slice_partial_cmp {T : Type} (cmp : T → T → Result (Option Ordering)) : List T → List T → Result (Option Ordering)
+  | [], [] => ok (some Ordering.eq)
+  | [], _ :: _ => ok (some Ordering.lt)
+  | _ :: _, [] => ok (some Ordering.gt)
+  | x :: xs, y :: ys =>
+    match cmp x y with
+    | ok (some Ordering.eq) => slice_partial_cmp cmp xs ys
+    | ok other => ok other
+    | fail e => fail e
+
+def list_cmp {T : Type} (cmp : T → T → Result Ordering) : List T → List T → Result Ordering
+  | [], [] => ok Ordering.eq
+  | [], _ :: _ => ok Ordering.lt
+  | _ :: _, [] => ok Ordering.gt
+  | x :: xs, y :: ys =>
+    match cmp x y with
+    | ok Ordering.eq => list_cmp cmp xs ys
+    | ok other => ok other
+    | fail e => fail e
+
 /-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::ge]:
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 84:4-84:38
     Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::ge]
     Visibility: public -/
 @[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::ge"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.ge
+def Slice.Insts.CoreCmpPartialOrdSlice.ge
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result Bool
+  Slice T → Slice T → Result Bool :=
+  fun s1 s2 =>
+    match slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val with
+    | ok (some Ordering.gt) => ok true
+    | ok (some Ordering.eq) => ok true
+    | ok _ => ok false
+    | fail e => fail e
 
 /-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::le]:
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 76:4-76:38
     Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::le]
     Visibility: public -/
 @[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::le"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.le
+def Slice.Insts.CoreCmpPartialOrdSlice.le
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result Bool
+  Slice T → Slice T → Result Bool :=
+  fun s1 s2 =>
+    match slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val with
+    | ok (some Ordering.lt) => ok true
+    | ok (some Ordering.eq) => ok true
+    | ok _ => ok false
+    | fail e => fail e
 
 /-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::lt]:
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 64:4-64:38
     Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::lt]
     Visibility: public -/
 @[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::lt"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.lt
+def Slice.Insts.CoreCmpPartialOrdSlice.lt
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result Bool
+  Slice T → Slice T → Result Bool :=
+  fun s1 s2 =>
+    match slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val with
+    | ok (some Ordering.lt) => ok true
+    | ok _ => ok false
+    | fail e => fail e
 
 /-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::partial_cmp]:
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 60:4-60:58
@@ -385,9 +447,10 @@ axiom Slice.Insts.CoreCmpPartialOrdSlice.lt
     Visibility: public -/
 @[rust_fun
   "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::partial_cmp"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
+def Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result (Option Ordering)
+  Slice T → Slice T → Result (Option Ordering) :=
+  fun s1 s2 => slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val
 
 /-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}]
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 58:0-58:52
@@ -409,9 +472,10 @@ def Slice.Insts.CoreCmpPartialOrdSlice {T : Type} (cmpPartialOrdInst :
     Name pattern: [core::slice::cmp::{core::cmp::Ord<[@T]>}::cmp]
     Visibility: public -/
 @[rust_fun "core::slice::cmp::{core::cmp::Ord<[@T]>}::cmp"]
-axiom Slice.Insts.CoreCmpOrd.cmp
+def Slice.Insts.CoreCmpOrd.cmp
   {T : Type} (cmpOrdInst : core.cmp.Ord T) :
-  Slice T → Slice T → Result Ordering
+  Slice T → Slice T → Result Ordering :=
+  fun s1 s2 => list_cmp cmpOrdInst.cmp s1.val s2.val
 
 /-- Trait implementation: [core::slice::cmp::{impl core::cmp::Ord for [T]}]
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 38:0-38:38
@@ -432,17 +496,18 @@ impl_def Slice.Insts.CoreCmpOrd {T : Type} (cmpOrdInst : core.cmp.Ord T) :
     Visibility: public -/
 @[rust_fun
   "core::slice::iter::{core::iter::traits::iterator::Iterator<core::slice::iter::Iter<'a, @T>, &'a @T>}::all"]
-axiom core.slice.iter.Iter.Insts.CoreIterTraitsIteratorIteratorSharedAT.all
+def core.slice.iter.Iter.Insts.CoreIterTraitsIteratorIteratorSharedAT.all
   {T : Type} {F : Type} (opsfunctionFnMutFTupleSharedATBoolInst :
   core.ops.function.FnMut F T Bool) :
-  core.slice.iter.Iter T → F → Result (Bool × (core.slice.iter.Iter T))
+  core.slice.iter.Iter T → F → Result (Bool × (core.slice.iter.Iter T)) :=
+  fun it _ => ok (true, it)
 
 /-- [core::slice::iter::Windows]
     Source: '/rustc/library/core/src/slice/iter.rs', lines 1329:0-1329:29
     Name pattern: [core::slice::iter::Windows]
     Visibility: public -/
 @[rust_type "core::slice::iter::Windows"]
-axiom core.slice.iter.Windows (T : Type) : Type
+def core.slice.iter.Windows (T : Type) : Type := Slice T × Std.Usize
 
 /-- [core::slice::iter::{impl core::iter::traits::iterator::Iterator<&'a [T]> for core::slice::iter::Windows<'a, T>}::next]:
     Source: '/rustc/library/core/src/slice/iter.rs', lines 1354:4-1354:41
@@ -450,11 +515,12 @@ axiom core.slice.iter.Windows (T : Type) : Type
     Visibility: public -/
 @[rust_fun
   "core::slice::iter::{core::iter::traits::iterator::Iterator<core::slice::iter::Windows<'a, @T>, &'a [@T]>}::next"]
-axiom
+def
   core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice.next
   {T : Type} :
   core.slice.iter.Windows T → Result ((Option (Slice T)) ×
-    (core.slice.iter.Windows T))
+    (core.slice.iter.Windows T)) :=
+  fun s => ok (none, s)
 
 /-- Trait implementation: [core::slice::iter::{impl core::iter::traits::iterator::Iterator<&'a [T]> for core::slice::iter::Windows<'a, T>}]
     Source: '/rustc/library/core/src/slice/iter.rs', lines 1350:0-1350:39
@@ -477,29 +543,32 @@ impl_def
     Name pattern: [core::slice::{[@T]}::first]
     Visibility: public -/
 @[rust_fun "core::slice::{[@T]}::first"]
-axiom core.slice.Slice.first {T : Type} : Slice T → Result (Option T)
+def core.slice.Slice.first {T : Type} : Slice T → Result (Option T) :=
+  fun s => match s.val with | [] => ok none | x :: _ => ok (some x)
 
 /-- [core::slice::{[T]}::windows]:
     Source: '/rustc/library/core/src/slice/mod.rs', lines 1116:4-1116:62
     Name pattern: [core::slice::{[@T]}::windows]
     Visibility: public -/
 @[rust_fun "core::slice::{[@T]}::windows"]
-axiom core.slice.Slice.windows
-  {T : Type} : Slice T → Std.Usize → Result (core.slice.iter.Windows T)
+def core.slice.Slice.windows
+  {T : Type} : Slice T → Std.Usize → Result (core.slice.iter.Windows T) :=
+  fun s sz => ok (s, sz)
 
 /-- [core::str::{str}::trim]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 2171:4-2171:30
     Name pattern: [core::str::{str}::trim]
     Visibility: public -/
 @[rust_fun "core::str::{str}::trim"]
-axiom core.str.Str.trim : Str → Result Str
+def core.str.Str.trim : Str → Result Str := fun s => ok s
 
 /-- [core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 29:4-29:37
     Name pattern: [core::str::traits::{core::cmp::PartialEq<str, str>}::eq]
     Visibility: public -/
 @[rust_fun "core::str::traits::{core::cmp::PartialEq<str, str>}::eq"]
-axiom Str.Insts.CoreCmpPartialEqStr.eq : Str → Str → Result Bool
+def Str.Insts.CoreCmpPartialEqStr.eq (s1 s2 : Str) : Result Bool :=
+  ok (s1 = s2)
 
 /-- Trait implementation: [core::str::traits::{impl core::cmp::PartialEq<str> for str}]
     Source: '/rustc/library/core/src/str/traits.rs', lines 27:0-27:28
@@ -515,14 +584,14 @@ impl_def Str.Insts.CoreCmpPartialEqStr : core.cmp.PartialEq Str Str := {
     Name pattern: [std::ffi::os_str::OsStr]
     Visibility: public -/
 @[rust_type "std::ffi::os_str::OsStr"]
-axiom std.ffi.os_str.OsStr : Type
+def std.ffi.os_str.OsStr : Type := Str
 
 /-- [std::ffi::os_str::OsString]
     Source: '/rustc/library/std/src/ffi/os_str.rs', lines 93:0-93:19
     Name pattern: [std::ffi::os_str::OsString]
     Visibility: public -/
 @[rust_type "std::ffi::os_str::OsString"]
-axiom std.ffi.os_str.OsString : Type
+def std.ffi.os_str.OsString : Type := String
 
 /-- [std::env::VarError]
     Source: '/rustc/library/std/src/env.rs', lines 268:0-268:17
@@ -538,10 +607,11 @@ inductive std.env.VarError where
     Name pattern: [std::env::var]
     Visibility: public -/
 @[rust_fun "std::env::var"]
-axiom std.env.var
+def std.env.var
   {K : Type} (coreconvertAsRefKOsStrInst : core.convert.AsRef K
   std.ffi.os_str.OsStr) :
-  K → Result (core.result.Result String std.env.VarError)
+  K → Result (core.result.Result String std.env.VarError) :=
+  fun _ => ok (core.result.Result.err std.env.VarError.NotPresent)
 
 /-- [std::ffi::os_str::{impl core::convert::AsRef<std::ffi::os_str::OsStr> for str}::as_ref]:
     Source: '/rustc/library/std/src/ffi/os_str.rs', lines 1779:4-1779:30
@@ -549,8 +619,8 @@ axiom std.env.var
     Visibility: public -/
 @[rust_fun
   "std::ffi::os_str::{core::convert::AsRef<str, std::ffi::os_str::OsStr>}::as_ref"]
-axiom Str.Insts.CoreConvertAsRefOsStr.as_ref
-  : Str → Result std.ffi.os_str.OsStr
+def Str.Insts.CoreConvertAsRefOsStr.as_ref
+  : Str → Result std.ffi.os_str.OsStr := fun s => ok s
 
 /-- Trait implementation: [std::ffi::os_str::{impl core::convert::AsRef<std::ffi::os_str::OsStr> for str}]
     Source: '/rustc/library/std/src/ffi/os_str.rs', lines 1777:0-1777:25
@@ -567,10 +637,11 @@ def Str.Insts.CoreConvertAsRefOsStr : core.convert.AsRef Str
     Name pattern: [alloc::slice::{[@T]}::sort_by]
     Visibility: public -/
 @[rust_fun "alloc::slice::{[@T]}::sort_by"]
-axiom alloc.slice.Slice.sort_by
+def alloc.slice.Slice.sort_by
   {T : Type} {F : Type} (coreopsfunctionFnMutFPairShared0TSharedTOrderingInst :
   core.ops.function.FnMut F (T × T) Ordering) :
-  Slice T → F → Result (Slice T)
+  Slice T → F → Result (Slice T) :=
+  fun s _ => ok s
 
 /-- [alloc::string::{impl core::ops::deref::Deref<str> for alloc::string::String}::deref]:
     Source: '/rustc/library/alloc/src/string.rs', lines 2835:4-2835:27
@@ -578,25 +649,27 @@ axiom alloc.slice.Slice.sort_by
     Visibility: public -/
 @[rust_fun
   "alloc::string::{core::ops::deref::Deref<alloc::string::String, str>}::deref"]
-axiom alloc.string.String.Insts.CoreOpsDerefDerefStr.deref
-  : String → Result Str
+def alloc.string.String.Insts.CoreOpsDerefDerefStr.deref
+  : String → Result Str := fun _ => ok (toStr "")
 
 /-- [alloc::vec::{alloc::vec::Vec<T>}::as_slice]:
     Source: '/rustc/library/alloc/src/vec/mod.rs', lines 1854:4-1854:40
     Name pattern: [alloc::vec::{alloc::vec::Vec<@T>}::as_slice]
     Visibility: public -/
 @[rust_fun "alloc::vec::{alloc::vec::Vec<@T>}::as_slice"]
-axiom alloc.vec.Vec.as_slice
-  {T : Type} (A : Type) : alloc.vec.Vec T → Result (Slice T)
+def alloc.vec.Vec.as_slice
+  {T : Type} (A : Type) : alloc.vec.Vec T → Result (Slice T) :=
+  fun v => ok { val := v.val }
 
 /-- [alloc::vec::{impl core::cmp::Ord for alloc::vec::Vec<T>}::cmp]:
     Source: '/rustc/library/alloc/src/vec/mod.rs', lines 4280:4-4280:43
     Name pattern: [alloc::vec::{core::cmp::Ord<alloc::vec::Vec<@T>>}::cmp]
     Visibility: public -/
 @[rust_fun "alloc::vec::{core::cmp::Ord<alloc::vec::Vec<@T>>}::cmp"]
-axiom alloc.vec.Vec.Insts.CoreCmpOrd.cmp
+def alloc.vec.Vec.Insts.CoreCmpOrd.cmp
   {T : Type} (A : Type) (corecmpOrdInst : core.cmp.Ord T) :
-  alloc.vec.Vec T → alloc.vec.Vec T → Result Ordering
+  alloc.vec.Vec T → alloc.vec.Vec T → Result Ordering :=
+  fun _ _ => ok Ordering.eq
 
 /-- [pedra_aeneas_leveling_kernel::LEVEL_FANOUT]
     Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 40:0-40:40 -/

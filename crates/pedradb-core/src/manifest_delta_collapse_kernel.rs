@@ -96,10 +96,16 @@ impl ManifestCatalogState {
 
     /// Aplica um delta de edição sobre o catálogo.
     pub fn apply_delta(&mut self, delta: &VersionEditDelta) {
-        // Aplica deleções
+        // Aplica deleções e poda níveis que fiquem vazios
         for &(level, file_number) in &delta.deleted_files {
-            if let Some(level_files) = self.levels.get_mut(&level) {
+            let empty = if let Some(level_files) = self.levels.get_mut(&level) {
                 level_files.remove(&file_number);
+                level_files.is_empty()
+            } else {
+                false
+            };
+            if empty {
+                self.levels.remove(&level);
             }
         }
 
@@ -170,5 +176,38 @@ impl ManifestAlgebraOracle {
         state_collapsed.apply_delta(&collapsed_delta);
 
         state_successive == state_collapsed
+    }
+
+    /// Comprova que o catálogo de níveis satisfaz invariantes fundamentais de integridade:
+    /// 1. Para todo arquivo, min_key <= max_key
+    /// 2. Para todo arquivo, file_number < next_file_number
+    /// 3. Para níveis L > 0, os arquivos não possuem sobreposição de chaves
+    pub fn verify_catalog_consistency(catalog: &ManifestCatalogState) -> bool {
+        for (&level, files) in &catalog.levels {
+            if files.is_empty() {
+                return false;
+            }
+            let mut entries: Vec<&ManifestFileEntry> = files.values().collect();
+            // Verifica limites e next_file_number
+            for entry in &entries {
+                if entry.min_key > entry.max_key {
+                    return false;
+                }
+                if entry.file_number >= catalog.next_file_number {
+                    return false;
+                }
+            }
+
+            // Para L > 0, nenhum arquivo pode se sobrepor
+            if level > 0 && entries.len() > 1 {
+                entries.sort_by(|a, b| a.min_key.cmp(&b.min_key));
+                for i in 0..entries.len() - 1 {
+                    if entries[i].max_key >= entries[i + 1].min_key {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 }

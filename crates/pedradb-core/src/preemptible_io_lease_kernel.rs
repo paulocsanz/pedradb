@@ -24,6 +24,12 @@ pub enum PreemptedIoLeaseViolation {
         /// Teto máximo permitido.
         max_allowed_bytes: u64,
     },
+    /// Regressão de relógio ou clock skew detectado na avaliação do lease.
+    ClockSkewDetected {
+        token_id: u64,
+        issued_at_tick: u64,
+        current_tick: u64,
+    },
 }
 
 /// Token de lease temporal de I/O concedido pelo rate limiter.
@@ -44,7 +50,7 @@ pub struct IoLeaseToken {
 pub enum PreSyscallGuardDecision {
     /// Lease válido: prossegue com a submissão física ao kernel POSIX/io_uring.
     ProceedWithIo,
-    /// Lease expirou por preempção: cancela o I/O e renegocia a cota com o rate limiter.
+    /// Lease expirou por preempção ou clock skew: cancela o I/O e renegocia a cota com o rate limiter.
     AbortAndRenegotiate {
         /// Ticks transcorridos além do limite.
         overrun_ticks: u64,
@@ -60,7 +66,11 @@ impl PreSyscallIoGuard {
         token: &IoLeaseToken,
         current_tick: u64,
     ) -> PreSyscallGuardDecision {
-        let elapsed = current_tick.saturating_sub(token.issued_at_tick);
+        if current_tick < token.issued_at_tick {
+            return PreSyscallGuardDecision::AbortAndRenegotiate { overrun_ticks: 0 };
+        }
+
+        let elapsed = current_tick - token.issued_at_tick;
 
         if elapsed <= token.max_duration_ticks {
             PreSyscallGuardDecision::ProceedWithIo
@@ -71,12 +81,20 @@ impl PreSyscallIoGuard {
         }
     }
 
-    /// Valida que nenhuma thread executa I/O sob lease expirado.
+    /// Valida que nenhuma thread executa I/O sob lease expirado ou relógio corrompido.
     pub fn verify_execution_safety(
         token: &IoLeaseToken,
         execution_tick: u64,
     ) -> Result<(), PreemptedIoLeaseViolation> {
-        let elapsed = execution_tick.saturating_sub(token.issued_at_tick);
+        if execution_tick < token.issued_at_tick {
+            return Err(PreemptedIoLeaseViolation::ClockSkewDetected {
+                token_id: token.token_id,
+                issued_at_tick: token.issued_at_tick,
+                current_tick: execution_tick,
+            });
+        }
+
+        let elapsed = execution_tick - token.issued_at_tick;
 
         if elapsed > token.max_duration_ticks {
             return Err(PreemptedIoLeaseViolation::ExpiredIoLeaseExecuted {
@@ -87,6 +105,20 @@ impl PreSyscallIoGuard {
             });
         }
 
+        Ok(())
+    }
+
+    /// Valida que a quantidade requisitada de bytes respeita a cota do lease.
+    pub fn verify_quota_safety(
+        token: &IoLeaseToken,
+        requested_bytes: u64,
+    ) -> Result<(), PreemptedIoLeaseViolation> {
+        if requested_bytes > token.bytes_allowed {
+            return Err(PreemptedIoLeaseViolation::QuotaExceededPerIo {
+                requested_bytes,
+                max_allowed_bytes: token.bytes_allowed,
+            });
+        }
         Ok(())
     }
 }

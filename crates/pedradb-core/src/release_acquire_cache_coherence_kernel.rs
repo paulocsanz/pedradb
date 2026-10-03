@@ -24,10 +24,26 @@ pub enum WeakMemoryCoherenceViolation {
         /// Ordenação incorreta utilizada.
         faulty_ordering: &'static str,
     },
+    /// O identificador do bloco na entrada publicada diverge do ID do slot do cache.
+    BlockIdMismatch {
+        /// ID esperado pelo slot.
+        slot_block_id: u64,
+        /// ID observado na entrada.
+        entry_block_id: u64,
+    },
+    /// Falha de integridade do payload (CRC32C divergente).
+    ChecksumMismatch {
+        /// ID do bloco.
+        block_id: u64,
+        /// Checksum esperado registrado na entrada.
+        expected_crc: u32,
+        /// Checksum real recalculado a partir do payload.
+        actual_crc: u32,
+    },
 }
 
 /// Buffer descompactado gerenciado em memória compartilhada.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecompressedBlockEntry {
     /// Identificador único do bloco.
     pub block_id: u64,
@@ -35,6 +51,18 @@ pub struct DecompressedBlockEntry {
     pub payload: Vec<u8>,
     /// Digest CRC32C do payload para verificação de integridade ponta-a-ponta.
     pub crc32c: u32,
+}
+
+impl DecompressedBlockEntry {
+    /// Constrói uma nova entrada calculando automaticamente o digest CRC32C do payload.
+    pub fn new(block_id: u64, payload: Vec<u8>) -> Self {
+        let crc = crc32c::crc32c(&payload);
+        Self {
+            block_id,
+            payload,
+            crc32c: crc,
+        }
+    }
 }
 
 /// Descritor de entrada no cache com token atômico de sincronização.
@@ -54,6 +82,12 @@ impl BlockCacheSlot {
             is_published: AtomicBool::new(false),
             epoch_token: AtomicU64::new(0),
         }
+    }
+
+    /// Identificador do bloco atribuído a este slot.
+    #[inline]
+    pub fn block_id(&self) -> u64 {
+        self.block_id
     }
 
     /// Publica com segurança os dados descompactados utilizando semântica `Release`.
@@ -91,6 +125,12 @@ impl ReleaseAcquireCoherenceOracle {
         expected_len: usize,
     ) -> Result<(), WeakMemoryCoherenceViolation> {
         if let Some((entry, epoch)) = slot.try_acquire_entry() {
+            if entry.block_id != slot.block_id {
+                return Err(WeakMemoryCoherenceViolation::BlockIdMismatch {
+                    slot_block_id: slot.block_id,
+                    entry_block_id: entry.block_id,
+                });
+            }
             if entry.payload.len() != expected_len {
                 return Err(WeakMemoryCoherenceViolation::PrematurePublicationDetected {
                     block_id: slot.block_id,
@@ -104,6 +144,21 @@ impl ReleaseAcquireCoherenceOracle {
                     faulty_ordering: "Missing causal epoch synchronization",
                 });
             }
+        }
+        Ok(())
+    }
+
+    /// Valida a integridade matemática do payload contra o digest CRC32C gravado.
+    pub fn verify_entry_integrity(
+        entry: &DecompressedBlockEntry,
+    ) -> Result<(), WeakMemoryCoherenceViolation> {
+        let actual_crc = crc32c::crc32c(&entry.payload);
+        if entry.crc32c != actual_crc {
+            return Err(WeakMemoryCoherenceViolation::ChecksumMismatch {
+                block_id: entry.block_id,
+                expected_crc: entry.crc32c,
+                actual_crc,
+            });
         }
         Ok(())
     }

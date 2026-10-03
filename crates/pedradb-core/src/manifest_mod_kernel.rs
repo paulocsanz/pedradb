@@ -463,10 +463,14 @@ pub fn store<E: Env>(env: &E, dir: &Path, vs: &VersionSet, sync: bool) -> Result
     }
 
     // Best-effort: drop older MANIFEST-* files (not the one we just wrote).
-    if let Ok(names) = env.read_dir_names(dir) {
-        for name in names {
-            if name.starts_with(MANIFEST_PREFIX) && name != man_name && !is_tmp_name(&name) {
-                let _ = env.remove_file(&dir.join(name));
+    // MUST ONLY purge older manifests when CURRENT was durably synced to directory!
+    // If sync_dir failed, older manifests must be preserved so recovery can roll back.
+    if unsynced.is_none() {
+        if let Ok(names) = env.read_dir_names(dir) {
+            for name in names {
+                if name.starts_with(MANIFEST_PREFIX) && name != man_name && !is_tmp_name(&name) {
+                    let _ = env.remove_file(&dir.join(name));
+                }
             }
         }
     }
@@ -790,6 +794,81 @@ mod tests {
         assert!(!dir.join("000009.sst.tmp").exists());
         assert!(!dir.join("CURRENT.tmp").exists());
         assert!(!dir.join("MANIFEST-000001.tmp").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[derive(Clone)]
+    struct FailSecondSyncDirEnv {
+        sync_dir_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Env for FailSecondSyncDirEnv {
+        type File = std::fs::File;
+
+        fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.create_dir_all(path)
+        }
+        fn create(&self, path: &Path) -> std::io::Result<Self::File> {
+            StdEnv.create(path)
+        }
+        fn open_append(&self, path: &Path) -> std::io::Result<Self::File> {
+            StdEnv.open_append(path)
+        }
+        fn open_read(&self, path: &Path) -> std::io::Result<Self::File> {
+            StdEnv.open_read(path)
+        }
+        fn sync_dir(&self, path: &Path) -> std::io::Result<()> {
+            let c = self.sync_dir_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if c == 1 {
+                return Err(std::io::Error::new(std::io::ErrorKind::Other, "injected sync_dir failure"));
+            }
+            StdEnv.sync_dir(path)
+        }
+        fn read_dir_names(&self, path: &Path) -> std::io::Result<Vec<String>> {
+            StdEnv.read_dir_names(path)
+        }
+        fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.remove_file(path)
+        }
+        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            StdEnv.rename(from, to)
+        }
+        fn exists(&self, path: &Path) -> bool {
+            StdEnv.exists(path)
+        }
+        fn metadata_len(&self, path: &Path) -> std::io::Result<u64> {
+            StdEnv.metadata_len(path)
+        }
+    }
+
+    #[test]
+    fn manifest_store_unsynced_preserves_older_manifests() {
+        let dir = temp_dir();
+        let env = FailSecondSyncDirEnv {
+            sync_dir_count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        };
+        let mut vs = VersionSet {
+            next_file_num: 2,
+            sst_file_nums: vec![1],
+            sst_levels: vec![0],
+            manifest_file_num: 0,
+            vlog_use_new: false,
+            earliest_readable_seq: 0,
+            sst_cfs: vec![String::new()],
+        };
+        install_next(&env, &dir, &mut vs, false).unwrap();
+        assert!(dir.join("MANIFEST-000001").exists());
+
+        vs.manifest_file_num = 2;
+        env.sync_dir_count.store(0, std::sync::atomic::Ordering::SeqCst);
+        let res = store(&env, &dir, &vs, true);
+        assert!(matches!(res, Err(CoreError::ManifestCommittedUnsynced { .. })));
+
+        assert!(
+            dir.join("MANIFEST-000001").exists(),
+            "MANIFEST-000001 must NOT be deleted when CURRENT sync_dir fails!"
+        );
+
         let _ = fs::remove_dir_all(&dir);
     }
 }

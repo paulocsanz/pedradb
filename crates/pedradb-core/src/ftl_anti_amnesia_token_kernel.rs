@@ -31,7 +31,72 @@ pub enum FtlAmnesiaViolation {
         /// Calculado.
         calculated_crc: u32,
     },
+    /// O bloco lido foi retornado de um índice físico LBA incorreto (Misdirection da FTL).
+    BlockIndexMisdirection {
+        /// Índice de bloco esperado pelo leitor.
+        expected_block_index: u32,
+        /// Índice de bloco retornado fisicamente pela mídia.
+        actual_block_index: u32,
+    },
+    /// A época de gravação diverge da época global esperada.
+    StaleGlobalEpochDetected {
+        /// Época registrada no bloco.
+        recorded_epoch: u64,
+        /// Época global esperada.
+        expected_epoch: u64,
+    },
+    /// Carga útil vazia ou corrompida.
+    EmptyPayloadNotAllowed,
+    /// Boot UUID não pode ser nulo/zero.
+    ZeroBootUuid,
+    /// Época global não pode ser zero.
+    ZeroEpoch,
+    /// Sequence number não pode ser zero.
+    ZeroSeq,
 }
+
+impl std::fmt::Display for FtlAmnesiaViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StaleBlockRollbackDetected { file_id, block_index, stale_block_seq, active_min_seq } => {
+                write!(
+                    f,
+                    "Stale block rollback on file {file_id} block {block_index}: seq {stale_block_seq} < active {active_min_seq}"
+                )
+            }
+            Self::ForeignIncarnationDetected { recorded_boot_uuid, expected_boot_uuid } => {
+                write!(
+                    f,
+                    "Foreign incarnation: recorded {recorded_boot_uuid:x} != expected {expected_boot_uuid:x}"
+                )
+            }
+            Self::TokenChecksumMismatch { expected_crc, calculated_crc } => {
+                write!(
+                    f,
+                    "Token checksum mismatch: expected {expected_crc:x}, calculated {calculated_crc:x}"
+                )
+            }
+            Self::BlockIndexMisdirection { expected_block_index, actual_block_index } => {
+                write!(
+                    f,
+                    "Block index misdirection: expected {expected_block_index}, actual {actual_block_index}"
+                )
+            }
+            Self::StaleGlobalEpochDetected { recorded_epoch, expected_epoch } => {
+                write!(
+                    f,
+                    "Stale global epoch: recorded {recorded_epoch}, expected {expected_epoch}"
+                )
+            }
+            Self::EmptyPayloadNotAllowed => write!(f, "Empty payload not allowed"),
+            Self::ZeroBootUuid => write!(f, "Boot UUID cannot be zero"),
+            Self::ZeroEpoch => write!(f, "Global epoch cannot be zero"),
+            Self::ZeroSeq => write!(f, "LSM sequence number cannot be zero"),
+        }
+    }
+}
+
+impl std::error::Error for FtlAmnesiaViolation {}
 
 /// Token físico de integridade espaço-temporal persistido no cabeçalho de cada bloco.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +114,20 @@ pub struct FtlAntiAmnesiaToken {
 }
 
 impl FtlAntiAmnesiaToken {
+    /// Gera um token de anti-amnésia validando boot_uuid, global_epoch e lsm_seq.
+    pub fn try_new(boot_uuid: u128, global_epoch: u64, lsm_seq: u64, block_index: u32) -> Result<Self, FtlAmnesiaViolation> {
+        if boot_uuid == 0 {
+            return Err(FtlAmnesiaViolation::ZeroBootUuid);
+        }
+        if global_epoch == 0 {
+            return Err(FtlAmnesiaViolation::ZeroEpoch);
+        }
+        if lsm_seq == 0 {
+            return Err(FtlAmnesiaViolation::ZeroSeq);
+        }
+        Ok(Self::new(boot_uuid, global_epoch, lsm_seq, block_index))
+    }
+
     /// Gera um token de anti-amnésia com CRC32C válido.
     pub fn new(boot_uuid: u128, global_epoch: u64, lsm_seq: u64, block_index: u32) -> Self {
         let crc = Self::compute_crc(boot_uuid, global_epoch, lsm_seq, block_index);
@@ -84,12 +163,34 @@ impl FtlAntiAmnesiaToken {
 }
 
 /// Bloco físico de dados persistido no NVMe com token de proteção.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhysicalMediaBlock {
     /// Token anti-amnésia da FTL.
     pub token: FtlAntiAmnesiaToken,
     /// Dados úteis do bloco.
     pub payload: Vec<u8>,
+}
+
+impl PhysicalMediaBlock {
+    /// Cria um bloco físico de mídia validando não-vacuidade do payload e checksum do token.
+    pub fn try_new(token: FtlAntiAmnesiaToken, payload: Vec<u8>) -> Result<Self, FtlAmnesiaViolation> {
+        if payload.is_empty() {
+            return Err(FtlAmnesiaViolation::EmptyPayloadNotAllowed);
+        }
+        if !token.is_checksum_valid() {
+            let calculated = FtlAntiAmnesiaToken::compute_crc(
+                token.boot_uuid,
+                token.global_epoch,
+                token.lsm_seq,
+                token.block_index,
+            );
+            return Err(FtlAmnesiaViolation::TokenChecksumMismatch {
+                expected_crc: token.token_crc,
+                calculated_crc: calculated,
+            });
+        }
+        Ok(Self { token, payload })
+    }
 }
 
 /// Oráculo de validação anti-amnésia contra reversões silenciosas da FTL.
@@ -126,7 +227,12 @@ impl FtlAntiAmnesiaOracle {
             });
         }
 
-        // 3. Prova de monotonicidade temporal contra o active version catalog:
+        // 3. Prova de payload não vazio (rejeita blocos apagados/uninitialized)
+        if block.payload.is_empty() {
+            return Err(FtlAmnesiaViolation::EmptyPayloadNotAllowed);
+        }
+
+        // 4. Prova de monotonicidade temporal contra o active version catalog:
         // Se o lsm_seq do bloco for inferior à linha de corte ativa do arquivo,
         // a FTL sofreu rollback e entregou dados de uma geração já reciclada.
         if block.token.lsm_seq < active_min_seq {
@@ -140,4 +246,84 @@ impl FtlAntiAmnesiaOracle {
 
         Ok(())
     }
+
+    /// Valida proveniência e integridade do bloco verificando também a correlação com o índice LBA esperado.
+    pub fn verify_block_at_index(
+        file_id: u64,
+        block: &PhysicalMediaBlock,
+        expected_boot_uuid: u128,
+        active_min_seq: u64,
+        expected_block_index: u32,
+    ) -> Result<(), FtlAmnesiaViolation> {
+        if block.token.block_index != expected_block_index {
+            return Err(FtlAmnesiaViolation::BlockIndexMisdirection {
+                expected_block_index,
+                actual_block_index: block.token.block_index,
+            });
+        }
+        Self::verify_block_provenance(file_id, block, expected_boot_uuid, active_min_seq)
+    }
+
+    /// Valida proveniência garantindo que o bloco pertença à época global esperada do cluster/instância.
+    pub fn verify_block_with_epoch(
+        file_id: u64,
+        block: &PhysicalMediaBlock,
+        expected_boot_uuid: u128,
+        active_min_seq: u64,
+        expected_epoch: u64,
+    ) -> Result<(), FtlAmnesiaViolation> {
+        if block.token.global_epoch != expected_epoch {
+            return Err(FtlAmnesiaViolation::StaleGlobalEpochDetected {
+                recorded_epoch: block.token.global_epoch,
+                expected_epoch,
+            });
+        }
+        Self::verify_block_provenance(file_id, block, expected_boot_uuid, active_min_seq)
+    }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ftl_anti_amnesia_bounds() {
+        assert_eq!(
+            FtlAntiAmnesiaToken::try_new(0, 1, 1, 0),
+            Err(FtlAmnesiaViolation::ZeroBootUuid)
+        );
+
+        assert_eq!(
+            FtlAntiAmnesiaToken::try_new(0x1234, 0, 1, 0),
+            Err(FtlAmnesiaViolation::ZeroEpoch)
+        );
+
+        assert_eq!(
+            FtlAntiAmnesiaToken::try_new(0x1234, 1, 0, 0),
+            Err(FtlAmnesiaViolation::ZeroSeq)
+        );
+
+        let token = FtlAntiAmnesiaToken::try_new(0x1234, 1, 100, 0).expect("valid token");
+
+        assert_eq!(
+            PhysicalMediaBlock::try_new(token, vec![]),
+            Err(FtlAmnesiaViolation::EmptyPayloadNotAllowed)
+        );
+
+        let block = PhysicalMediaBlock::try_new(token, vec![1, 2, 3]).expect("valid block");
+        assert_eq!(block.payload, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_ftl_violation_display() {
+        let err = FtlAmnesiaViolation::ZeroBootUuid;
+        assert_eq!(format!("{err}"), "Boot UUID cannot be zero");
+
+        let err2 = FtlAmnesiaViolation::ZeroEpoch;
+        assert_eq!(format!("{err2}"), "Global epoch cannot be zero");
+
+        let err3 = FtlAmnesiaViolation::ZeroSeq;
+        assert_eq!(format!("{err3}"), "LSM sequence number cannot be zero");
+    }
+}
+

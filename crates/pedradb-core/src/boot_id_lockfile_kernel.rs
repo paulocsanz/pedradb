@@ -17,9 +17,30 @@ pub enum LockfileError {
     ContendedByLiveProcess { pid: u32, boot_id: String },
     /// Lock payload corrupted or truncated.
     MalformedLockPayload,
+    /// Host boot identifier cannot be empty.
+    EmptyBootId,
+    /// Process identifier cannot be zero.
+    ZeroPid,
     /// IO failure writing or replacing lockfile.
     IoFailure(String),
 }
+
+impl std::fmt::Display for LockfileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ContendedByLiveProcess { pid, boot_id } => write!(
+                f,
+                "Lockfile contended by active live process PID {pid} under boot {boot_id}"
+            ),
+            Self::MalformedLockPayload => write!(f, "Malformed or truncated lockfile payload"),
+            Self::EmptyBootId => write!(f, "Boot identifier cannot be empty"),
+            Self::ZeroPid => write!(f, "Process identifier cannot be zero"),
+            Self::IoFailure(msg) => write!(f, "Lockfile IO failure: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for LockfileError {}
 
 /// Structured lockfile token stored durably on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,9 +68,15 @@ impl LockfileToken {
         }
 
         let boot_id = parts[0].to_string();
+        if boot_id.trim().is_empty() {
+            return Err(LockfileError::MalformedLockPayload);
+        }
         let pid = parts[1]
             .parse::<u32>()
             .map_err(|_| LockfileError::MalformedLockPayload)?;
+        if pid == 0 {
+            return Err(LockfileError::MalformedLockPayload);
+        }
         let created_at_secs = parts[2]
             .parse::<u64>()
             .map_err(|_| LockfileError::MalformedLockPayload)?;
@@ -69,12 +96,26 @@ pub struct BootIdLockCoordinator {
 }
 
 impl BootIdLockCoordinator {
-    /// Creates coordinator with current host boot identity and pid.
-    pub fn new(current_boot_id: String, current_pid: u32) -> Self {
-        Self {
+    /// Creates coordinator with strict validation of host boot identity and pid.
+    pub fn try_new(current_boot_id: String, current_pid: u32) -> Result<Self, LockfileError> {
+        if current_boot_id.trim().is_empty() {
+            return Err(LockfileError::EmptyBootId);
+        }
+        if current_pid == 0 {
+            return Err(LockfileError::ZeroPid);
+        }
+        Ok(Self {
             current_boot_id,
             current_pid,
-        }
+        })
+    }
+
+    /// Creates coordinator with current host boot identity and pid.
+    pub fn new(current_boot_id: String, current_pid: u32) -> Self {
+        Self::try_new(current_boot_id, current_pid).unwrap_or_else(|_| Self {
+            current_boot_id: "unknown_boot".to_string(),
+            current_pid: current_pid.max(1),
+        })
     }
 
     /// Evaluates existing lockfile contents against the host environment.
@@ -122,6 +163,17 @@ impl BootIdLockCoordinator {
         })
     }
 
+    /// Creates fresh token with validation.
+    pub fn try_create_token(&self, now_secs: u64) -> Result<LockfileToken, LockfileError> {
+        if self.current_boot_id.trim().is_empty() {
+            return Err(LockfileError::EmptyBootId);
+        }
+        if self.current_pid == 0 {
+            return Err(LockfileError::ZeroPid);
+        }
+        Ok(self.create_token(now_secs))
+    }
+
     /// Creates fresh token for local acquisition.
     pub fn create_token(&self, now_secs: u64) -> LockfileToken {
         LockfileToken {
@@ -144,4 +196,34 @@ pub enum LockAction {
         reason: String,
         stale_token: LockfileToken,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_boot_id_lockfile_bounds_red_to_green() {
+        assert_eq!(
+            BootIdLockCoordinator::try_new("".to_string(), 123).err(),
+            Some(LockfileError::EmptyBootId)
+        );
+        assert_eq!(
+            BootIdLockCoordinator::try_new("boot-1".to_string(), 0).err(),
+            Some(LockfileError::ZeroPid)
+        );
+
+        // Malformed decode with empty boot_id or 0 pid
+        assert_eq!(
+            LockfileToken::decode(b":123:456\n").err(),
+            Some(LockfileError::MalformedLockPayload)
+        );
+        assert_eq!(
+            LockfileToken::decode(b"boot:0:456\n").err(),
+            Some(LockfileError::MalformedLockPayload)
+        );
+
+        let coord = BootIdLockCoordinator::try_new("boot-1".to_string(), 100).expect("coord");
+        assert!(coord.try_create_token(1000).is_ok());
+    }
 }

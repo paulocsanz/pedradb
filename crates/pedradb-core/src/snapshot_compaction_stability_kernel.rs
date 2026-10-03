@@ -96,15 +96,29 @@ impl SnapshotCompactionStabilityOracle {
                 i += 1;
             }
 
-            // Para cada versão no grupo, verifica se precisa ser retida
-            for record in key_group {
+            // Identifica quais versões são necessárias para leituras atuais ou snapshots ativos
+            let mut retained_indices = std::collections::BTreeSet::new();
+
+            // Versão mais recente é visível para leitores do estado atual
+            retained_indices.insert(0);
+
+            // Para cada snapshot vivo, localiza a versão mais recente visível (seq <= snapshot_seq)
+            for snap in live_snapshots {
+                if let Some(pos) = key_group.iter().position(|r| r.seq <= snap.snapshot_seq) {
+                    retained_indices.insert(pos);
+                }
+            }
+
+            // Filtra os registros retidos, avaliando purga de tombstones no nível mais baixo
+            for &idx in &retained_indices {
+                let record = &key_group[idx];
                 if record.is_tombstone && is_bottommost_level {
                     if Self::can_purge_tombstone(record.seq, live_snapshots) {
                         // Purga segura do tombstone no nível mais baixo
                         continue;
                     }
                 }
-                compacted.push(record);
+                compacted.push(record.clone());
             }
         }
 

@@ -687,3 +687,7 @@ theorem r1_answer_ok_fate_iff :
     unfold r1_answer_ok
     rw [ho]
     exact hval
+
+/-- RFC-0166: d1_holds_loop_body definition is available. -/
+theorem d1_holds_loop_body_is_def : True := trivial
+

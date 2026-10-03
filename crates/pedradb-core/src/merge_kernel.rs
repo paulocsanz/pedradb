@@ -138,10 +138,14 @@ pub fn write_op_range_end_as_is(_kind: ValueType, _value: &[u8]) -> Option<&[u8]
 /// hides it. `Deletion` / `RangeDeletion` are not live.
 #[must_use]
 pub fn visible_at(kind: ValueType, range_hidden: bool) -> bool {
-    match kind {
-        ValueType::Value => !range_hidden,
-        ValueType::Deletion | ValueType::RangeDeletion => false,
-    }
+    crate::mutate_switch!(
+        crate::mutation_switch_kernel::MUTANT_RESURRECT_TOMBSTONE,
+        match kind {
+            ValueType::Value => !range_hidden,
+            ValueType::Deletion | ValueType::RangeDeletion => false,
+        },
+        true
+    )
 }
 
 /// AS-IS: never hide (deleted / range-covered keys scan as live).

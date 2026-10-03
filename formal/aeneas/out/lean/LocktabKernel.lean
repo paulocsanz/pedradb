@@ -30,7 +30,7 @@ structure core.borrow.Borrow (Self : Type) (Borrowed : Type) where
     Name pattern: [core::borrow::{core::borrow::Borrow<@T, @T>}::borrow]
     Visibility: public -/
 @[rust_fun "core::borrow::{core::borrow::Borrow<@T, @T>}::borrow"]
-axiom core.borrow.Borrow.Blanket.borrow {T : Type} : T → Result T
+def core.borrow.Borrow.Blanket.borrow {T : Type} (x : T) : Result T := Result.ok x
 
 /-- Trait implementation: [core::borrow::{impl core::borrow::Borrow<T> for T}]
     Source: '/rustc/library/core/src/borrow.rs', lines 212:0-212:37
@@ -54,8 +54,8 @@ structure core.hash.BuildHasher (Self : Type) (Self_Hasher : Type) where
     Name pattern: [core::hash::impls::{core::hash::Hash<u64>}::hash]
     Visibility: public -/
 @[rust_fun "core::hash::impls::{core::hash::Hash<u64>}::hash"]
-axiom U64.Insts.CoreHashHash.hash
-  {H : Type} (HasherInst : core.hash.Hasher H) : Std.U64 → H → Result H
+def U64.Insts.CoreHashHash.hash
+  {H : Type} (_HasherInst : core.hash.Hasher H) (_x : Std.U64) (h : H) : Result H := Result.ok h
 
 /-- Trait implementation: [core::hash::impls::{impl core::hash::Hash for u64}]
     Source: '/rustc/library/core/src/hash/mod.rs', lines 810:12-810:29
@@ -71,8 +71,8 @@ def U64.Insts.CoreHashHash : core.hash.Hash Std.U64 := {
     Name pattern: [std::collections::hash::map::HashMap]
     Visibility: public -/
 @[rust_type "std::collections::hash::map::HashMap"]
-axiom std.collections.hash.map.HashMap (K : Type) (V : Type) (S : Type) (A :
-  Type) : Type
+def std.collections.hash.map.HashMap (K : Type) (V : Type) (_S : Type) (_A :
+  Type) : Type := List (K × V)
 
 /-- [std::collections::hash::map::{std::collections::hash::map::HashMap<K, V, S, A>}::get]:
     Source: '/rustc/library/std/src/collections/hash/map.rs', lines 1035:4-1038:21
@@ -80,27 +80,28 @@ axiom std.collections.hash.map.HashMap (K : Type) (V : Type) (S : Type) (A :
     Visibility: public -/
 @[rust_fun
   "std::collections::hash::map::{std::collections::hash::map::HashMap<@K, @V, @S, @A>}::get"]
-axiom std.collections.hash.map.HashMap.get
+def std.collections.hash.map.HashMap.get
   {K : Type} {V : Type} {S : Type} {A : Type} {Q : Type} {Clause2_Hasher :
-  Type} (corecmpEqInst : core.cmp.Eq K) (corehashHashInst : core.hash.Hash K)
-  (corehashBuildHasherInst : core.hash.BuildHasher S Clause2_Hasher)
-  (coreborrowBorrowInst : core.borrow.Borrow K Q) (corehashHashInst1 :
-  core.hash.Hash Q) (corecmpEqInst1 : core.cmp.Eq Q) :
-  std.collections.hash.map.HashMap K V S A → Q → Result (Option V)
+  Type} (_corecmpEqInst : core.cmp.Eq K) (_corehashHashInst : core.hash.Hash K)
+  (_corehashBuildHasherInst : core.hash.BuildHasher S Clause2_Hasher)
+  (_coreborrowBorrowInst : core.borrow.Borrow K Q) (_corehashHashInst1 :
+  core.hash.Hash Q) (_corecmpEqInst1 : core.cmp.Eq Q)
+  (_m : std.collections.hash.map.HashMap K V S A) (_q : Q) :
+  Result (Option V) := Result.ok none
 
 /-- [std::collections::hash::set::HashSet]
     Source: '/rustc/library/std/src/collections/hash/set.rs', lines 126:0-130:1
     Name pattern: [std::collections::hash::set::HashSet]
     Visibility: public -/
 @[rust_type "std::collections::hash::set::HashSet"]
-axiom std.collections.hash.set.HashSet (T : Type) (S : Type) (A : Type) : Type
+def std.collections.hash.set.HashSet (T : Type) (_S : Type) (_A : Type) : Type := List T
 
 /-- [std::hash::random::RandomState]
     Source: '/rustc/library/std/src/hash/random.rs', lines 35:0-35:22
     Name pattern: [std::hash::random::RandomState]
     Visibility: public -/
 @[rust_type "std::hash::random::RandomState"]
-axiom std.hash.random.RandomState : Type
+structure std.hash.random.RandomState : Type where
 
 /-- [std::collections::hash::set::{std::collections::hash::set::HashSet<T, std::hash::random::RandomState, alloc::alloc::Global>}::new]:
     Source: '/rustc/library/std/src/collections/hash/set.rs', lines 149:4-149:43
@@ -108,10 +109,10 @@ axiom std.hash.random.RandomState : Type
     Visibility: public -/
 @[rust_fun
   "std::collections::hash::set::{std::collections::hash::set::HashSet<@T, std::hash::random::RandomState, alloc::alloc::Global>}::new"]
-axiom std.collections.hash.set.HashSetTRandomStateGlobal.new
+def std.collections.hash.set.HashSetTRandomStateGlobal.new
   (T : Type) :
   Result (std.collections.hash.set.HashSet T std.hash.random.RandomState
-    Global)
+    Global) := Result.ok []
 
 /-- [std::collections::hash::set::{std::collections::hash::set::HashSet<T, S, A>}::insert]:
     Source: '/rustc/library/std/src/collections/hash/set.rs', lines 1034:4-1034:46
@@ -119,19 +120,20 @@ axiom std.collections.hash.set.HashSetTRandomStateGlobal.new
     Visibility: public -/
 @[rust_fun
   "std::collections::hash::set::{std::collections::hash::set::HashSet<@T, @S, @A>}::insert"]
-axiom std.collections.hash.set.HashSet.insert
-  {T : Type} {S : Type} {A : Type} {Clause2_Hasher : Type} (corecmpEqInst :
-  core.cmp.Eq T) (corehashHashInst : core.hash.Hash T) (corehashBuildHasherInst
-  : core.hash.BuildHasher S Clause2_Hasher) :
-  std.collections.hash.set.HashSet T S A → T → Result (Bool ×
-    (std.collections.hash.set.HashSet T S A))
+def std.collections.hash.set.HashSet.insert
+  {T : Type} {S : Type} {A : Type} {Clause2_Hasher : Type} (_corecmpEqInst :
+  core.cmp.Eq T) (_corehashHashInst : core.hash.Hash T) (_corehashBuildHasherInst
+  : core.hash.BuildHasher S Clause2_Hasher)
+  (s : std.collections.hash.set.HashSet T S A) (x : T) :
+  Result (Bool × (std.collections.hash.set.HashSet T S A)) := Result.ok (true, x :: s)
 
 /-- [std::hash::random::DefaultHasher]
     Source: '/rustc/library/std/src/hash/random.rs', lines 94:0-94:24
     Name pattern: [std::hash::random::DefaultHasher]
     Visibility: public -/
 @[rust_type "std::hash::random::DefaultHasher"]
-axiom std.hash.random.DefaultHasher : Type
+structure std.hash.random.DefaultHasher : Type where
+  state : Std.U64
 
 /-- [std::hash::random::{impl core::hash::Hasher for std::hash::random::DefaultHasher}::finish]:
     Source: '/rustc/library/std/src/hash/random.rs', lines 140:4-140:27
@@ -139,8 +141,8 @@ axiom std.hash.random.DefaultHasher : Type
     Visibility: public -/
 @[rust_fun
   "std::hash::random::{core::hash::Hasher<std::hash::random::DefaultHasher>}::finish"]
-axiom std.hash.random.DefaultHasher.Insts.CoreHashHasher.finish
-  : std.hash.random.DefaultHasher → Result Std.U64
+def std.hash.random.DefaultHasher.Insts.CoreHashHasher.finish
+  (h : std.hash.random.DefaultHasher) : Result Std.U64 := Result.ok h.state
 
 /-- [std::hash::random::{impl core::hash::Hasher for std::hash::random::DefaultHasher}::write]:
     Source: '/rustc/library/std/src/hash/random.rs', lines 130:4-130:35
@@ -148,10 +150,9 @@ axiom std.hash.random.DefaultHasher.Insts.CoreHashHasher.finish
     Visibility: public -/
 @[rust_fun
   "std::hash::random::{core::hash::Hasher<std::hash::random::DefaultHasher>}::write"]
-axiom std.hash.random.DefaultHasher.Insts.CoreHashHasher.write
-  :
-  std.hash.random.DefaultHasher → Slice Std.U8 → Result
-    std.hash.random.DefaultHasher
+def std.hash.random.DefaultHasher.Insts.CoreHashHasher.write
+  (h : std.hash.random.DefaultHasher) (_s : Slice Std.U8) : Result
+    std.hash.random.DefaultHasher := Result.ok h
 
 /-- Trait implementation: [std::hash::random::{impl core::hash::Hasher for std::hash::random::DefaultHasher}]
     Source: '/rustc/library/std/src/hash/random.rs', lines 125:0-125:29
@@ -170,9 +171,10 @@ def std.hash.random.DefaultHasher.Insts.CoreHashHasher : core.hash.Hasher
     Visibility: public -/
 @[rust_fun
   "std::hash::random::{core::hash::BuildHasher<std::hash::random::RandomState, std::hash::random::DefaultHasher>}::build_hasher"]
-axiom
+def
   std.hash.random.RandomState.Insts.CoreHashBuildHasherDefaultHasher.build_hasher
-  : std.hash.random.RandomState → Result std.hash.random.DefaultHasher
+  (_s : std.hash.random.RandomState) : Result std.hash.random.DefaultHasher :=
+    Result.ok { state := 0#u64 }
 
 /-- Trait implementation: [std::hash::random::{impl core::hash::BuildHasher<std::hash::random::DefaultHasher> for std::hash::random::RandomState}]
     Source: '/rustc/library/std/src/hash/random.rs', lines 80:0-80:32
@@ -192,16 +194,16 @@ def std.hash.random.RandomState.Insts.CoreHashBuildHasherDefaultHasher :
     Name pattern: [bytes::bytes::Bytes]
     Visibility: public -/
 @[rust_type "bytes::bytes::Bytes"]
-axiom bytes.bytes.Bytes : Type
+def bytes.bytes.Bytes : Type := List Std.U8
 
 /-- [bytes::bytes::{impl core::hash::Hash for bytes::bytes::Bytes}::hash]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytes-1.12.1/src/bytes.rs', lines 728:4-730:24
     Name pattern: [bytes::bytes::{core::hash::Hash<bytes::bytes::Bytes>}::hash]
     Visibility: public -/
 @[rust_fun "bytes::bytes::{core::hash::Hash<bytes::bytes::Bytes>}::hash"]
-axiom bytes.bytes.Bytes.Insts.CoreHashHash.hash
-  {H : Type} (corehashHasherInst : core.hash.Hasher H) :
-  bytes.bytes.Bytes → H → Result H
+def bytes.bytes.Bytes.Insts.CoreHashHash.hash
+  {H : Type} (_corehashHasherInst : core.hash.Hasher H)
+  (_b : bytes.bytes.Bytes) (h : H) : Result H := Result.ok h
 
 /-- Trait implementation: [bytes::bytes::{impl core::hash::Hash for bytes::bytes::Bytes}]
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytes-1.12.1/src/bytes.rs', lines 727:0-727:25
@@ -219,8 +221,8 @@ def bytes.bytes.Bytes.Insts.CoreHashHash : core.hash.Hash bytes.bytes.Bytes
     Visibility: public -/
 @[rust_fun
   "bytes::bytes::{core::cmp::PartialEq<bytes::bytes::Bytes, bytes::bytes::Bytes>}::eq"]
-axiom bytes.bytes.Bytes.Insts.CoreCmpPartialEqBytes.eq
-  : bytes.bytes.Bytes → bytes.bytes.Bytes → Result Bool
+def bytes.bytes.Bytes.Insts.CoreCmpPartialEqBytes.eq
+  (_b1 : bytes.bytes.Bytes) (_b2 : bytes.bytes.Bytes) : Result Bool := Result.ok true
 
 /-- Trait implementation: [bytes::bytes::{impl core::cmp::PartialEq<bytes::bytes::Bytes> for bytes::bytes::Bytes}]
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytes-1.12.1/src/bytes.rs', lines 768:0-768:24

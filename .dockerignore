@@ -1,0 +1,11 @@
+target
+target-linux-arm64
+.git
+formal
+research
+bench
+findings
+docs/references
+**/*.pdf
+**/__pycache__
+*.pyc

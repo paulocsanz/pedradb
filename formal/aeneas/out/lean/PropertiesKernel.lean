@@ -23,9 +23,13 @@ namespace pedra_aeneas_properties_kernel
     Visibility: public -/
 @[rust_fun
   "core::option::{core::cmp::PartialEq<core::option::Option<@T>, core::option::Option<@T>>}::eq"]
-axiom core.option.Option.Insts.CoreCmpPartialEqOption.eq
-  {T : Type} (cmpPartialEqInst : core.cmp.PartialEq T T) :
-  Option T → Option T → Result Bool
+def core.option.Option.Insts.CoreCmpPartialEqOption.eq
+  {T : Type} (cmpPartialEqInst : core.cmp.PartialEq T T)
+  (a b : Option T) : Result Bool :=
+  match a, b with
+  | none, none => ok true
+  | some x, some y => cmpPartialEqInst.eq x y
+  | _, _ => ok false
 
 /-- [pedra_aeneas_properties_kernel::majority]:
     Source: '../../../crates/pedradb-spec/src/properties_kernel.rs', lines 34:0-40:1 -/
