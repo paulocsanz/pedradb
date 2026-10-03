@@ -77,6 +77,17 @@ HISTORICAL_MENTIONS = frozenset({
     # Internal lab tooling / generators excluded from the public mirror (RFC-0331)
     "gen_proof_shims.py",
     "tcg_world_smoke.sh",
+    "dst_campaign.sh",
+    "swarm_physical_disk.sh",
+    "fdb_side_shapes.sh",
+    "race_job.sh",
+    "ratchet/pct_seeds.txt",
+    "ratchet/coverage_floor.tsv",
+    "perf_calltree.py",
+    "rocks_side_ycsb.sh",
+    "rocksdb_parity_v0.sh",
+    "public_assets/README.md",
+    "sync_public_repo.sh",
 })
 
 
