@@ -22,7 +22,34 @@ pub enum PetriNetLivenessViolation {
         /// Tokens contados.
         tokens: u32,
     },
+    EmptyTransitions,
+    ZeroCapacityLimit,
+    ZeroMaxStates,
+    EmptyTransitionName,
+    UnknownTask {
+        task: &'static str,
+    },
 }
+
+impl std::fmt::Display for PetriNetLivenessViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DeadlockStateReachable { marking, firing_sequence } => {
+                write!(f, "Deadlock state reachable at {marking:?} via path {firing_sequence:?}")
+            }
+            Self::CapacityLimitExceeded { resource, tokens } => {
+                write!(f, "Capacity limit exceeded for {resource}: {tokens} tokens")
+            }
+            Self::EmptyTransitions => write!(f, "Transitions vector cannot be empty"),
+            Self::ZeroCapacityLimit => write!(f, "Capacity limit cannot be 0"),
+            Self::ZeroMaxStates => write!(f, "Max states to explore cannot be 0"),
+            Self::EmptyTransitionName => write!(f, "Transition name cannot be empty"),
+            Self::UnknownTask { task } => write!(f, "Unknown task type: {task}"),
+        }
+    }
+}
+
+impl std::error::Error for PetriNetLivenessViolation {}
 
 /// Estado de marcação dos lugares de recursos e tarefas na Rede de Petri.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,7 +69,7 @@ pub struct PetriMarking {
 }
 
 /// Descritor de uma transição na Rede de Petri.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PetriTransition {
     /// Nome descritivo da transição.
     pub name: &'static str,
@@ -55,6 +82,37 @@ pub struct PetriTransition {
     pub produced_fd: u32,
     pub produced_quota: u32,
     pub produced_manifest: u32,
+}
+
+impl PetriTransition {
+    pub fn try_new(
+        name: &'static str,
+        required_fd: u32,
+        required_quota: u32,
+        required_manifest: u32,
+        required_task: &'static str,
+        produced_fd: u32,
+        produced_quota: u32,
+        produced_manifest: u32,
+    ) -> Result<Self, PetriNetLivenessViolation> {
+        if name.trim().is_empty() {
+            return Err(PetriNetLivenessViolation::EmptyTransitionName);
+        }
+        match required_task {
+            "flush" | "compact" | "blob_gc" => {}
+            other => return Err(PetriNetLivenessViolation::UnknownTask { task: other }),
+        }
+        Ok(Self {
+            name,
+            required_fd,
+            required_quota,
+            required_manifest,
+            required_task,
+            produced_fd,
+            produced_quota,
+            produced_manifest,
+        })
+    }
 }
 
 /// Motor formal de análise da Rede de Petri de background workers.
@@ -112,9 +170,42 @@ impl BackgroundWorkerPetriNet {
         }
     }
 
+    /// Cria uma nova rede de Petri validada contra transições vazias.
+    pub fn try_new(transitions: Vec<PetriTransition>) -> Result<Self, PetriNetLivenessViolation> {
+        if transitions.is_empty() {
+            return Err(PetriNetLivenessViolation::EmptyTransitions);
+        }
+        for t in &transitions {
+            if t.name.trim().is_empty() {
+                return Err(PetriNetLivenessViolation::EmptyTransitionName);
+            }
+            match t.required_task {
+                "flush" | "compact" | "blob_gc" => {}
+                other => return Err(PetriNetLivenessViolation::UnknownTask { task: other }),
+            }
+        }
+        Ok(Self {
+            transitions,
+            max_capacity_per_place: None,
+        })
+    }
+
+    /// Configura um limite máximo finito de tokens por lugar de forma validada.
+    pub fn try_with_capacity_limit(mut self, limit: u32) -> Result<Self, PetriNetLivenessViolation> {
+        if limit == 0 {
+            return Err(PetriNetLivenessViolation::ZeroCapacityLimit);
+        }
+        self.max_capacity_per_place = Some(limit);
+        Ok(self)
+    }
+
     /// Configura um limite máximo finito de tokens por lugar.
     pub fn with_capacity_limit(mut self, limit: u32) -> Self {
-        self.max_capacity_per_place = Some(limit);
+        if limit == 0 {
+            self.max_capacity_per_place = None;
+        } else {
+            self.max_capacity_per_place = Some(limit);
+        }
         self
     }
 
@@ -219,6 +310,9 @@ impl BackgroundWorkerPetriNet {
         initial_marking: PetriMarking,
         max_states: usize,
     ) -> Result<usize, PetriNetLivenessViolation> {
+        if max_states == 0 {
+            return Err(PetriNetLivenessViolation::ZeroMaxStates);
+        }
         self.check_capacity(&initial_marking)?;
 
         let mut visited = HashSet::new();
@@ -264,5 +358,53 @@ impl BackgroundWorkerPetriNet {
         }
 
         Ok(state_count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_petri_net_structural_invariants_red_to_green() {
+        assert_eq!(
+            BackgroundWorkerPetriNet::try_new(vec![]).err(),
+            Some(PetriNetLivenessViolation::EmptyTransitions)
+        );
+
+        let t_bad_name = PetriTransition::try_new("", 1, 1, 1, "flush", 1, 1, 1);
+        assert_eq!(
+            t_bad_name,
+            Err(PetriNetLivenessViolation::EmptyTransitionName)
+        );
+
+        let t_bad_task = PetriTransition::try_new("T1", 1, 1, 1, "invalid_task", 1, 1, 1);
+        assert_eq!(
+            t_bad_task,
+            Err(PetriNetLivenessViolation::UnknownTask { task: "invalid_task" })
+        );
+
+        let net = BackgroundWorkerPetriNet::default();
+        assert_eq!(
+            net.try_with_capacity_limit(0).err(),
+            Some(PetriNetLivenessViolation::ZeroCapacityLimit)
+        );
+
+        let m0 = PetriMarking {
+            p_fd_available: 10,
+            p_quota_available: 10,
+            p_manifest_lock: 1,
+            p_flush_tasks: 1,
+            p_compact_tasks: 0,
+            p_blob_gc_tasks: 0,
+        };
+        let net_valid = BackgroundWorkerPetriNet::default();
+        assert_eq!(
+            net_valid.verify_liveness_and_deadlock_freedom(m0, 0),
+            Err(PetriNetLivenessViolation::ZeroMaxStates)
+        );
+
+        let disp = format!("{}", PetriNetLivenessViolation::ZeroCapacityLimit);
+        assert!(!disp.is_empty());
     }
 }

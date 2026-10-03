@@ -35,6 +35,21 @@ pub const MUTANT_OVERFLOW_SATURATION_BYPASS: u32 = 1007;
 /// Synthetic mutant: fabricate orphan key in scan output (M7).
 pub const MUTANT_FABRICATE_ORPHAN_KEY: u32 = 1008;
 
+/// Synthetic mutant (RFC-0331 V1.4): locked WAL write ignores its reserved
+/// span and lands at the drained watermark `position` — the F-CAMP-4
+/// overlap regression (in-flight pwrite ticket gets stomped).
+pub const MUTANT_WAL_WRITE_AT_POSITION: u32 = 1009;
+
+/// Synthetic mutant (RFC-0331 V1.4): staged drain writes but never commits
+/// the interval — `position` never drains, and a later
+/// `truncate_to_logical` destroys committed bytes.
+pub const MUTANT_WAL_STAGED_DRAIN_SKIP_COMMIT: u32 = 1010;
+
+/// Synthetic mutant (RFC-0331 V1.4): staged drain writes at
+/// `position - len` instead of the staged span's reserved start — the
+/// pre-F-CAMP-4 staged-overlap regression.
+pub const MUTANT_WAL_STAGED_DRAIN_AT_POSITION: u32 = 1011;
+
 /// Global atomic mutant switch (0 = clean production execution).
 pub static ACTIVE_MUTANT: AtomicU32 = AtomicU32::new(MUTANT_BASELINE);
 
@@ -75,6 +90,9 @@ pub fn is_any_mutant_active() -> bool {
 #[must_use]
 pub fn mutant_name(id: u32) -> &'static str {
     match id {
+        MUTANT_WAL_WRITE_AT_POSITION => "wal_write_at_position",
+        MUTANT_WAL_STAGED_DRAIN_SKIP_COMMIT => "wal_staged_drain_skip_commit",
+        MUTANT_WAL_STAGED_DRAIN_AT_POSITION => "wal_staged_drain_at_position",
         MUTANT_BASELINE => "baseline_clean",
         MUTANT_BYPASS_WAL_SYNC => "bypass_wal_sync",
         MUTANT_CORRUPT_RECORD_CRC => "corrupt_record_crc",
@@ -100,6 +118,9 @@ pub fn all_mutants() -> &'static [u32] {
         MUTANT_DECOMPRESSION_BOMB_BYPASS,
         MUTANT_OVERFLOW_SATURATION_BYPASS,
         MUTANT_FABRICATE_ORPHAN_KEY,
+        MUTANT_WAL_WRITE_AT_POSITION,
+        MUTANT_WAL_STAGED_DRAIN_SKIP_COMMIT,
+        MUTANT_WAL_STAGED_DRAIN_AT_POSITION,
     ]
 }
 

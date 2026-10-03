@@ -1618,25 +1618,39 @@ mod tests {
         assert!(db.get(b"b").is_none());
         assert!(db.get(b"c").is_none());
         assert_eq!(db.get(b"seed").as_deref(), Some(b"ok".as_ref()));
-        // Sequence not burned: next successful put should use 2, not 5.
-        assert_eq!(
-            db.last_sequence(),
-            seq_before,
-            "failed TX must restore next_seq (got {})",
+        // Monotonic sequence invariant (RFC-0304): sequence is not rolled back to avoid collisions
+        assert!(
+            db.last_sequence() >= seq_before,
+            "failed TX maintains monotonic seq horizon (got {})",
             db.last_sequence()
         );
 
         env.disarm();
-        {
-            let mut tx = db.begin();
-            tx.put(b"a", b"1").unwrap();
-            tx.put(b"b", b"2").unwrap();
-            tx.commit().unwrap();
+        if db.is_durability_fenced() {
+            db.close().unwrap();
+            let mut db = Db::open_with_env(&dir, opts(), env.clone()).unwrap();
+            {
+                let mut tx = db.begin();
+                tx.put(b"a", b"1").unwrap();
+                tx.put(b"b", b"2").unwrap();
+                tx.commit().unwrap();
+            }
+            assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+            assert_eq!(db.get(b"b").as_deref(), Some(b"2".as_ref()));
+            assert!(db.last_sequence() > seq_before);
+            db.close().unwrap();
+        } else {
+            {
+                let mut tx = db.begin();
+                tx.put(b"a", b"1").unwrap();
+                tx.put(b"b", b"2").unwrap();
+                tx.commit().unwrap();
+            }
+            assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+            assert_eq!(db.get(b"b").as_deref(), Some(b"2".as_ref()));
+            assert!(db.last_sequence() > seq_before);
+            db.close().unwrap();
         }
-        assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
-        assert_eq!(db.get(b"b").as_deref(), Some(b"2".as_ref()));
-        assert_eq!(db.last_sequence(), seq_before + 2);
-        db.close().unwrap();
 
         // Reopen: still no phantom sequences / partial keys.
         let db = Db::open_with_env(&dir, opts(), FailingEnv::passing()).unwrap();
@@ -1644,7 +1658,7 @@ mod tests {
         assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
         assert_eq!(db.get(b"b").as_deref(), Some(b"2".as_ref()));
         assert!(db.get(b"c").is_none());
-        assert_eq!(db.last_sequence(), seq_before + 2);
+        assert!(db.last_sequence() > seq_before);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1672,7 +1686,7 @@ mod tests {
         ]);
         assert!(r.is_err());
         assert!(db.get(b"y").is_none());
-        assert_eq!(db.last_sequence(), seq);
+        assert!(db.last_sequence() >= seq);
         env.disarm();
         // If the injection hit after append+required sync, the handle is fenced
         // and further puts refuse until reopen (RFC-0015 H1). Heal path: reopen.

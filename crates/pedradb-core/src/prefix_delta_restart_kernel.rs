@@ -53,7 +53,38 @@ pub enum PrefixDeltaViolation {
         /// Current non-strictly-greater offset.
         current: usize,
     },
+    EmptyKey,
+    EmptyEntries,
 }
+
+impl std::fmt::Display for PrefixDeltaViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SharedLenExceedsPreviousKey { shared_len, prev_len } => {
+                write!(f, "Shared len {shared_len} exceeds previous key len {prev_len}")
+            }
+            Self::NonZeroSharedAtRestartPoint { shared_len } => {
+                write!(f, "Non-zero shared len {shared_len} at restart point")
+            }
+            Self::InvalidRestartOffset { offset, block_len } => {
+                write!(f, "Invalid restart offset {offset} for block len {block_len}")
+            }
+            Self::OrderInversionDetected => write!(f, "Keys order inversion detected"),
+            Self::CorruptTrailer => write!(f, "Corrupt block trailer"),
+            Self::InvalidRestartInterval => write!(f, "Restart interval must be at least 1"),
+            Self::RestartCountMismatch { expected, found } => {
+                write!(f, "Restart count mismatch: expected {expected}, found {found}")
+            }
+            Self::NonMonotonicRestartOffsets { prev, current } => {
+                write!(f, "Non-monotonic restart offsets: prev {prev}, current {current}")
+            }
+            Self::EmptyKey => write!(f, "Block entry key cannot be empty"),
+            Self::EmptyEntries => write!(f, "Entries to encode cannot be empty"),
+        }
+    }
+}
+
+impl std::error::Error for PrefixDeltaViolation {}
 
 /// A key-value record stored inside an SST data block.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,10 +95,38 @@ pub struct BlockKvEntry {
     pub val: Vec<u8>,
 }
 
+impl BlockKvEntry {
+    pub fn try_new(key: Vec<u8>, val: Vec<u8>) -> Result<Self, PrefixDeltaViolation> {
+        if key.is_empty() {
+            return Err(PrefixDeltaViolation::EmptyKey);
+        }
+        Ok(Self { key, val })
+    }
+}
+
 /// Encoder and decoder for prefix delta-compressed data blocks with restart points.
 pub struct PrefixDeltaBlock;
 
 impl PrefixDeltaBlock {
+    /// Encodes a list of strictly sorted KV entries into a delta-compressed block with validation.
+    pub fn try_encode_block(entries: &[BlockKvEntry], restart_interval: usize) -> Result<Vec<u8>, PrefixDeltaViolation> {
+        if restart_interval == 0 {
+            return Err(PrefixDeltaViolation::InvalidRestartInterval);
+        }
+        if entries.is_empty() {
+            return Err(PrefixDeltaViolation::EmptyEntries);
+        }
+        for (i, entry) in entries.iter().enumerate() {
+            if entry.key.is_empty() {
+                return Err(PrefixDeltaViolation::EmptyKey);
+            }
+            if i > 0 && entries[i - 1].key >= entry.key {
+                return Err(PrefixDeltaViolation::OrderInversionDetected);
+            }
+        }
+        Ok(Self::encode_block(entries, restart_interval))
+    }
+
     /// Encodes a list of strictly sorted KV entries into a delta-compressed block.
     #[must_use]
     pub fn encode_block(entries: &[BlockKvEntry], restart_interval: usize) -> Vec<u8> {
@@ -250,5 +309,48 @@ impl PrefixDeltaBlock {
         }
 
         Ok(entries)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prefix_delta_structural_invariants_red_to_green() {
+        assert_eq!(
+            BlockKvEntry::try_new(vec![], vec![1, 2, 3]),
+            Err(PrefixDeltaViolation::EmptyKey)
+        );
+
+        let kvs = vec![
+            BlockKvEntry::try_new(b"a".to_vec(), b"1".to_vec()).unwrap(),
+            BlockKvEntry::try_new(b"b".to_vec(), b"2".to_vec()).unwrap(),
+        ];
+        assert_eq!(
+            PrefixDeltaBlock::try_encode_block(&kvs, 0),
+            Err(PrefixDeltaViolation::InvalidRestartInterval)
+        );
+
+        assert_eq!(
+            PrefixDeltaBlock::try_encode_block(&[], 2),
+            Err(PrefixDeltaViolation::EmptyEntries)
+        );
+
+        let unsorted_kvs = vec![
+            BlockKvEntry::try_new(b"b".to_vec(), b"2".to_vec()).unwrap(),
+            BlockKvEntry::try_new(b"a".to_vec(), b"1".to_vec()).unwrap(),
+        ];
+        assert_eq!(
+            PrefixDeltaBlock::try_encode_block(&unsorted_kvs, 2),
+            Err(PrefixDeltaViolation::OrderInversionDetected)
+        );
+
+        let encoded = PrefixDeltaBlock::try_encode_block(&kvs, 2).unwrap();
+        let decoded = PrefixDeltaBlock::decode_and_verify(&encoded, 2).unwrap();
+        assert_eq!(decoded, kvs);
+
+        let disp = format!("{}", PrefixDeltaViolation::EmptyKey);
+        assert!(!disp.is_empty());
     }
 }

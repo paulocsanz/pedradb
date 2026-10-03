@@ -1,0 +1,9 @@
+# RFC-0191 P0.1 + RFC-0227 P0.3 — product-guarantee freeze (D1/R1/T1/C1).
+# Columns: id layer catalog_id theorem lean_file entry subject subject_kind
+#   subject       handler fn the row is about (RFC-0227)
+#   subject_kind  plan | handler — close of handler must unfold subject
+floor_promoted 4
+D1	close	catalog:wal_commit_plan	d1_put_crash_reopen	formal/aeneas/lean/Merge.lean	wal_commit_plan	put_crash_reopen_survives	handler
+R1	close	catalog:visible_at	r1_get_live	formal/aeneas/lean/Merge.lean	visible_at	get_live	handler
+T1	close	catalog:leftover_txn_is_aborted	t1_recover	formal/aeneas/lean/Txn.lean	leftover_fate	txn_recover_materializes	handler
+C1	close	catalog:joint_election	c1_replica_served	formal/aeneas/lean/Membership.lean	joint_election_ok	replica_served_ok	handler

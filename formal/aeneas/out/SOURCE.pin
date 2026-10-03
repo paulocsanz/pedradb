@@ -1,0 +1,4 @@
+path=crates/pedradb-journal/src/pin_kernel.rs
+sha256=d7d253231f8fa55e6bd8c2fa119982b54b9be0b1c53131d9dd2f6603caeec73b
+aeneas=daa85d7
+charon=0.1.232

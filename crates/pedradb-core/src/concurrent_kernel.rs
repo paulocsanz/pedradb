@@ -296,6 +296,12 @@ struct WriteGroup {
     /// counted here but absent from the queue are waking between ops — exactly
     /// the stragglers the catch-up window waits for.
     active: AtomicUsize,
+    /// Non-submit publishers holding the engine write lock whose work can
+    /// make absent keys visible (SST ingest). The RFC-0330 G2 reader guard
+    /// blocks on these exactly like in-flight submits; compaction and
+    /// flush holders never insert user keys and must NOT block readers
+    /// (RFC-0236).
+    ingesting: AtomicUsize,
     /// Maximum concurrent in-flight submissions allowed before queue backpressure (RFC-0274 Pillar VI; 0 = unconstrained).
     max_in_flight_writers: AtomicUsize,
     /// Catch-up window length in µs (RFC-0037 P2.2): `0` disables. Runtime
@@ -538,6 +544,26 @@ fn stall_park_max_wait() -> Duration {
         .map_or(Duration::from_secs(10), Duration::from_millis)
 }
 
+/// Ticket for a non-submit publishing section (SST ingest). Hold it
+/// across the whole engine-write-lock section; `Drop` releases with
+/// `Release` so a G2 reader that observes zero trusts it (RFC-0330 G2).
+struct IngestTicket {
+    writes: Arc<WriteGroup>,
+}
+
+fn begin_ingest_ticket(writes: &Arc<WriteGroup>) -> IngestTicket {
+    writes.ingesting.fetch_add(1, Ordering::AcqRel);
+    IngestTicket {
+        writes: Arc::clone(writes),
+    }
+}
+
+impl Drop for IngestTicket {
+    fn drop(&mut self) {
+        self.writes.ingesting.fetch_sub(1, Ordering::Release);
+    }
+}
+
 impl WriteGroup {
     fn new() -> Self {
         Self {
@@ -549,6 +575,7 @@ impl WriteGroup {
             stall_parks: AtomicU64::new(0),
             arrived: Condvar::new(),
             active: AtomicUsize::new(0),
+            ingesting: AtomicUsize::new(0),
             max_in_flight_writers: AtomicUsize::new(crate::backpressure_kernel::DEFAULT_MAX_IN_FLIGHT_WRITERS),
             catchup_window_us: AtomicU64::new(
                 std::env::var("PEDRA_CATCHUP_US")
@@ -1162,10 +1189,20 @@ impl WriteGroup {
         self.finish_lone_ops(1);
     }
 
+    /// Whether a publisher whose work can still make absent keys visible
+    /// is in flight: a submit (publish happens before its `active` ticket
+    /// drops, now with a Release edge) or a direct SST ingest. Compaction
+    /// and flush write-lock holders never insert user keys and are
+    /// deliberately NOT counted — the RFC-0236 contract forbids absent
+    /// GETs from waiting on them.
+    fn publishers_in_flight(&self) -> bool {
+        self.active.load(Ordering::Acquire) != 0 || self.ingesting.load(Ordering::Acquire) != 0
+    }
+
     fn finish_lone_ops(&self, n: u64) {
         self.batches.fetch_add(1, Ordering::Relaxed);
         self.batch_ops.fetch_add(n, Ordering::Relaxed);
-        self.active.fetch_sub(1, Ordering::Relaxed);
+        self.active.fetch_sub(1, Ordering::Release);
         self.mark_complete();
     }
 
@@ -1417,7 +1454,7 @@ impl WriteGroup {
             };
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(n, Ordering::Relaxed);
-            self.active.fetch_sub(1, Ordering::Relaxed);
+            self.active.fetch_sub(1, Ordering::Release);
             self.mark_complete();
             return result;
         }
@@ -1488,7 +1525,7 @@ impl WriteGroup {
                     }
                     // This thread's `active` ticket never reaches the tail
                     // decrement after a resume; account it here.
-                    self.active.fetch_sub(1, Ordering::Relaxed);
+                    self.active.fetch_sub(1, Ordering::Release);
                     self.mark_complete();
                     if let Some(mut guard) = db.try_write() {
                         guard.fence_durability_post_commit(
@@ -1516,7 +1553,7 @@ impl WriteGroup {
             };
             granted_block("follower_reply", recv_reply)
         };
-        self.active.fetch_sub(1, Ordering::Relaxed);
+        self.active.fetch_sub(1, Ordering::Release);
         self.mark_complete();
         r
     }
@@ -2264,6 +2301,7 @@ impl WriteGroup {
             .load(Ordering::Relaxed)
             .then(Instant::now);
         let mut ledger_bytes = 0u64;
+        let wal_pos_before = wal.lock().position();
         let io_err = {
             let before = if pinned { wal.lock().position() } else { 0 };
             // RFC-0193 / RFC-0230 P0.4: opt-in pwrite off the WAL meta lock.
@@ -2364,6 +2402,7 @@ impl WriteGroup {
             }
             g.fence_durability(&e, crate::db::FenceClass::of_core(&e));
             g.end_commit();
+            let _ = wal.lock().discard_uncommitted(wal_pos_before);
             return chunks
                 .into_iter()
                 .flat_map(|chunk| match chunk {
@@ -2754,16 +2793,23 @@ impl<E: Env> ConcurrentDb<E> {
             self.note_class_point(true);
             return v;
         }
-        // RFC-0330 Strict Linearizability Guard (G2):
-        // If lookup_published returned None, a concurrent writer might currently hold
-        // the write lock (e.g. during SuperVersion transition / memtable insert).
-        // Before returning a false negative (None), acquire the shared read lock to wait
-        // for any in-flight write to complete and publish its state. This guarantees
-        // monotonic Read-Your-Writes without transient stale read windows.
-        let g = self.inner.read();
-        let final_val = g.get_after_point_miss(key);
-        self.note_class_point(final_val.is_some());
-        final_val
+        // RFC-0330 Strict Linearizability Guard (G2), reconciled with
+        // RFC-0236: a false negative is only possible while a publisher
+        // that can make this key visible is in flight (submit or ingest —
+        // publish happens before their ticket drops, Release edges give
+        // the reader the happens-before it needs). Compaction and flush
+        // holders never insert user keys, so for them the published-SV
+        // miss is already decided: waiting would only re-create the
+        // compact write-lock latency floor RFC-0236 removed.
+        if self.writes.publishers_in_flight() {
+            let g = self.inner.read();
+            let final_val = g.get_after_point_miss(key);
+            self.note_class_point(final_val.is_some());
+            final_val
+        } else {
+            self.note_class_point(false);
+            None
+        }
     }
 
     /// Point lookup against the published SuperVersion. After mem+imm+SST
@@ -5220,6 +5266,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// Open/decode of `path`; SST or MANIFEST I/O.
     pub fn ingest_sst_file(&self, path: &std::path::Path, family: &str) -> Result<()> {
+        let _ticket = begin_ingest_ticket(&self.writes);
         let mut g = self.inner.write();
         let res = g.ingest_sst_file(path, family);
         self.publish_from(&g);
@@ -12313,16 +12360,37 @@ mod tests {
         db.delete_range(b"a", b"z").unwrap();
         db.flush().unwrap();
 
-        // Contended read executed FIRST so point_cache does not mask it
-        let _g = db.inner.write();
-        let point_res = db.get(b"middle");
-        eprintln!("B1 DIAG flushed delete_range point_res={:?}", point_res);
+        // A reader that races a writer (inner.try_read fails) answers via
+        // the published SuperVersion; a negative answer then blocks in the
+        // RFC-0330 G2 guard on inner.read(). Holding inner.write() on THIS
+        // thread while calling get()/scan_collect() therefore self-deadlocks
+        // (parking_lot never grants the writer's own thread the read lock)
+        // — which is how this test hung the public CI test job for its full
+        // 40m budget (2026-10-03). Exercise the contended branches directly
+        // instead: lookup_published/scan_published are exactly what a real
+        // contended reader runs before the G2 guard can block it, and they
+        // bypass point_cache, so a warm cache cannot mask the regression.
+        // The locked paths (what G2 re-runs after the writer releases) are
+        // asserted by the uncontended calls at the end.
+        let point_res = db.lookup_published(b"middle");
+        assert_eq!(
+            point_res, None,
+            "contended get must honor range delete via the published SuperVersion"
+        );
 
+        let contended_scan =
+            db.scan_published(Bound::Unbounded, Bound::Unbounded, MAX_SEQUENCE_NUMBER);
+        assert!(
+            contended_scan.is_empty(),
+            "contended scan must honor range delete, got: {contended_scan:?}"
+        );
 
         let scan_res = db.scan_collect(Bound::Unbounded, Bound::Unbounded);
-        eprintln!("B1 DIAG scan_res={:?}", scan_res);
-        assert_eq!(point_res, None, "contended get must honor range delete");
-        assert!(scan_res.is_empty(), "contended scan must honor range delete, got: {:?}", scan_res);
+        assert!(
+            scan_res.is_empty(),
+            "scan must honor range delete, got: {scan_res:?}"
+        );
+        assert_eq!(db.get(b"middle"), None, "get must honor range delete");
     }
 
     #[test]

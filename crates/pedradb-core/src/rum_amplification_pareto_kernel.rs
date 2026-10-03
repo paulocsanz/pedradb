@@ -21,9 +21,35 @@ pub enum RumBudgetViolation {
     ReservedPercentageExceeds100 { percent: u32 },
     /// Capacidade total de IOPS do dispositivo deve ser estritamente positiva.
     ZeroTotalDeviceIops,
+    /// Taxa de falso positivo do Bloom filter não pode exceder 1000 por mil (100%).
+    InvalidBloomFprPermille { permille: u32 },
+    /// Requisição de admissão de IOPS de compactação não pode ser zero.
+    ZeroRequestedCompactionIops,
     /// Overflow aritmético nos cálculos de limites teóricos.
     ArithmeticOverflow,
 }
+
+impl std::fmt::Display for RumBudgetViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidNumLevels => write!(f, "LSM tree level count must be at least 1"),
+            Self::InvalidLevelRatio => write!(f, "LSM level growth ratio must be at least 2"),
+            Self::ReservedPercentageExceeds100 { percent } => {
+                write!(f, "reserved read percentage {percent}% exceeds 100%")
+            }
+            Self::ZeroTotalDeviceIops => write!(f, "total device IOPS budget must be strictly positive"),
+            Self::InvalidBloomFprPermille { permille } => {
+                write!(f, "bloom false positive rate {permille}‰ exceeds maximum of 1000‰")
+            }
+            Self::ZeroRequestedCompactionIops => {
+                write!(f, "requested compaction IOPS admission cannot be zero")
+            }
+            Self::ArithmeticOverflow => write!(f, "arithmetic overflow in RUM bound calculations"),
+        }
+    }
+}
+
+impl std::error::Error for RumBudgetViolation {}
 
 /// Configuration governing LSM amplification and hardware budget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +79,25 @@ impl Default for RumBudgetConfig {
 }
 
 impl RumBudgetConfig {
+    /// Cria uma nova configuração RUM validada.
+    pub fn try_new(
+        num_levels: u32,
+        level_ratio: u32,
+        bloom_fpr_permille: u32,
+        total_device_iops: u64,
+        reserved_read_iops_percent: u32,
+    ) -> Result<Self, RumBudgetViolation> {
+        let config = Self {
+            num_levels,
+            level_ratio,
+            bloom_fpr_permille,
+            total_device_iops,
+            reserved_read_iops_percent,
+        };
+        config.validate()?;
+        Ok(config)
+    }
+
     /// Valida as restrições matemáticas e físicas da configuração RUM.
     pub fn validate(&self) -> Result<(), RumBudgetViolation> {
         if self.num_levels == 0 {
@@ -68,6 +113,11 @@ impl RumBudgetConfig {
         }
         if self.total_device_iops == 0 {
             return Err(RumBudgetViolation::ZeroTotalDeviceIops);
+        }
+        if self.bloom_fpr_permille > 1000 {
+            return Err(RumBudgetViolation::InvalidBloomFprPermille {
+                permille: self.bloom_fpr_permille,
+            });
         }
         Ok(())
     }
@@ -94,6 +144,12 @@ pub struct RumParetoEvaluator {
 }
 
 impl RumParetoEvaluator {
+    /// Creates a new evaluator with given pre-validated configuration.
+    pub fn try_new(config: RumBudgetConfig) -> Result<Self, RumBudgetViolation> {
+        config.validate()?;
+        Ok(Self { config })
+    }
+
     /// Creates a new evaluator with given configuration.
     pub fn new(config: RumBudgetConfig) -> Self {
         Self { config }
@@ -166,6 +222,9 @@ impl RumParetoEvaluator {
 
     /// Regula a admissão de requisições de IOPS de compactação de background, garantindo o piso de leitura.
     pub fn admit_compaction_iops(&self, requested_compaction_iops: u64) -> Result<u64, RumBudgetViolation> {
+        if requested_compaction_iops == 0 {
+            return Err(RumBudgetViolation::ZeroRequestedCompactionIops);
+        }
         let bounds = self.checked_compute_bounds()?;
         Ok(std::cmp::min(requested_compaction_iops, bounds.max_compaction_iops))
     }
@@ -174,5 +233,50 @@ impl RumParetoEvaluator {
     pub fn is_compaction_within_budget(&self, active_compaction_iops: u64) -> bool {
         let bounds = self.compute_bounds();
         active_compaction_iops <= bounds.max_compaction_iops
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rum_pareto_structural_invariants_red_to_green() {
+        // 1. Default config is strictly valid
+        let default_config = RumBudgetConfig::default();
+        let evaluator = RumParetoEvaluator::try_new(default_config).expect("default config must be valid");
+        let bounds = evaluator.checked_compute_bounds().expect("bounds compute successfully");
+        assert_eq!(bounds.max_write_amp, 70); // 7 levels * ratio 10
+        assert_eq!(bounds.reserved_read_iops, 30_000);
+        assert_eq!(bounds.max_compaction_iops, 70_000);
+
+        // 2. Reject zero levels
+        let err_levels = RumBudgetConfig::try_new(0, 10, 10, 100_000, 30);
+        assert_eq!(err_levels, Err(RumBudgetViolation::InvalidNumLevels));
+
+        // 3. Reject level ratio < 2
+        let err_ratio = RumBudgetConfig::try_new(7, 1, 10, 100_000, 30);
+        assert_eq!(err_ratio, Err(RumBudgetViolation::InvalidLevelRatio));
+
+        // 4. Reject reserved percent > 100
+        let err_percent = RumBudgetConfig::try_new(7, 10, 10, 100_000, 101);
+        assert_eq!(err_percent, Err(RumBudgetViolation::ReservedPercentageExceeds100 { percent: 101 }));
+
+        // 5. Reject zero total IOPS
+        let err_zero_iops = RumBudgetConfig::try_new(7, 10, 10, 0, 30);
+        assert_eq!(err_zero_iops, Err(RumBudgetViolation::ZeroTotalDeviceIops));
+
+        // 6. Reject bloom FPR > 1000 permille
+        let err_bloom = RumBudgetConfig::try_new(7, 10, 1001, 100_000, 30);
+        assert_eq!(err_bloom, Err(RumBudgetViolation::InvalidBloomFprPermille { permille: 1001 }));
+
+        // 7. Compaction admission regulation
+        assert_eq!(evaluator.admit_compaction_iops(50_000), Ok(50_000));
+        assert_eq!(evaluator.admit_compaction_iops(100_000), Ok(70_000));
+        assert_eq!(evaluator.admit_compaction_iops(0), Err(RumBudgetViolation::ZeroRequestedCompactionIops));
+
+        // 8. Display & Error implementations
+        let d = format!("{}", RumBudgetViolation::InvalidBloomFprPermille { permille: 1200 });
+        assert!(d.contains("1200‰ exceeds maximum of 1000‰"));
     }
 }

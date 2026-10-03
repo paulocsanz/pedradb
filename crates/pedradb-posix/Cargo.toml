@@ -14,3 +14,4 @@ workspace = true
 path = "src/lib_kernel.rs"
 [dependencies]
 libc = "0.2"
+pedradb-spec.workspace = true

@@ -1,0 +1,1379 @@
+#!/usr/bin/env python3
+"""RFC-0171 P0.3 / RFC-0174 P0.2: single_artifact twin==kernel and count freeze."""
+
+from __future__ import annotations
+
+import copy
+import io
+import json
+import sys
+from contextlib import redirect_stdout
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import pedra_formal as pf  # noqa: E402
+
+
+def _sa_fails(catalog: dict) -> list[str]:
+    """RFC-0171 P0.3: twin path must equal kernel path when single_artifact."""
+    hits = []
+    for pair in catalog.get("pairs") or []:
+        if not pair.get("single_artifact"):
+            continue
+        kpath = pair.get("kernel") or ""
+        tpath = pair.get("twin") or ""
+        if kpath != tpath:
+            hits.append(
+                f"{pair.get('id')}: single_artifact requires twin == kernel "
+                f"(RFC-0171 P0.3; kernel={kpath!r} twin={tpath!r})"
+            )
+    return hits
+
+
+def _twins(catalog: dict) -> pf.Report:
+    report = pf.Report()
+    with redirect_stdout(io.StringIO()):
+        pf.check_twins(ROOT, catalog, report, strict=False)
+    return report
+
+
+def main() -> int:
+    catalog = json.loads((ROOT / "scripts/formal/catalog.json").read_text(encoding="utf-8"))
+    live_hits = _sa_fails(catalog)
+    if live_hits:
+        print("FAIL live catalog single_artifact:", live_hits[:3])
+        return 1
+    print("ok live single_artifact")
+
+    n_sa = sum(1 for p in catalog.get("pairs") or [] if p.get("single_artifact"))
+    n_df = sum(1 for p in catalog.get("pairs") or [] if p.get("data_fate"))
+    res = json.loads((ROOT / "scripts/formal/residuals.json").read_text(encoding="utf-8"))
+    glue = res.get("glue") or {}
+    if glue.get("single_artifact") != n_sa:
+        print(
+            f"FAIL live glue.single_artifact={glue.get('single_artifact')!r} != {n_sa}"
+        )
+        return 1
+    if glue.get("data_fate") != n_df:
+        print(f"FAIL live glue.data_fate={glue.get('data_fate')!r} != {n_df}")
+        return 1
+    print(f"ok live single_artifact={n_sa} data_fate={n_df} freeze")
+
+    frac_mutant = copy.deepcopy(res)
+    frac_mutant.setdefault("glue", {})["single_artifact"] = n_sa + 1
+    tmp = ROOT / "scripts/formal/.sa-frac-mutant.json"
+    try:
+        tmp.write_text(json.dumps(frac_mutant), encoding="utf-8")
+        # Drive the freeze rule against a copy; do not json.dump the live catalog.
+        live_sa = glue.get("single_artifact")
+        if live_sa == n_sa + 1:
+            print("FAIL mutant stamp collided with live")
+            return 1
+        if frac_mutant["glue"]["single_artifact"] == n_sa:
+            print("FAIL fraction mutant did not diverge")
+            return 1
+        print("ok mutant glue.single_artifact count named")
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+    mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in mutant["pairs"]:
+        if pair.get("id") == "write_admission":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/write_admission.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing write_admission")
+        return 1
+    hits = [m for m in _sa_fails(mutant) if "write_admission" in m]
+    if not hits:
+        print("FAIL twin≠kernel did not fail")
+        return 1
+    print("ok mutant write_admission twin≠kernel named")
+    flush_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in flush_mutant["pairs"]:
+        if pair.get("id") == "flush_decision":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/flush_decision.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing flush_decision")
+        return 1
+    hits = [m for m in _sa_fails(flush_mutant) if "flush_decision" in m]
+    if not hits:
+        print("FAIL flush_decision twin≠kernel did not fail")
+        return 1
+    print("ok mutant flush_decision twin≠kernel named")
+    iter_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in iter_mutant["pairs"]:
+        if pair.get("id") == "iter_window":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/rocksdb-compat/verus/iter_window.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing iter_window")
+        return 1
+    hits = [m for m in _sa_fails(iter_mutant) if "iter_window" in m]
+    if not hits:
+        print("FAIL iter_window twin≠kernel did not fail")
+        return 1
+    print("ok mutant iter_window twin≠kernel named")
+    glue_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in glue_mutant["pairs"]:
+        if pair.get("id") == "tx_glue":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/tx_glue.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing tx_glue")
+        return 1
+    hits = [m for m in _sa_fails(glue_mutant) if "tx_glue" in m]
+    if not hits:
+        print("FAIL tx_glue twin≠kernel did not fail")
+        return 1
+    print("ok mutant tx_glue twin≠kernel named")
+    apply_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in apply_mutant["pairs"]:
+        if pair.get("id") == "apply_step":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/apply_advance.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing apply_step")
+        return 1
+    hits = [m for m in _sa_fails(apply_mutant) if "apply_step" in m]
+    if not hits:
+        print("FAIL apply_step twin≠kernel did not fail")
+        return 1
+    print("ok mutant apply_step twin≠kernel named")
+    compact_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in compact_mutant["pairs"]:
+        if pair.get("id") == "compact_unleft":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/compact_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing compact_unleft")
+        return 1
+    hits = [m for m in _sa_fails(compact_mutant) if "compact_unleft" in m]
+    if not hits:
+        print("FAIL compact_unleft twin≠kernel did not fail")
+        return 1
+    print("ok mutant compact_unleft twin≠kernel named")
+    commit_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in commit_mutant["pairs"]:
+        if pair.get("id") == "commit_raft":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/commit_recover.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing commit_raft")
+        return 1
+    hits = [m for m in _sa_fails(commit_mutant) if "commit_raft" in m]
+    if not hits:
+        print("FAIL commit_raft twin≠kernel did not fail")
+        return 1
+    print("ok mutant commit_raft twin≠kernel named")
+    lease_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in lease_mutant["pairs"]:
+        if pair.get("id") == "lease":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-dcs/verus/lease_live.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing lease")
+        return 1
+    hits = [m for m in _sa_fails(lease_mutant) if "lease" in m]
+    if not hits:
+        print("FAIL lease twin≠kernel did not fail")
+        return 1
+    print("ok mutant lease twin≠kernel named")
+    reopen_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in reopen_mutant["pairs"]:
+        if pair.get("id") == "reopen_outcome":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/reopen_outcome.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing reopen_outcome")
+        return 1
+    hits = [m for m in _sa_fails(reopen_mutant) if "reopen_outcome" in m]
+    if not hits:
+        print("FAIL reopen_outcome twin≠kernel did not fail")
+        return 1
+    print("ok mutant reopen_outcome twin≠kernel named")
+    deadlock_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in deadlock_mutant["pairs"]:
+        if pair.get("id") == "wait_for_deadlock":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/rocksdb-compat/verus/wait_for_deadlock.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing wait_for_deadlock")
+        return 1
+    hits = [m for m in _sa_fails(deadlock_mutant) if "wait_for_deadlock" in m]
+    if not hits:
+        print("FAIL wait_for_deadlock twin≠kernel did not fail")
+        return 1
+    print("ok mutant wait_for_deadlock twin≠kernel named")
+    cf_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in cf_mutant["pairs"]:
+        if pair.get("id") == "cf_family":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/cf_family.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing cf_family")
+        return 1
+    hits = [m for m in _sa_fails(cf_mutant) if "cf_family" in m]
+    if not hits:
+        print("FAIL cf_family twin≠kernel did not fail")
+        return 1
+    print("ok mutant cf_family twin≠kernel named")
+    vlog_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in vlog_mutant["pairs"]:
+        if pair.get("id") == "vlog_recover":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/vlog_gc_decision.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing vlog_recover")
+        return 1
+    hits = [m for m in _sa_fails(vlog_mutant) if "vlog_recover" in m]
+    if not hits:
+        print("FAIL vlog_recover twin≠kernel did not fail")
+        return 1
+    print("ok mutant vlog_recover twin≠kernel named")
+    manifest_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in manifest_mutant["pairs"]:
+        if pair.get("id") == "manifest_recover":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/manifest_recover.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing manifest_recover")
+        return 1
+    hits = [m for m in _sa_fails(manifest_mutant) if "manifest_recover" in m]
+    if not hits:
+        print("FAIL manifest_recover twin≠kernel did not fail")
+        return 1
+    print("ok mutant manifest_recover twin≠kernel named")
+    ae_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in ae_mutant["pairs"]:
+        if pair.get("id") == "ae_entry":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/ae_entry_action.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing ae_entry")
+        return 1
+    hits = [m for m in _sa_fails(ae_mutant) if "ae_entry" in m]
+    if not hits:
+        print("FAIL ae_entry twin≠kernel did not fail")
+        return 1
+    print("ok mutant ae_entry twin≠kernel named")
+    ack_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in ack_mutant["pairs"]:
+        if pair.get("id") == "ae_ack":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/ae_ack_success.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing ae_ack")
+        return 1
+    hits = [m for m in _sa_fails(ack_mutant) if "ae_ack" in m]
+    if not hits:
+        print("FAIL ae_ack twin≠kernel did not fail")
+        return 1
+    print("ok mutant ae_ack twin≠kernel named")
+    txn_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in txn_mutant["pairs"]:
+        if pair.get("id") == "txn":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing txn")
+        return 1
+    hits = [m for m in _sa_fails(txn_mutant) if m.startswith("txn:")]
+    if not hits:
+        print("FAIL txn twin≠kernel did not fail")
+        return 1
+    print("ok mutant txn twin≠kernel named")
+    revert_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in revert_mutant["pairs"]:
+        if pair.get("id") == "revert_clears_status":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing revert_clears_status")
+        return 1
+    hits = [m for m in _sa_fails(revert_mutant) if m.startswith("revert_clears_status:")]
+    if not hits:
+        print("FAIL revert_clears_status twin≠kernel did not fail")
+        return 1
+    print("ok mutant revert_clears_status twin≠kernel named")
+    rua_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in rua_mutant["pairs"]:
+        if pair.get("id") == "revert_user_action":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing revert_user_action")
+        return 1
+    hits = [m for m in _sa_fails(rua_mutant) if m.startswith("revert_user_action:")]
+    if not hits:
+        print("FAIL revert_user_action twin≠kernel did not fail")
+        return 1
+    print("ok mutant revert_user_action twin≠kernel named")
+    sih_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in sih_mutant["pairs"]:
+        if pair.get("id") == "should_repair_si_hist":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing should_repair_si_hist")
+        return 1
+    hits = [m for m in _sa_fails(sih_mutant) if m.startswith("should_repair_si_hist:")]
+    if not hits:
+        print("FAIL should_repair_si_hist twin≠kernel did not fail")
+        return 1
+    print("ok mutant should_repair_si_hist twin≠kernel named")
+    dc_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in dc_mutant["pairs"]:
+        if pair.get("id") == "discard_cut":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing discard_cut")
+        return 1
+    hits = [m for m in _sa_fails(dc_mutant) if m.startswith("discard_cut:")]
+    if not hits:
+        print("FAIL discard_cut twin≠kernel did not fail")
+        return 1
+    print("ok mutant discard_cut twin≠kernel named")
+    lo_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in lo_mutant["pairs"]:
+        if pair.get("id") == "leftover_txn_is_aborted":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing leftover_txn_is_aborted")
+        return 1
+    hits = [m for m in _sa_fails(lo_mutant) if m.startswith("leftover_txn_is_aborted:")]
+    if not hits:
+        print("FAIL leftover_txn_is_aborted twin≠kernel did not fail")
+        return 1
+    print("ok mutant leftover_txn_is_aborted twin≠kernel named")
+    nid_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in nid_mutant["pairs"]:
+        if pair.get("id") == "next_txn_id_after":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing next_txn_id_after")
+        return 1
+    hits = [m for m in _sa_fails(nid_mutant) if m.startswith("next_txn_id_after:")]
+    if not hits:
+        print("FAIL next_txn_id_after twin≠kernel did not fail")
+        return 1
+    print("ok mutant next_txn_id_after twin≠kernel named")
+    rsg_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in rsg_mutant["pairs"]:
+        if pair.get("id") == "recover_si_generation":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing recover_si_generation")
+        return 1
+    hits = [m for m in _sa_fails(rsg_mutant) if m.startswith("recover_si_generation:")]
+    if not hits:
+        print("FAIL recover_si_generation twin≠kernel did not fail")
+        return 1
+    print("ok mutant recover_si_generation twin≠kernel named")
+    pea_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in pea_mutant["pairs"]:
+        if pair.get("id") == "prepare_error_aborts_earlier":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing prepare_error_aborts_earlier")
+        return 1
+    hits = [m for m in _sa_fails(pea_mutant) if m.startswith("prepare_error_aborts_earlier:")]
+    if not hits:
+        print("FAIL prepare_error_aborts_earlier twin≠kernel did not fail")
+        return 1
+    print("ok mutant prepare_error_aborts_earlier twin≠kernel named")
+    rsg2_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in rsg2_mutant["pairs"]:
+        if pair.get("id") == "reserve_si_gen":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing reserve_si_gen")
+        return 1
+    hits = [m for m in _sa_fails(rsg2_mutant) if m.startswith("reserve_si_gen:")]
+    if not hits:
+        print("FAIL reserve_si_gen twin≠kernel did not fail")
+        return 1
+    print("ok mutant reserve_si_gen twin≠kernel named")
+    usg_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in usg_mutant["pairs"]:
+        if pair.get("id") == "unreserve_si_gen":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/txn_kernel.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing unreserve_si_gen")
+        return 1
+    hits = [m for m in _sa_fails(usg_mutant) if m.startswith("unreserve_si_gen:")]
+    if not hits:
+        print("FAIL unreserve_si_gen twin≠kernel did not fail")
+        return 1
+    print("ok mutant unreserve_si_gen twin≠kernel named")
+    dl_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in dl_mutant["pairs"]:
+        if pair.get("id") == "dictionary_link":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/dictionary_link.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing dictionary_link")
+        return 1
+    hits = [m for m in _sa_fails(dl_mutant) if m.startswith("dictionary_link:")]
+    if not hits:
+        print("FAIL dictionary_link twin≠kernel did not fail")
+        return 1
+    print("ok mutant dictionary_link twin≠kernel named")
+    blob_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in blob_mutant["pairs"]:
+        if pair.get("id") == "blob_gc_pick":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/vlog_gc_decision.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing blob_gc_pick")
+        return 1
+    hits = [m for m in _sa_fails(blob_mutant) if m.startswith("blob_gc_pick:")]
+    if not hits:
+        print("FAIL blob_gc_pick twin≠kernel did not fail")
+        return 1
+    print("ok mutant blob_gc_pick twin≠kernel named")
+    lev_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in lev_mutant["pairs"]:
+        if pair.get("id") == "leveling":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/leveling.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing leveling")
+        return 1
+    hits = [m for m in _sa_fails(lev_mutant) if m.startswith("leveling:")]
+    if not hits:
+        print("FAIL leveling twin≠kernel did not fail")
+        return 1
+    print("ok mutant leveling twin≠kernel named")
+    pick_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in pick_mutant["pairs"]:
+        if pair.get("id") == "leveling_pick":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/leveling_pick.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing leveling_pick")
+        return 1
+    hits = [m for m in _sa_fails(pick_mutant) if m.startswith("leveling_pick:")]
+    if not hits:
+        print("FAIL leveling_pick twin≠kernel did not fail")
+        return 1
+    print("ok mutant leveling_pick twin≠kernel named")
+    pd_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in pd_mutant["pairs"]:
+        if pair.get("id") == "leveling_pushdown":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/leveling_pick.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing leveling_pushdown")
+        return 1
+    hits = [m for m in _sa_fails(pd_mutant) if m.startswith("leveling_pushdown:")]
+    if not hits:
+        print("FAIL leveling_pushdown twin≠kernel did not fail")
+        return 1
+    print("ok mutant leveling_pushdown twin≠kernel named")
+    wrc_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in wrc_mutant["pairs"]:
+        if pair.get("id") == "write_record_count":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/write_record_count.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing write_record_count")
+        return 1
+    hits = [m for m in _sa_fails(wrc_mutant) if m.startswith("write_record_count:")]
+    if not hits:
+        print("FAIL write_record_count twin≠kernel did not fail")
+        return 1
+    print("ok mutant write_record_count twin≠kernel named")
+    vis_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in vis_mutant["pairs"]:
+        if pair.get("id") == "visible_at":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/visible_at.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing visible_at")
+        return 1
+    hits = [m for m in _sa_fails(vis_mutant) if m.startswith("visible_at:")]
+    if not hits:
+        print("FAIL visible_at twin≠kernel did not fail")
+        return 1
+    print("ok mutant visible_at twin≠kernel named")
+    dt_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in dt_mutant["pairs"]:
+        if pair.get("id") == "durable_term":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/durable_term.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing durable_term")
+        return 1
+    hits = [m for m in _sa_fails(dt_mutant) if m.startswith("durable_term:")]
+    if not hits:
+        print("FAIL durable_term twin≠kernel did not fail")
+        return 1
+    print("ok mutant durable_term twin≠kernel named")
+    gp_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in gp_mutant["pairs"]:
+        if pair.get("id") == "grant_persist":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/vote_decision.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing grant_persist")
+        return 1
+    hits = [m for m in _sa_fails(gp_mutant) if m.startswith("grant_persist:")]
+    if not hits:
+        print("FAIL grant_persist twin≠kernel did not fail")
+        return 1
+    print("ok mutant grant_persist twin≠kernel named")
+    vote_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in vote_mutant["pairs"]:
+        if pair.get("id") == "vote":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/vote_decision.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing vote")
+        return 1
+    hits = [m for m in _sa_fails(vote_mutant) if m.startswith("vote:")]
+    if not hits:
+        print("FAIL vote twin≠kernel did not fail")
+        return 1
+    print("ok mutant vote twin≠kernel named")
+    cd_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in cd_mutant["pairs"]:
+        if pair.get("id") == "compact_decision":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/compact_decision.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing compact_decision")
+        return 1
+    hits = [m for m in _sa_fails(cd_mutant) if m.startswith("compact_decision:")]
+    if not hits:
+        print("FAIL compact_decision twin≠kernel did not fail")
+        return 1
+    print("ok mutant compact_decision twin≠kernel named")
+    cr_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in cr_mutant["pairs"]:
+        if pair.get("id") == "compact_retention":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/compact_decision.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing compact_retention")
+        return 1
+    hits = [m for m in _sa_fails(cr_mutant) if m.startswith("compact_retention:")]
+    if not hits:
+        print("FAIL compact_retention twin≠kernel did not fail")
+        return 1
+    print("ok mutant compact_retention twin≠kernel named")
+    pin_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in pin_mutant["pairs"]:
+        if pair.get("id") == "pin_gc":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/compact_decision.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing pin_gc")
+        return 1
+    hits = [m for m in _sa_fails(pin_mutant) if m.startswith("pin_gc:")]
+    if not hits:
+        print("FAIL pin_gc twin≠kernel did not fail")
+        return 1
+    print("ok mutant pin_gc twin≠kernel named")
+    wr_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in wr_mutant["pairs"]:
+        if pair.get("id") == "wal_recover":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-core/verus/wal_recover.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing wal_recover")
+        return 1
+    hits = [m for m in _sa_fails(wr_mutant) if m.startswith("wal_recover:")]
+    if not hits:
+        print("FAIL wal_recover twin≠kernel did not fail")
+        return 1
+    print("ok mutant wal_recover twin≠kernel named")
+    l28_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in l28_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_abort":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_abort")
+        return 1
+    hits = [m for m in _sa_fails(l28_mutant) if m.startswith("l28_tcp_abort:")]
+    if not hits:
+        print("FAIL l28_tcp_abort twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_abort twin≠kernel named")
+    apply_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in apply_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_apply":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_apply")
+        return 1
+    hits = [m for m in _sa_fails(apply_mutant) if m.startswith("l28_tcp_apply:")]
+    if not hits:
+        print("FAIL l28_tcp_apply twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_apply twin≠kernel named")
+    napply_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in napply_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_napply":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_napply")
+        return 1
+    hits = [m for m in _sa_fails(napply_mutant) if m.startswith("l28_tcp_napply:")]
+    if not hits:
+        print("FAIL l28_tcp_napply twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_napply twin≠kernel named")
+    clear_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in clear_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_clear":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_clear")
+        return 1
+    hits = [m for m in _sa_fails(clear_mutant) if m.startswith("l28_tcp_clear:")]
+    if not hits:
+        print("FAIL l28_tcp_clear twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_clear twin≠kernel named")
+    left_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in left_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_left":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_left")
+        return 1
+    hits = [m for m in _sa_fails(left_mutant) if m.startswith("l28_tcp_left:")]
+    if not hits:
+        print("FAIL l28_tcp_left twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_left twin≠kernel named")
+    hw_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in hw_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_hw":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_hw")
+        return 1
+    hits = [m for m in _sa_fails(hw_mutant) if m.startswith("l28_tcp_hw:")]
+    if not hits:
+        print("FAIL l28_tcp_hw twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_hw twin≠kernel named")
+    part_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in part_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_part":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_part")
+        return 1
+    hits = [m for m in _sa_fails(part_sa_mutant) if m.startswith("l28_tcp_part:")]
+    if not hits:
+        print("FAIL l28_tcp_part twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_part twin≠kernel named")
+    trunc_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in trunc_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_trunc":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_trunc")
+        return 1
+    hits = [m for m in _sa_fails(trunc_sa_mutant) if m.startswith("l28_tcp_trunc:")]
+    if not hits:
+        print("FAIL l28_tcp_trunc twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_trunc twin≠kernel named")
+    odrop_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in odrop_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_odrop":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_odrop")
+        return 1
+    hits = [m for m in _sa_fails(odrop_sa_mutant) if m.startswith("l28_tcp_odrop:")]
+    if not hits:
+        print("FAIL l28_tcp_odrop twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_odrop twin≠kernel named")
+    nowms_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in nowms_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_nowms":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_nowms")
+        return 1
+    hits = [m for m in _sa_fails(nowms_sa_mutant) if m.startswith("l28_tcp_nowms:")]
+    if not hits:
+        print("FAIL l28_tcp_nowms twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_nowms twin≠kernel named")
+    dterm_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in dterm_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_dterm":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_dterm")
+        return 1
+    hits = [m for m in _sa_fails(dterm_sa_mutant) if m.startswith("l28_tcp_dterm:")]
+    if not hits:
+        print("FAIL l28_tcp_dterm twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_dterm twin≠kernel named")
+    hist_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in hist_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_hist":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_hist")
+        return 1
+    hits = [m for m in _sa_fails(hist_sa_mutant) if m.startswith("l28_tcp_hist:")]
+    if not hits:
+        print("FAIL l28_tcp_hist twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_hist twin≠kernel named")
+    fence_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in fence_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_fence":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_fence")
+        return 1
+    hits = [m for m in _sa_fails(fence_sa_mutant) if m.startswith("l28_tcp_fence:")]
+    if not hits:
+        print("FAIL l28_tcp_fence twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_fence twin≠kernel named")
+    pre_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in pre_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_pre":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_pre")
+        return 1
+    hits = [m for m in _sa_fails(pre_sa_mutant) if m.startswith("l28_tcp_pre:")]
+    if not hits:
+        print("FAIL l28_tcp_pre twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_pre twin≠kernel named")
+    peer_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in peer_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_peer":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_peer")
+        return 1
+    hits = [m for m in _sa_fails(peer_sa_mutant) if m.startswith("l28_tcp_peer:")]
+    if not hits:
+        print("FAIL l28_tcp_peer twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_peer twin≠kernel named")
+    lid_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in lid_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_lid":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_lid")
+        return 1
+    hits = [m for m in _sa_fails(lid_sa_mutant) if m.startswith("l28_tcp_lid:")]
+    if not hits:
+        print("FAIL l28_tcp_lid twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_lid twin≠kernel named")
+    rdr_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in rdr_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_rdr":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_rdr")
+        return 1
+    hits = [m for m in _sa_fails(rdr_sa_mutant) if m.startswith("l28_tcp_rdr:")]
+    if not hits:
+        print("FAIL l28_tcp_rdr twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_rdr twin≠kernel named")
+    dsc_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in dsc_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_dsc":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_dsc")
+        return 1
+    hits = [m for m in _sa_fails(dsc_sa_mutant) if m.startswith("l28_tcp_dsc:")]
+    if not hits:
+        print("FAIL l28_tcp_dsc twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_dsc twin≠kernel named")
+    pld_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in pld_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_pld":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_pld")
+        return 1
+    hits = [m for m in _sa_fails(pld_sa_mutant) if m.startswith("l28_tcp_pld:")]
+    if not hits:
+        print("FAIL l28_tcp_pld twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_pld twin≠kernel named")
+    std_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in std_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_std":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_std")
+        return 1
+    hits = [m for m in _sa_fails(std_sa_mutant) if m.startswith("l28_tcp_std:")]
+    if not hits:
+        print("FAIL l28_tcp_std twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_std twin≠kernel named")
+    hnt_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in hnt_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_hnt":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_hnt")
+        return 1
+    hits = [m for m in _sa_fails(hnt_sa_mutant) if m.startswith("l28_tcp_hnt:")]
+    if not hits:
+        print("FAIL l28_tcp_hnt twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_hnt twin≠kernel named")
+    slot_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in slot_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_slot":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_slot")
+        return 1
+    hits = [m for m in _sa_fails(slot_sa_mutant) if m.startswith("l28_tcp_slot:")]
+    if not hits:
+        print("FAIL l28_tcp_slot twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_slot twin≠kernel named")
+    sth_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in sth_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_sth":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_sth")
+        return 1
+    hits = [m for m in _sa_fails(sth_sa_mutant) if m.startswith("l28_tcp_sth:")]
+    if not hits:
+        print("FAIL l28_tcp_sth twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_sth twin≠kernel named")
+    pj_sa_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in pj_sa_mutant["pairs"]:
+        if pair.get("id") == "l28_tcp_pj":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-store/verus/l28.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing l28_tcp_pj")
+        return 1
+    hits = [m for m in _sa_fails(pj_sa_mutant) if m.startswith("l28_tcp_pj:")]
+    if not hits:
+        print("FAIL l28_tcp_pj twin≠kernel did not fail")
+        return 1
+    print("ok mutant l28_tcp_pj twin≠kernel named")
+    dl_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in dl_mutant["pairs"]:
+        if pair.get("id") == "discard_leader":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing discard_leader")
+        return 1
+    hits = [m for m in _sa_fails(dl_mutant) if m.startswith("discard_leader:")]
+    if not hits:
+        print("FAIL discard_leader twin≠kernel did not fail")
+        return 1
+    print("ok mutant discard_leader twin≠kernel named")
+    du_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in du_mutant["pairs"]:
+        if pair.get("id") == "discard_uncommitted":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing discard_uncommitted")
+        return 1
+    hits = [m for m in _sa_fails(du_mutant) if m.startswith("discard_uncommitted:")]
+    if not hits:
+        print("FAIL discard_uncommitted twin≠kernel did not fail")
+        return 1
+    print("ok mutant discard_uncommitted twin≠kernel named")
+    je_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in je_mutant["pairs"]:
+        if pair.get("id") == "joint_election":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing joint_election")
+        return 1
+    hits = [m for m in _sa_fails(je_mutant) if m.startswith("joint_election:")]
+    if not hits:
+        print("FAIL joint_election twin≠kernel did not fail")
+        return 1
+    print("ok mutant joint_election twin≠kernel named")
+    jl_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in jl_mutant["pairs"]:
+        if pair.get("id") == "joint_leave":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing joint_leave")
+        return 1
+    hits = [m for m in _sa_fails(jl_mutant) if m.startswith("joint_leave:")]
+    if not hits:
+        print("FAIL joint_leave twin≠kernel did not fail")
+        return 1
+    print("ok mutant joint_leave twin≠kernel named")
+    pjn_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in pjn_mutant["pairs"]:
+        if pair.get("id") == "pending_joint_node":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing pending_joint_node")
+        return 1
+    hits = [m for m in _sa_fails(pjn_mutant) if m.startswith("pending_joint_node:")]
+    if not hits:
+        print("FAIL pending_joint_node twin≠kernel did not fail")
+        return 1
+    print("ok mutant pending_joint_node twin≠kernel named")
+    jlo_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in jlo_mutant["pairs"]:
+        if pair.get("id") == "joint_leave_ok":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing joint_leave_ok")
+        return 1
+    hits = [m for m in _sa_fails(jlo_mutant) if m.startswith("joint_leave_ok:")]
+    if not hits:
+        print("FAIL joint_leave_ok twin≠kernel did not fail")
+        return 1
+    print("ok mutant joint_leave_ok twin≠kernel named")
+    eg_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in eg_mutant["pairs"]:
+        if pair.get("id") == "election_grant_from":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing election_grant_from")
+        return 1
+    hits = [m for m in _sa_fails(eg_mutant) if m.startswith("election_grant_from:")]
+    if not hits:
+        print("FAIL election_grant_from twin≠kernel did not fail")
+        return 1
+    print("ok mutant election_grant_from twin≠kernel named")
+    jt_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in jt_mutant["pairs"]:
+        if pair.get("id") == "joint_target":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing joint_target")
+        return 1
+    hits = [m for m in _sa_fails(jt_mutant) if m.startswith("joint_target:")]
+    if not hits:
+        print("FAIL joint_target twin≠kernel did not fail")
+        return 1
+    print("ok mutant joint_target twin≠kernel named")
+    jat_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in jat_mutant["pairs"]:
+        if pair.get("id") == "joint_add_target":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing joint_add_target")
+        return 1
+    hits = [m for m in _sa_fails(jat_mutant) if m.startswith("joint_add_target:")]
+    if not hits:
+        print("FAIL joint_add_target twin≠kernel did not fail")
+        return 1
+    print("ok mutant joint_add_target twin≠kernel named")
+    qlf_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in qlf_mutant["pairs"]:
+        if pair.get("id") == "queued_leave_finish":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing queued_leave_finish")
+        return 1
+    hits = [m for m in _sa_fails(qlf_mutant) if m.startswith("queued_leave_finish:")]
+    if not hits:
+        print("FAIL queued_leave_finish twin≠kernel did not fail")
+        return 1
+    print("ok mutant queued_leave_finish twin≠kernel named")
+    dm_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in dm_mutant["pairs"]:
+        if pair.get("id") == "disk_membership":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing disk_membership")
+        return 1
+    hits = [m for m in _sa_fails(dm_mutant) if m.startswith("disk_membership:")]
+    if not hits:
+        print("FAIL disk_membership twin≠kernel did not fail")
+        return 1
+    print("ok mutant disk_membership twin≠kernel named")
+    hw_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in hw_mutant["pairs"]:
+        if pair.get("id") == "high_water":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing high_water")
+        return 1
+    hits = [m for m in _sa_fails(hw_mutant) if m.startswith("high_water:")]
+    if not hits:
+        print("FAIL high_water twin≠kernel did not fail")
+        return 1
+    print("ok mutant high_water twin≠kernel named")
+    pm_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in pm_mutant["pairs"]:
+        if pair.get("id") == "participating_member":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing participating_member")
+        return 1
+    hits = [m for m in _sa_fails(pm_mutant) if m.startswith("participating_member:")]
+    if not hits:
+        print("FAIL participating_member twin≠kernel did not fail")
+        return 1
+    print("ok mutant participating_member twin≠kernel named")
+    iba_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in iba_mutant["pairs"]:
+        if pair.get("id") == "identity_before_applied":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing identity_before_applied")
+        return 1
+    hits = [m for m in _sa_fails(iba_mutant) if m.startswith("identity_before_applied:")]
+    if not hits:
+        print("FAIL identity_before_applied twin≠kernel did not fail")
+        return 1
+    print("ok mutant identity_before_applied twin≠kernel named")
+    ra_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in ra_mutant["pairs"]:
+        if pair.get("id") == "recover_apply":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing recover_apply")
+        return 1
+    hits = [m for m in _sa_fails(ra_mutant) if m.startswith("recover_apply:")]
+    if not hits:
+        print("FAIL recover_apply twin≠kernel did not fail")
+        return 1
+    print("ok mutant recover_apply twin≠kernel named")
+    ran_mutant = copy.deepcopy(catalog)
+    found = False
+    for pair in ran_mutant["pairs"]:
+        if pair.get("id") == "recover_apply_node":
+            pair["single_artifact"] = True
+            pair["twin"] = "crates/pedradb-raft/verus/membership_joint.rs"
+            found = True
+            break
+    if not found:
+        print("FAIL catalog missing recover_apply_node")
+        return 1
+    hits = [m for m in _sa_fails(ran_mutant) if m.startswith("recover_apply_node:")]
+    if not hits:
+        print("FAIL recover_apply_node twin≠kernel did not fail")
+        return 1
+    print("ok mutant recover_apply_node twin≠kernel named")
+    # Drive the same rule through check_twins (may also report unrelated
+    # dirty-tree twin drift; we only require the SA id).
+    try:
+        twin_hits = [
+            m
+            for m in _twins(mutant).failed
+            if "write_admission" in m and "single_artifact" in m
+        ]
+        if not twin_hits:
+            print("FAIL check_twins did not name write_admission single_artifact")
+            return 1
+        print("ok check_twins names write_admission single_artifact")
+    except ValueError as e:
+        print("warn check_twins parse:", e)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

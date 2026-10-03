@@ -1,8 +1,8 @@
-//! [`FailingEnvArc`]: `Send + Sync` fault injection via `Arc` (RFC-0011 P2.4).
+//! [`FailingEnvArc`]: `Send + Sync` fault injection via `Arc` (RFC-0011 P2.4 / RFC-0333).
 //!
-//! Same fail-after semantics as [`super::FailingEnv`], but shared state uses
-//! atomics so the env can cross threads. Prefer the `Rc` variant for single-threaded
-//! tests (lighter).
+//! Multi-thread safe fault injection covering the full 42-cell fault alphabet matrix
+//! (7 FaultKind x 6 OpClass) with atomic short-write byte capping. Shared state uses
+//! atomics so the env can cross threads safely without deadlocks.
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use pedradb_core::env::{Env, EnvFile, StdEnv};
 
-use super::FaultKind;
+use super::{FaultKind, OpClass};
 
 #[derive(Debug)]
 struct FailStateArc {
@@ -20,6 +20,8 @@ struct FailStateArc {
     once: AtomicBool,
     kind: AtomicU64, // packs FaultKind as discriminant
     sync_only: AtomicBool,
+    op_class: AtomicU64, // packs OpClass as discriminant
+    short_write_cap: AtomicU64, // u64::MAX = None
     /// RFC-0179: `available_bytes` override is live.
     space_injected: AtomicBool,
     /// Free bytes; `u64::MAX` means unknown (`None`) while injected.
@@ -52,10 +54,43 @@ fn kind_from_u64(v: u64) -> FaultKind {
     }
 }
 
+fn op_class_to_u64(op: OpClass) -> u64 {
+    match op {
+        OpClass::Any => 0,
+        OpClass::Write => 1,
+        OpClass::Sync => 2,
+        OpClass::Rename => 3,
+        OpClass::CreateOpen => 4,
+        OpClass::Remove => 5,
+        OpClass::Meta => 6,
+    }
+}
+
+fn op_class_from_u64(v: u64) -> OpClass {
+    match v {
+        1 => OpClass::Write,
+        2 => OpClass::Sync,
+        3 => OpClass::Rename,
+        4 => OpClass::CreateOpen,
+        5 => OpClass::Remove,
+        6 => OpClass::Meta,
+        _ => OpClass::Any,
+    }
+}
+
 impl FailStateArc {
-    fn gate(&self, is_sync: bool) -> io::Result<()> {
+    fn gate_class(&self, op: OpClass) -> io::Result<()> {
+        let op_filter = op_class_from_u64(self.op_class.load(Ordering::Relaxed));
+        if !op_filter.matches(op) {
+            return Ok(());
+        }
+        let is_sync = matches!(op, OpClass::Sync);
         let kind = kind_from_u64(self.kind.load(Ordering::Relaxed));
         if (kind.is_sync_only() || self.sync_only.load(Ordering::Relaxed)) && !is_sync {
+            return Ok(());
+        }
+        // Short-write is handled directly in Write::write.
+        if kind.is_short_write() && matches!(op, OpClass::Write) {
             return Ok(());
         }
         let left = self.remaining.load(Ordering::Relaxed);
@@ -111,6 +146,8 @@ impl FailingEnvArc<StdEnv> {
                 once: AtomicBool::new(once),
                 kind: AtomicU64::new(kind_to_u64(kind)),
                 sync_only: AtomicBool::new(kind.is_sync_only()),
+                op_class: AtomicU64::new(op_class_to_u64(OpClass::Any)),
+                short_write_cap: AtomicU64::new(u64::MAX),
                 space_injected: AtomicBool::new(false),
                 available: AtomicU64::new(u64::MAX),
                 probe_err: AtomicBool::new(false),
@@ -132,6 +169,8 @@ impl<E: Env> FailingEnvArc<E> {
                 once: AtomicBool::new(false),
                 kind: AtomicU64::new(kind_to_u64(FaultKind::IoError)),
                 sync_only: AtomicBool::new(false),
+                op_class: AtomicU64::new(op_class_to_u64(OpClass::Any)),
+                short_write_cap: AtomicU64::new(u64::MAX),
                 space_injected: AtomicBool::new(false),
                 available: AtomicU64::new(u64::MAX),
                 probe_err: AtomicBool::new(false),
@@ -159,6 +198,31 @@ impl<E: Env> FailingEnvArc<E> {
             .sync_only
             .store(kind.is_sync_only(), Ordering::Relaxed);
         self.arm(after_ops, transient);
+    }
+
+    /// Arm with explicit FaultKind and OpClass for targeted fault grid testing.
+    pub fn arm_with_class(
+        &self,
+        after_ops: u64,
+        transient: bool,
+        kind: FaultKind,
+        op_class: OpClass,
+    ) {
+        self.state
+            .op_class
+            .store(op_class_to_u64(op_class), Ordering::Relaxed);
+        self.arm_with_kind(after_ops, transient, kind);
+    }
+
+    /// Arm short-write failure with maximum byte cap before failing.
+    pub fn arm_short_write(&self, after_ops: u64, cap_bytes: usize) {
+        self.state
+            .short_write_cap
+            .store(cap_bytes as u64, Ordering::Relaxed);
+        self.state
+            .op_class
+            .store(op_class_to_u64(OpClass::Write), Ordering::Relaxed);
+        self.arm_with_kind(after_ops, true, FaultKind::ShortWrite);
     }
 
     /// Whether a fault fired.
@@ -191,19 +255,47 @@ pub struct FailingFileArc<E: Env = StdEnv> {
 
 impl<E: Env> Read for FailingFileArc<E> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::Meta)?;
         self.inner.read(buf)
     }
 }
 
 impl<E: Env> Write for FailingFileArc<E> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.state.gate(false)?;
+        let op_filter = op_class_from_u64(self.state.op_class.load(Ordering::Relaxed));
+        let kind = kind_from_u64(self.state.kind.load(Ordering::Relaxed));
+        if kind.is_short_write() && op_filter.matches(OpClass::Write) {
+            let left = self.state.remaining.load(Ordering::Relaxed);
+            if pedradb_core::write_admission_kernel::batch_is_empty(left) {
+                if self.state.once.load(Ordering::Relaxed) && self.state.fired.load(Ordering::Relaxed) {
+                    return self.inner.write(buf);
+                }
+                let cap = self.state.short_write_cap.swap(u64::MAX, Ordering::Relaxed);
+                if cap != u64::MAX {
+                    self.state.fired.store(true, Ordering::Relaxed);
+                    if self.state.once.load(Ordering::Relaxed) {
+                        self.state.remaining.store(u64::MAX, Ordering::Relaxed);
+                    }
+                    let n = (cap as usize).min(buf.len());
+                    if pedradb_core::write_admission_kernel::batch_is_empty(n as u64) {
+                        return Err(FaultKind::ShortWrite.to_error());
+                    }
+                    let wrote = self.inner.write(&buf[..n])?;
+                    return Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        format!("injected short write after {wrote} bytes"),
+                    ));
+                }
+            } else {
+                self.state.remaining.fetch_sub(1, Ordering::Relaxed);
+            }
+        }
+        self.state.gate_class(OpClass::Write)?;
         self.inner.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::Write)?;
         self.inner.flush()
     }
 }
@@ -216,22 +308,22 @@ impl<E: Env> Seek for FailingFileArc<E> {
 
 impl<E: Env> EnvFile for FailingFileArc<E> {
     fn sync_data(&mut self) -> io::Result<()> {
-        self.state.gate(true)?;
+        self.state.gate_class(OpClass::Sync)?;
         self.inner.sync_data()
     }
 
     fn sync_all(&mut self) -> io::Result<()> {
-        self.state.gate(true)?;
+        self.state.gate_class(OpClass::Sync)?;
         self.inner.sync_all()
     }
 
     fn set_len(&mut self, len: u64) -> io::Result<()> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::Write)?;
         self.inner.set_len(len)
     }
 
     fn len(&mut self) -> io::Result<u64> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::Meta)?;
         self.inner.len()
     }
 }
@@ -240,12 +332,12 @@ impl<E: Env> Env for FailingEnvArc<E> {
     type File = FailingFileArc<E>;
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::CreateOpen)?;
         self.inner.create_dir_all(path)
     }
 
     fn create(&self, path: &Path) -> io::Result<Self::File> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::CreateOpen)?;
         Ok(FailingFileArc {
             inner: self.inner.create(path)?,
             state: Arc::clone(&self.state),
@@ -253,7 +345,7 @@ impl<E: Env> Env for FailingEnvArc<E> {
     }
 
     fn open_append(&self, path: &Path) -> io::Result<Self::File> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::CreateOpen)?;
         Ok(FailingFileArc {
             inner: self.inner.open_append(path)?,
             state: Arc::clone(&self.state),
@@ -261,7 +353,7 @@ impl<E: Env> Env for FailingEnvArc<E> {
     }
 
     fn open_read(&self, path: &Path) -> io::Result<Self::File> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::CreateOpen)?;
         Ok(FailingFileArc {
             inner: self.inner.open_read(path)?,
             state: Arc::clone(&self.state),
@@ -269,22 +361,22 @@ impl<E: Env> Env for FailingEnvArc<E> {
     }
 
     fn sync_dir(&self, path: &Path) -> io::Result<()> {
-        self.state.gate(true)?;
+        self.state.gate_class(OpClass::Sync)?;
         self.inner.sync_dir(path)
     }
 
     fn read_dir_names(&self, path: &Path) -> io::Result<Vec<String>> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::Meta)?;
         self.inner.read_dir_names(path)
     }
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::Remove)?;
         self.inner.remove_file(path)
     }
 
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::Rename)?;
         self.inner.rename(from, to)
     }
 
@@ -293,13 +385,13 @@ impl<E: Env> Env for FailingEnvArc<E> {
     }
 
     fn metadata_len(&self, path: &Path) -> io::Result<u64> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::Meta)?;
         self.inner.metadata_len(path)
     }
 
     /// F5: route through the seam so a wrapped non-Std env decides.
     fn is_dir(&self, path: &Path) -> io::Result<bool> {
-        self.state.gate(false)?;
+        self.state.gate_class(OpClass::Meta)?;
         self.inner.is_dir(path)
     }
 
@@ -335,5 +427,21 @@ mod tests {
         let env = FailingEnvArc::fail_after(0);
         assert!(env.create_dir_all(Path::new("/tmp/nope-arc-fail")).is_err());
         assert!(env.tripped());
+    }
+
+    #[test]
+    fn op_class_selective_filtering() {
+        let env = FailingEnvArc::passing();
+        env.arm_with_class(0, true, FaultKind::SyncFail, OpClass::Sync);
+        let file_path = std::env::temp_dir().join(format!("pedra_test_failing_arc_{}.txt", std::process::id()));
+        let _ = env.remove_file(&file_path);
+        // Create should succeed because filter is OpClass::Sync
+        let mut f = env.create(&file_path).unwrap();
+        // Write should succeed
+        assert!(f.write_all(b"hello").is_ok());
+        // Sync should trip
+        assert!(f.sync_all().is_err());
+        assert!(env.tripped());
+        let _ = env.remove_file(&file_path);
     }
 }

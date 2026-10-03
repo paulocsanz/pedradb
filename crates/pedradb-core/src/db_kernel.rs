@@ -7539,10 +7539,19 @@ impl<E: Env> Db<E> {
         // Recheck inflight while holding the WAL mutex so rotate cannot
         // truncate a just-written frame (Pebble-style split).
         {
-            let w = self.wal.lock();
+            let mut w = self.wal.lock();
             if self.commit_inflight.load(Ordering::Acquire) > 0 {
                 return Ok(());
             }
+            // RFC-0209 order rule (b): this decision is a barrier — staged
+            // group-commit bytes are segment content and must reach the
+            // sink before the emptiness check. Without the drain the
+            // drained watermark (`position`) is stale (F-CAMP-4), the
+            // segment looks empty, the rotate — and the MANIFEST pay-point
+            // that publishes the just-installed L0 — is skipped, and the
+            // L0 stays orphaned on disk (2026-10-03: the walless hydrate
+            // tail lost its durability exactly this way).
+            w.drain_staged()?;
             match crate::flush_kernel::wal_segment_is_empty(w.position()) {
                 true => return Ok(()),
                 false => {}
@@ -10625,8 +10634,18 @@ impl<E: Env> Db<E> {
         let tw = st.as_ref().map(|_| std::time::Instant::now());
         let (n, sync_r) = {
             let mut w = self.wal.lock();
-            let n = w.encode_write_op_batches(&[sl])?;
+            let pos_before = w.position();
+            let n = match w.encode_write_op_batches(&[sl]) {
+                Ok(n) => n,
+                Err(e) => {
+                    let _ = w.discard_uncommitted(pos_before);
+                    return Err(e);
+                }
+            };
             let r = w.sync_data();
+            if r.is_err() {
+                let _ = w.discard_uncommitted(pos_before);
+            }
             (n, r)
         };
         if let (Some(st), Some(tw)) = (st.as_ref(), tw) {

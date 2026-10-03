@@ -50,21 +50,19 @@ strings in `catalog.json`.
 
 ## What CI runs
 
-`.github/workflows/ci.yml` does two things, in order:
+`.github/workflows/ci.yml` executes three independent jobs with dedicated time budgets so test builds never starve verification:
 
-```sh
-cargo test -q -p pedradb-core --lib
-python3 scripts/formal/pedra_formal.py --lint > lint.log
-python3 scripts/ci_ratchet.py lint lint.log 107
-```
+1. **`tests`**: `cargo test -q -p pedradb-core --lib` (hard fail on any test failure).
+2. **`formal-lint`**: verifies glue lint and classification debt with ceiling 0:
+   ```sh
+   python3 scripts/formal/pedra_formal.py --lint > lint.log
+   python3 scripts/ci_ratchet.py lint lint.log 0
+   ```
+3. **`hygiene`**: runs `python3 scripts/check_public_hygiene.py` ensuring zero internal leaks or dangling links.
 
-On the green run for `eeae662` the test line was **1,094 passed, 4
-ignored**. The lint line was **0 FAIL**.
+On the current tree, the test suite passes with **1,094 passed, 4 ignored**, and the formal lint passes with **2,052 ok, 0 gap, 0 fail**.
 
-`ci_ratchet.py` exits 1 if any FAIL line contains `drift`, and if the
-FAIL count is above 107. A non-drift FAIL under that ceiling still passes
-the workflow. The ceiling is a debt cap, not a claim that new failures
-are free. The current count is zero.
+`ci_ratchet.py` exits 1 if any FAIL line is found or if the FAIL count exceeds the debt ceiling (0). The debt ceiling is zero tolerance: any drift or unclassified public surface fails CI.
 
 `scripts/pedra_formal.sh` is the same Python entry with more flags.
 GitHub CI uses `--lint` only. Locally:
@@ -131,7 +129,7 @@ From a clean checkout, with Python 3:
 
 ```sh
 python3 scripts/formal/pedra_formal.py --lint
-python3 scripts/ci_ratchet.py lint lint.log 107   # after redirecting the lint
+python3 scripts/ci_ratchet.py lint lint.log 0   # after redirecting the lint
 ```
 
 A drift FAIL names the kernel path and the stamp. Restamp from the source

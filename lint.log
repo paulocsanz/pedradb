@@ -1,0 +1,2065 @@
+== lint (production must call the kernel) ==
+ok    vote: crates/pedradb-raft/src/lib_kernel.rs calls vote_decision
+ok    vote: live_caller crates/pedradb-store/src/lib_kernel.rs calls vote_decision
+ok    vote: live handler on_request_vote in crates/pedradb-store/src/lib_kernel.rs
+ok    ae_entry: crates/pedradb-raft/src/lib_kernel.rs calls ae_entry_action
+ok    ae_entry: live_caller crates/pedradb-store/src/lib_kernel.rs calls ae_entry_action
+ok    ae_entry: live handler on_append_entries in crates/pedradb-store/src/lib_kernel.rs
+ok    ae_ack: crates/pedradb-raft/src/lib_kernel.rs calls ae_ack_success
+ok    ae_ack: live_caller crates/pedradb-store/src/lib_kernel.rs calls ae_ack_success
+ok    ae_ack: live handler on_append_entries in crates/pedradb-store/src/lib_kernel.rs
+ok    commit_raft: crates/pedradb-raft/src/lib_kernel.rs calls propose_ack_ok
+ok    commit_raft: crates/pedradb-raft/src/net_kernel.rs calls propose_ack_ok
+ok    commit_raft: live_caller crates/pedradb-store/src/lib_kernel.rs calls propose_ack_ok
+ok    commit_raft: live handler broadcast_append_after_propose in crates/pedradb-store/src/lib_kernel.rs
+ok    joint_election: crates/pedradb-store/src/lib_kernel.rs calls joint_election_ok
+ok    joint_election: live_caller crates/pedradb-store/src/lib_kernel.rs calls joint_election_ok
+ok    joint_election: live handler election_has_joint_quorum in crates/pedradb-store/src/lib_kernel.rs
+ok    joint_leave: crates/pedradb-store/src/lib_kernel.rs calls joint_still_active
+ok    joint_leave: live_caller crates/pedradb-store/src/lib_kernel.rs calls joint_still_active
+ok    joint_leave: live handler pending_joint_on in crates/pedradb-store/src/lib_kernel.rs
+ok    pending_joint_node: crates/pedradb-store/src/lib_kernel.rs calls pending_joint_node_counts
+ok    pending_joint_node: live_caller crates/pedradb-store/src/lib_kernel.rs calls pending_joint_node_counts
+ok    pending_joint_node: live handler pending_joint in crates/pedradb-store/src/lib_kernel.rs
+ok    joint_leave_ok: crates/pedradb-store/src/lib_kernel.rs calls joint_leave_ok
+ok    joint_leave_ok: live_caller crates/pedradb-store/src/lib_kernel.rs calls joint_leave_ok
+ok    joint_leave_ok: live handler leave_joint in crates/pedradb-store/src/lib_kernel.rs
+ok    election_grant_from: crates/pedradb-store/src/lib_kernel.rs calls election_grant_from_counts
+ok    election_grant_from: live_caller crates/pedradb-store/src/lib_kernel.rs calls election_grant_from_counts
+ok    election_grant_from: live handler on_request_vote_reply in crates/pedradb-store/src/lib_kernel.rs
+ok    joint_target: crates/pedradb-store/src/lib_kernel.rs calls joint_target_counts
+ok    joint_target: live_caller crates/pedradb-store/src/lib_kernel.rs calls joint_target_counts
+ok    joint_target: live handler remove_member_joint in crates/pedradb-store/src/lib_kernel.rs
+ok    joint_add_target: crates/pedradb-store/src/lib_kernel.rs calls joint_add_target_counts
+ok    joint_add_target: live_caller crates/pedradb-store/src/lib_kernel.rs calls joint_add_target_counts
+ok    joint_add_target: live handler add_member_joint in crates/pedradb-store/src/lib_kernel.rs
+ok    queued_leave_finish: crates/pedradb-store/src/lib_kernel.rs calls queued_leave_finish_ok
+ok    queued_leave_finish: live_caller crates/pedradb-store/src/lib_kernel.rs calls queued_leave_finish_ok
+ok    queued_leave_finish: live handler finish_uncommitted_leave in crates/pedradb-store/src/lib_kernel.rs
+ok    disk_membership: crates/pedradb-store/src/lib_kernel.rs calls disk_membership_overrides_cli
+ok    disk_membership: live_caller crates/pedradb-store/src/lib_kernel.rs calls disk_membership_overrides_cli
+ok    disk_membership: live handler bind_cluster_identity in crates/pedradb-store/src/lib_kernel.rs
+ok    high_water: crates/pedradb-store/src/lib_kernel.rs calls high_water_at_least
+ok    high_water: live_caller crates/pedradb-store/src/lib_kernel.rs calls high_water_at_least
+ok    high_water: live handler open_single_node_with_rng_opts in crates/pedradb-store/src/lib_kernel.rs
+ok    participating_member: crates/pedradb-store/src/lib_kernel.rs calls participating_if_member
+ok    participating_member: live_caller crates/pedradb-store/src/lib_kernel.rs calls participating_if_member
+ok    participating_member: live handler is_participating in crates/pedradb-store/src/lib_kernel.rs
+ok    identity_before_applied: crates/pedradb-store/src/lib_kernel.rs calls membership_identity_before_applied
+ok    identity_before_applied: live_caller crates/pedradb-store/src/lib_kernel.rs calls membership_identity_before_applied
+ok    identity_before_applied: live handler apply_range in crates/pedradb-store/src/lib_kernel.rs
+ok    recover_apply: crates/pedradb-store/src/lib_kernel.rs calls recover_must_apply
+ok    recover_apply: live_caller crates/pedradb-store/src/lib_kernel.rs calls recover_must_apply
+ok    recover_apply: live handler recover_apply_committed in crates/pedradb-store/src/lib_kernel.rs
+ok    recover_apply_node: crates/pedradb-store/src/lib_kernel.rs calls recover_apply_node_counts
+ok    recover_apply_node: live_caller crates/pedradb-store/src/lib_kernel.rs calls recover_apply_node_counts
+ok    recover_apply_node: live handler recover_apply_committed in crates/pedradb-store/src/lib_kernel.rs
+ok    recover_truncate: crates/pedradb-store/src/lib_kernel.rs calls recover_truncate_node_counts
+ok    recover_truncate: live_caller crates/pedradb-store/src/lib_kernel.rs calls recover_truncate_node_counts
+ok    recover_truncate: live handler persist_truncated_logs in crates/pedradb-store/src/lib_kernel.rs
+ok    recover_drop_orphan: crates/pedradb-store/src/lib_kernel.rs calls recover_drop_orphan_seg
+ok    recover_drop_orphan: live_caller crates/pedradb-store/src/lib_kernel.rs calls recover_drop_orphan_seg
+ok    recover_drop_orphan: live handler persist_log_db in crates/pedradb-store/src/lib_kernel.rs
+ok    recover_abort: crates/pedradb-store/src/lib_kernel.rs calls recover_abort_node_counts
+ok    recover_abort: live_caller crates/pedradb-store/src/lib_kernel.rs calls recover_abort_node_counts
+ok    recover_abort: live handler abort_leftover_intents in crates/pedradb-store/src/lib_kernel.rs
+ok    persist_meta: crates/pedradb-store/src/lib_kernel.rs calls persist_meta_node_counts
+ok    persist_meta: live_caller crates/pedradb-store/src/lib_kernel.rs calls persist_meta_node_counts
+ok    persist_meta: live handler persist_u64_meta_all in crates/pedradb-store/src/lib_kernel.rs
+ok    persist_hist: crates/pedradb-store/src/lib_kernel.rs calls persist_hist_node_counts
+ok    persist_hist: live_caller crates/pedradb-store/src/lib_kernel.rs calls persist_hist_node_counts
+ok    persist_hist: live handler persist_si_keys in crates/pedradb-store/src/lib_kernel.rs
+ok    persist_fence: crates/pedradb-store/src/lib_kernel.rs calls persist_fence_node_counts
+ok    persist_fence: live_caller crates/pedradb-store/src/lib_kernel.rs calls persist_fence_node_counts
+ok    persist_fence: live handler fence_txn_aborted in crates/pedradb-store/src/lib_kernel.rs
+ok    force_clear: crates/pedradb-store/src/lib_kernel.rs calls force_clear_node_counts
+ok    force_clear: live_caller crates/pedradb-store/src/lib_kernel.rs calls force_clear_node_counts
+ok    force_clear: live handler force_local_clear_keys in crates/pedradb-store/src/lib_kernel.rs
+ok    drop_preimages: crates/pedradb-store/src/lib_kernel.rs calls drop_preimages_node_counts
+ok    drop_preimages: live_caller crates/pedradb-store/src/lib_kernel.rs calls drop_preimages_node_counts
+ok    drop_preimages: live handler drop_preimages in crates/pedradb-store/src/lib_kernel.rs
+ok    open_peer_disk: crates/pedradb-store/src/lib_kernel.rs calls open_peer_uses_disk
+ok    open_peer_disk: live_caller crates/pedradb-store/src/lib_kernel.rs calls open_peer_uses_disk
+ok    open_peer_disk: live handler open_with_envs_rng_opts in crates/pedradb-store/src/lib_kernel.rs
+ok    local_id_member: crates/pedradb-store/src/lib_kernel.rs calls local_id_if_member
+ok    local_id_member: live_caller crates/pedradb-store/src/lib_kernel.rs calls local_id_if_member
+ok    local_id_member: live handler local_node_id in crates/pedradb-store/src/lib_kernel.rs
+ok    reader_local: crates/pedradb-store/src/lib_kernel.rs calls reader_id_local
+ok    reader_local: live_caller crates/pedradb-store/src/lib_kernel.rs calls reader_id_local
+ok    reader_local: live handler ids_first_if_local in crates/pedradb-store/src/lib_kernel.rs
+ok    discard_uncommitted: crates/pedradb-store/src/lib_kernel.rs calls discard_node_counts
+ok    discard_uncommitted: live_caller crates/pedradb-store/src/lib_kernel.rs calls discard_node_counts
+ok    discard_uncommitted: live handler discard_uncommitted_from in crates/pedradb-store/src/lib_kernel.rs
+ok    discard_leader: crates/pedradb-store/src/lib_kernel.rs calls discard_leader_local
+ok    discard_leader: live_caller crates/pedradb-store/src/lib_kernel.rs calls discard_leader_local
+ok    discard_leader: live handler finish_queued_propose in crates/pedradb-store/src/lib_kernel.rs
+ok    removed_step_down: crates/pedradb-store/src/lib_kernel.rs calls removed_steps_down
+ok    removed_step_down: live_caller crates/pedradb-store/src/lib_kernel.rs calls removed_steps_down
+ok    removed_step_down: live handler install_applied_membership in crates/pedradb-store/src/lib_kernel.rs
+ok    hint_member: crates/pedradb-store/src/lib_kernel.rs calls hint_if_member
+ok    hint_member: live_caller crates/pedradb-store/src/lib_kernel.rs calls hint_if_member
+ok    hint_member: live handler leader_hint in crates/pedradb-store/src/lib_kernel.rs
+ok    drop_repl_slot: crates/pedradb-store/src/lib_kernel.rs calls drop_repl_slot
+ok    drop_repl_slot: live_caller crates/pedradb-store/src/lib_kernel.rs calls drop_repl_slot
+ok    drop_repl_slot: live handler install_applied_membership in crates/pedradb-store/src/lib_kernel.rs
+ok    drop_sent_through: crates/pedradb-store/src/lib_kernel.rs calls drop_sent_through
+ok    drop_sent_through: live_caller crates/pedradb-store/src/lib_kernel.rs calls drop_sent_through
+ok    drop_sent_through: live handler remove_member in crates/pedradb-store/src/lib_kernel.rs
+ok    lease: crates/pedradb-dcs/src/command_kernel.rs calls lease_live
+ok    dcs_apply: crates/pedradb-raft/src/lib_kernel.rs calls dcs_apply_should_advance_result
+ok    dcs_apply: live_caller crates/pedradb-store/src/lib_kernel.rs calls dcs_apply_should_advance_result
+ok    dcs_apply: live handler apply_range in crates/pedradb-store/src/lib_kernel.rs
+ok    dcs_advance_bool: dcs_apply_should_advance lives and is used in crates/pedradb-dcs/src/apply_kernel.rs
+ok    lease_table: crates/pedradb-dcs/src/lib_kernel.rs calls lease_table_expired
+ok    lease_table: live_caller crates/pedradb-dcs/src/lib_kernel.rs calls lease_table_expired
+ok    lease_table: live handler lease_expired in crates/pedradb-dcs/src/lib_kernel.rs
+ok    lease_next_id: crates/pedradb-dcs/src/lib_kernel.rs calls next_lease_id_after
+ok    lease_next_id: live_caller crates/pedradb-dcs/src/lib_kernel.rs calls next_lease_id_after
+ok    lease_next_id: live handler from_open_db in crates/pedradb-dcs/src/lib_kernel.rs
+ok    txn: crates/pedradb-store/src/lib_kernel.rs calls txn_commit_action
+ok    txn: live_caller crates/pedradb-store/src/lib_kernel.rs calls txn_commit_action
+ok    txn: live handler apply_txn_commit in crates/pedradb-store/src/lib_kernel.rs
+ok    revert_clears_status: crates/pedradb-store/src/lib_kernel.rs calls revert_clears_status
+ok    revert_clears_status: revert_clears_status lives and is used in crates/pedradb-store/src/txn_kernel.rs
+ok    revert_clears_status: live_caller crates/pedradb-store/src/lib_kernel.rs calls revert_clears_status
+ok    revert_clears_status: live handler apply_txn_revert in crates/pedradb-store/src/lib_kernel.rs
+ok    revert_user_action: crates/pedradb-store/src/lib_kernel.rs calls revert_user_action
+ok    revert_user_action: revert_user_action lives and is used in crates/pedradb-store/src/txn_kernel.rs
+ok    revert_user_action: live_caller crates/pedradb-store/src/lib_kernel.rs calls revert_user_action
+ok    revert_user_action: live handler apply_txn_revert in crates/pedradb-store/src/lib_kernel.rs
+ok    should_repair_si_hist: crates/pedradb-store/src/lib_kernel.rs calls should_repair_si_hist
+ok    should_repair_si_hist: should_repair_si_hist lives and is used in crates/pedradb-store/src/txn_kernel.rs
+ok    should_repair_si_hist: live_caller crates/pedradb-store/src/lib_kernel.rs calls should_repair_si_hist
+ok    should_repair_si_hist: live handler apply_txn_revert in crates/pedradb-store/src/lib_kernel.rs
+ok    si_hist_repair: crates/pedradb-store/src/lib_kernel.rs calls si_hist_repair_plan
+ok    si_hist_repair: live_caller crates/pedradb-store/src/lib_kernel.rs calls si_hist_repair_plan
+ok    si_hist_repair: live handler repair_si_hist_tip in crates/pedradb-store/src/lib_kernel.rs
+ok    discard_cut: crates/pedradb-store/src/lib_kernel.rs calls discard_cut
+ok    discard_cut: discard_cut lives and is used in crates/pedradb-store/src/txn_kernel.rs
+ok    discard_cut: live_caller crates/pedradb-store/src/lib_kernel.rs calls discard_cut
+ok    discard_cut: live handler discard_uncommitted_from in crates/pedradb-store/src/lib_kernel.rs
+ok    leftover_txn_is_aborted: crates/pedradb-store/src/lib_kernel.rs calls leftover_txn_is_aborted
+ok    leftover_txn_is_aborted: leftover_txn_is_aborted lives and is used in crates/pedradb-store/src/txn_kernel.rs
+ok    leftover_txn_is_aborted: live_caller crates/pedradb-store/src/lib_kernel.rs calls leftover_txn_is_aborted
+ok    leftover_txn_is_aborted: live handler abort_leftover_intents in crates/pedradb-store/src/lib_kernel.rs
+ok    next_txn_id_after: crates/pedradb-store/src/lib_kernel.rs calls next_txn_id_after
+ok    next_txn_id_after: next_txn_id_after lives and is used in crates/pedradb-store/src/txn_kernel.rs
+ok    next_txn_id_after: live_caller crates/pedradb-store/src/lib_kernel.rs calls next_txn_id_after
+ok    next_txn_id_after: live handler recover_next_txn_id in crates/pedradb-store/src/lib_kernel.rs
+ok    recover_si_generation: crates/pedradb-store/src/lib_kernel.rs calls recover_si_generation
+ok    recover_si_generation: recover_si_generation lives and is used in crates/pedradb-store/src/txn_kernel.rs
+ok    recover_si_generation: live_caller crates/pedradb-store/src/lib_kernel.rs calls recover_si_generation
+ok    recover_si_generation: live handler load_si_from_disk in crates/pedradb-store/src/lib_kernel.rs
+ok    hist_load_fate: crates/pedradb-store/src/lib_kernel.rs calls hist_load_fate
+ok    hist_load_fate: live_caller crates/pedradb-store/src/lib_kernel.rs calls hist_load_fate
+ok    hist_load_fate: live handler load_si_from_disk in crates/pedradb-store/src/lib_kernel.rs
+ok    prepare_error_aborts_earlier: crates/pedradb-store/src/lib_kernel.rs calls prepare_error_aborts_earlier
+ok    prepare_error_aborts_earlier: prepare_error_aborts_earlier lives and is used in crates/pedradb-store/src/txn_kernel.rs
+ok    prepare_error_aborts_earlier: live_caller crates/pedradb-store/src/lib_kernel.rs calls prepare_error_aborts_earlier
+ok    prepare_error_aborts_earlier: live handler tx_start in crates/pedradb-store/src/lib_kernel.rs
+ok    reserve_si_gen: crates/pedradb-store/src/lib_kernel.rs calls reserve_si_gen
+ok    reserve_si_gen: reserve_si_gen lives and is used in crates/pedradb-store/src/txn_kernel.rs
+ok    reserve_si_gen: live_caller crates/pedradb-store/src/lib_kernel.rs calls reserve_si_gen
+ok    reserve_si_gen: live handler tx_finish in crates/pedradb-store/src/lib_kernel.rs
+ok    unreserve_si_gen: crates/pedradb-store/src/lib_kernel.rs calls unreserve_si_gen
+ok    unreserve_si_gen: unreserve_si_gen lives and is used in crates/pedradb-store/src/txn_kernel.rs
+ok    unreserve_si_gen: live_caller crates/pedradb-store/src/lib_kernel.rs calls unreserve_si_gen
+ok    unreserve_si_gen: live handler broadcast_append in crates/pedradb-store/src/lib_kernel.rs
+ok    compact: crates/pedradb-store/src/lib_kernel.rs calls may_compact_through
+ok    compact: live_caller crates/pedradb-store/src/lib_kernel.rs calls may_compact_through
+ok    compact: live handler maybe_compact_logs in crates/pedradb-store/src/lib_kernel.rs
+ok    compact_unleft: crates/pedradb-store/src/lib_kernel.rs calls compact_through_unleft
+ok    snapshot: crates/pedradb-store/src/lib_kernel.rs calls snapshot_touches_user_key
+ok    snapshot: live_caller crates/pedradb-store/src/lib_kernel.rs calls snapshot_touches_user_key
+ok    snapshot: live handler on_install_snapshot in crates/pedradb-store/src/lib_kernel.rs
+ok    si_reader: crates/pedradb-store/src/lib_kernel.rs calls si_reader_beats
+ok    si_reader: live_caller crates/pedradb-store/src/lib_kernel.rs calls si_reader_beats
+ok    si_reader: live handler best_applied_reader in crates/pedradb-store/src/lib_kernel.rs
+ok    index_val: crates/pedradb-store/src/layers_kernel.rs calls len_pref_value
+ok    index_val: live_caller crates/pedradb-store/src/layers_kernel.rs calls len_pref_value
+ok    index_val: live handler table_index_value_range in crates/pedradb-store/src/layers_kernel.rs
+ok    changelog: crates/pedradb-core/src/db_put_kernel.rs calls changelog_needs_sst_rebuild
+ok    changelog: live_caller crates/pedradb-core/src/db_put_kernel.rs calls changelog_needs_sst_rebuild
+ok    changelog: live handler maybe_rebuild_feed_from_live in crates/pedradb-core/src/db_put_kernel.rs
+ok    range_covers: range_tombstone_covers lives and is used in crates/pedradb-core/src/merge_kernel.rs
+ok    range_covers: live_caller crates/pedradb-core/src/merge_kernel.rs calls range_tombstone_covers
+ok    range_covers: live handler range_deleted in crates/pedradb-core/src/merge_kernel.rs
+ok    write_op_range_end: write_op_range_end lives and is used in crates/pedradb-core/src/merge_kernel.rs
+ok    write_op_range_end: crates/pedradb-core/src/db_kernel.rs calls write_op_range_end
+ok    write_op_range_end: live_caller crates/pedradb-core/src/db_kernel.rs calls write_op_range_end
+ok    write_op_range_end: live handler stage_unapplied in crates/pedradb-core/src/db_kernel.rs
+ok    merge_sift: sift_step lives and is used in crates/pedradb-core/src/merge_kernel.rs
+ok    merge_sift: live_caller crates/pedradb-core/src/merge_kernel.rs calls sift_step
+ok    merge_sift: live handler sift_down in crates/pedradb-core/src/merge_kernel.rs
+ok    prefix: crates/pedradb-store/src/lib_kernel.rs calls prefix_exclusive_end
+ok    prefix: crates/pedradb-store/src/layers_kernel.rs calls prefix_exclusive_end
+ok    prefix: live_caller crates/pedradb-store/src/lib_kernel.rs calls prefix_exclusive_end
+ok    prefix: live handler scan_prefix in crates/pedradb-store/src/lib_kernel.rs
+ok    stream_cursor: crates/pedradb-stream/src/lib_kernel.rs calls ack_in_order
+ok    stream_cursor: live_caller crates/pedradb-stream/src/lib_kernel.rs calls ack_in_order
+ok    stream_cursor: live handler ack in crates/pedradb-stream/src/lib_kernel.rs
+ok    stream_next_seq: next_seq lives and is used in crates/pedradb-stream/src/cursor_kernel.rs
+ok    bearer: crates/pedradb-http/src/lib_kernel.rs calls bearer_token_from_value
+ok    bearer: live_caller crates/pedradb-http/src/lib_kernel.rs calls bearer_token_from_value
+ok    bearer: live handler authorize in crates/pedradb-http/src/lib_kernel.rs
+ok    content_length: crates/pedradb-http/src/lib_kernel.rs calls keep_body_without_cl
+ok    content_length: live_caller crates/pedradb-http/src/lib_kernel.rs calls keep_body_without_cl
+ok    content_length: live handler read_req in crates/pedradb-http/src/lib_kernel.rs
+ok    invalid_cl_zero: crates/pedradb-http/src/lib_kernel.rs calls invalid_cl_as_zero
+ok    invalid_cl_zero: live_caller crates/pedradb-http/src/lib_kernel.rs calls invalid_cl_as_zero
+ok    invalid_cl_zero: live handler read_req in crates/pedradb-http/src/lib_kernel.rs
+ok    cl_repeat_conflict: crates/pedradb-http/src/lib_kernel.rs calls content_length_repeat_ok
+ok    cl_repeat_conflict: live_caller crates/pedradb-http/src/lib_kernel.rs calls content_length_repeat_ok
+ok    cl_repeat_conflict: live handler read_req in crates/pedradb-http/src/lib_kernel.rs
+ok    short_body_vs_cl: crates/pedradb-http/src/lib_kernel.rs calls short_body_vs_cl_is_error
+ok    short_body_vs_cl: live_caller crates/pedradb-http/src/lib_kernel.rs calls short_body_vs_cl_is_error
+ok    short_body_vs_cl: live handler read_req in crates/pedradb-http/src/lib_kernel.rs
+ok    fail_closed: crates/pedradb-http/src/lib_kernel.rs calls parse_error_writes_status
+ok    fail_closed: live_caller crates/pedradb-http/src/lib_kernel.rs calls parse_error_writes_status
+ok    fail_closed: live handler write_wire_err in crates/pedradb-http/src/lib_kernel.rs
+ok    form_plus: crates/pedradb-http/src/lib_kernel.rs calls form_decode
+ok    form_plus: live_caller crates/pedradb-http/src/lib_kernel.rs calls form_decode
+ok    form_plus: live handler query_decoded_values in crates/pedradb-http/src/lib_kernel.rs
+ok    origin_path: crates/pedradb-http/src/lib_kernel.rs calls origin_form_path
+ok    origin_path: live_caller crates/pedradb-http/src/lib_kernel.rs calls origin_form_path
+ok    origin_path: live handler path_only in crates/pedradb-http/src/lib_kernel.rs
+ok    path_after_authority: path_after_authority lives and is used in crates/pedradb-http/src/path_kernel.rs
+ok    strip_http_authority: strip_http_authority lives and is used in crates/pedradb-http/src/path_kernel.rs
+ok    request_target_authority: crates/pedradb-http/src/lib_kernel.rs calls request_target_authority
+ok    request_target_authority: request_target_authority lives and is used in crates/pedradb-http/src/path_kernel.rs
+ok    request_target_authority: live_caller crates/pedradb-http/src/lib_kernel.rs calls request_target_authority
+ok    request_target_authority: live handler read_req in crates/pedradb-http/src/lib_kernel.rs
+ok    host_authority_mismatch: crates/pedradb-http/src/lib_kernel.rs calls host_authority_mismatch
+ok    host_authority_mismatch: host_authority_mismatch lives and is used in crates/pedradb-http/src/path_kernel.rs
+ok    host_authority_mismatch: live_caller crates/pedradb-http/src/lib_kernel.rs calls host_authority_mismatch
+ok    host_authority_mismatch: live handler read_req in crates/pedradb-http/src/lib_kernel.rs
+ok    split_host_port: split_host_port lives and is used in crates/pedradb-http/src/path_kernel.rs
+ok    strip_uri_fragment: crates/pedradb-http/src/lib_kernel.rs calls strip_uri_fragment
+ok    strip_uri_fragment: strip_uri_fragment lives and is used in crates/pedradb-http/src/path_kernel.rs
+ok    strip_uri_fragment: live_caller crates/pedradb-http/src/lib_kernel.rs calls strip_uri_fragment
+ok    strip_uri_fragment: live handler query_decoded_values in crates/pedradb-http/src/lib_kernel.rs
+ok    strip_authority_for_routing: strip_authority_for_routing lives and is used in crates/pedradb-http/src/path_kernel.rs
+ok    form_plus_byte: form_plus_byte lives and is used in crates/pedradb-http/src/form_kernel.rs
+ok    from_hex: crates/pedradb-http/src/lib_kernel.rs calls from_hex
+ok    from_hex: from_hex lives and is used in crates/pedradb-http/src/form_kernel.rs
+ok    from_hex: live_caller crates/pedradb-http/src/lib_kernel.rs calls from_hex
+ok    from_hex: live handler percent_decode in crates/pedradb-http/src/lib_kernel.rs
+ok    plus_before_percent: plus_before_percent lives and is used in crates/pedradb-http/src/form_kernel.rs
+ok    query_values_conflict: crates/pedradb-http/src/lib_kernel.rs calls query_values_conflict
+ok    query_values_conflict: live_caller crates/pedradb-http/src/lib_kernel.rs calls query_values_conflict
+ok    query_values_conflict: live handler query_param_unique in crates/pedradb-http/src/lib_kernel.rs
+ok    query_u64_conflict: crates/pedradb-http/src/lib_kernel.rs calls query_u64_conflict
+ok    query_u64_conflict: live_caller crates/pedradb-http/src/lib_kernel.rs calls query_u64_conflict
+ok    query_u64_conflict: live handler query_u64 in crates/pedradb-http/src/lib_kernel.rs
+ok    query_part_is_bare_name: crates/pedradb-http/src/lib_kernel.rs calls query_part_is_bare_name
+ok    query_part_is_bare_name: live_caller crates/pedradb-http/src/lib_kernel.rs calls query_part_is_bare_name
+ok    query_part_is_bare_name: live handler query_decoded_values in crates/pedradb-http/src/lib_kernel.rs
+ok    ascii_lower: ascii_lower lives and is used in crates/pedradb-http/src/auth_kernel.rs
+ok    ascii_upper: ascii_upper lives and is used in crates/pedradb-http/src/auth_kernel.rs
+ok    is_bearer_scheme: is_bearer_scheme lives and is used in crates/pedradb-http/src/auth_kernel.rs
+ok    is_non_bearer_auth_scheme: is_non_bearer_auth_scheme lives and is used in crates/pedradb-http/src/auth_kernel.rs
+ok    normalize_http_method: crates/pedradb-http/src/lib_kernel.rs calls normalize_http_method
+ok    normalize_http_method: live_caller crates/pedradb-http/src/lib_kernel.rs calls normalize_http_method
+ok    normalize_http_method: live handler read_req in crates/pedradb-http/src/lib_kernel.rs
+ok    authorization_matches: crates/pedradb-http/src/lib_kernel.rs calls authorization_matches
+ok    authorization_matches: live_caller crates/pedradb-http/src/lib_kernel.rs calls authorization_matches
+ok    authorization_matches: live handler authorize in crates/pedradb-http/src/lib_kernel.rs
+ok    isolated: crates/pedradb-fold/src/follow_kernel.rs calls isolated_id_matches
+ok    isolated: live_caller crates/pedradb-fold/src/follow_kernel.rs calls isolated_id_matches
+ok    isolated: live handler in_prefixes in crates/pedradb-fold/src/follow_kernel.rs
+ok    isolated_child: isolated_child_byte lives and is used in crates/pedradb-fold/src/isolated_kernel.rs
+ok    children: crates/montanha-fdb-recipes/src/lib_kernel.rs calls packed_children_end
+ok    children: live_caller crates/montanha-fdb-recipes/src/lib_kernel.rs calls packed_children_end
+ok    children: live handler range_end in crates/montanha-fdb-recipes/src/lib_kernel.rs
+ok    fields: crates/montanha-fdb-recipes/src/lib_kernel.rs calls encode_fields
+ok    fields: live_caller crates/montanha-fdb-recipes/src/lib_kernel.rs calls encode_fields
+ok    fields: live handler set_user in crates/montanha-fdb-recipes/src/lib_kernel.rs
+ok    journal_pin: crates/pedradb-journal/src/lib_kernel.rs calls may_advance_pin
+ok    journal_pin: live_caller crates/pedradb-journal/src/lib_kernel.rs calls may_advance_pin
+ok    journal_pin: live handler pin_after_apply in crates/pedradb-journal/src/lib_kernel.rs
+ok    journal_catch_up_pin: crates/pedradb-journal/src/lib_kernel.rs calls catch_up_pins_on_read
+ok    journal_catch_up_pin: live_caller crates/pedradb-journal/src/lib_kernel.rs calls catch_up_pins_on_read
+ok    journal_catch_up_pin: live handler catch_up in crates/pedradb-journal/src/lib_kernel.rs
+ok    journal_fold_pin: crates/pedradb-journal/src/lib_kernel.rs calls fold_pins_on_read
+ok    journal_fold_pin: live_caller crates/pedradb-journal/src/lib_kernel.rs calls fold_pins_on_read
+ok    journal_fold_pin: live handler peek in crates/pedradb-journal/src/lib_kernel.rs
+ok    journal_next_pin: crates/pedradb-journal/src/lib_kernel.rs calls next_pin
+ok    journal_next_pin: live_caller crates/pedradb-journal/src/lib_kernel.rs calls next_pin
+ok    journal_next_pin: live handler catch_up in crates/pedradb-journal/src/lib_kernel.rs
+ok    wal_recover: crates/pedradb-core/src/wal/reader_kernel.rs calls recover_collect_act
+ok    pack: crates/montanha-fdb-recipes/src/lib_kernel.rs calls pack_cut_tag
+ok    pack: live_caller crates/montanha-fdb-recipes/src/lib_kernel.rs calls pack_cut_tag
+ok    pack: live handler pack in crates/montanha-fdb-recipes/src/lib_kernel.rs
+ok    children_start: crates/montanha-fdb-recipes/src/lib_kernel.rs calls packed_children_start
+ok    children_start: live_caller crates/montanha-fdb-recipes/src/lib_kernel.rs calls packed_children_start
+ok    children_start: live handler range_start in crates/montanha-fdb-recipes/src/lib_kernel.rs
+ok    children_half_open: key_in_half_open lives and is used in crates/montanha-fdb-recipes/src/children_kernel.rs
+ok    children_next_byte: next_byte_in_packed_children lives and is used in crates/montanha-fdb-recipes/src/children_kernel.rs
+ok    fields_kept: field_kept lives and is used in crates/montanha-fdb-recipes/src/fields_kernel.rs
+ok    fields_suffix: crates/montanha-fdb-recipes/src/lib_kernel.rs calls child_bytes_after
+ok    fields_suffix: live_caller crates/montanha-fdb-recipes/src/lib_kernel.rs calls child_bytes_after
+ok    fields_suffix: live handler child_suffix in crates/montanha-fdb-recipes/src/lib_kernel.rs
+ok    fields_decode: crates/montanha-fdb-recipes/src/lib_kernel.rs calls decode_fields
+ok    fields_decode: live_caller crates/montanha-fdb-recipes/src/lib_kernel.rs calls decode_fields
+ok    fields_decode: live handler decode_pair_compat in crates/montanha-fdb-recipes/src/lib_kernel.rs
+ok    fields_pair_nul: crates/montanha-fdb-recipes/src/lib_kernel.rs calls decode_pair_first_nul
+ok    fields_pair_nul: live_caller crates/montanha-fdb-recipes/src/lib_kernel.rs calls decode_pair_first_nul
+ok    fields_pair_nul: live handler decode_pair_compat in crates/montanha-fdb-recipes/src/lib_kernel.rs
+ok    ship_guard: crates/pedradb-replicate/src/lib_kernel.rs calls pull_plan
+ok    ship_guard: live_caller crates/pedradb-replicate/src/lib_kernel.rs calls pull_plan
+ok    ship_guard: live handler pull_on in crates/pedradb-replicate/src/lib_kernel.rs
+ok    ship_stamp: stamp_changed lives and is used in crates/pedradb-replicate/src/ship_kernel.rs
+ok    bloom_header: bloom_header_ok lives and is used in crates/pedradb-core/src/bloom_kernel.rs
+ok    bloom_header: live_caller crates/pedradb-core/src/bloom_kernel.rs calls bloom_header_ok
+ok    bloom_header: live handler decode in crates/pedradb-core/src/bloom_kernel.rs
+ok    bloom_insert: crates/pedradb-core/src/sst/table_kernel.rs calls insert
+ok    bloom_insert: live_caller crates/pedradb-core/src/sst/table_kernel.rs calls insert
+ok    bloom_insert: live handler write_sst_try_sorted_on in crates/pedradb-core/src/sst/table_kernel.rs
+ok    bloom_may_contain: crates/pedradb-core/src/sst/table_kernel.rs calls may_contain
+ok    bloom_may_contain: live_caller crates/pedradb-core/src/sst/table_kernel.rs calls may_contain
+ok    bloom_may_contain: live handler point_at in crates/pedradb-core/src/sst/table_kernel.rs
+ok    scan_guard: crates/pedradb-core/src/sst/table_kernel.rs calls scan_reads_file
+ok    scan_guard: live_caller crates/pedradb-core/src/sst/table_kernel.rs calls scan_reads_file
+ok    scan_guard: live handler entries_in_user_range_capped in crates/pedradb-core/src/sst/table_kernel.rs
+ok    si_read: crates/pedradb-store/src/lib_kernel.rs calls snapshot_read_plan
+ok    si_read: live_caller crates/pedradb-store/src/lib_kernel.rs calls snapshot_read_plan
+ok    si_read: live handler get_at_version in crates/pedradb-store/src/lib_kernel.rs
+ok    fold_range: crates/pedradb-fold/src/watch_kernel.rs calls fold_event_hides_key
+ok    fold_range: crates/pedradb-fold/src/store_kernel.rs calls fold_event_hides_key
+ok    fold_range: live_caller crates/pedradb-fold/src/watch_kernel.rs calls fold_event_hides_key
+ok    fold_range: live handler last_per_key in crates/pedradb-fold/src/watch_kernel.rs
+ok    manifest_recover: crates/pedradb-core/src/db_kernel.rs calls sst_recover_action
+ok    reopen_outcome: crates/pedradb-core/src/db_open_kernel.rs calls reopen_outcome
+ok    flush_decision: crates/pedradb-core/src/db_kernel.rs calls wal_rotate_decision
+ok    wal_rotate_decision: crates/pedradb-core/src/db_kernel.rs calls wal_rotate_decision
+ok    occ_snap_published: crates/pedradb-core/src/concurrent_kernel.rs calls occ_snap_uses_published
+ok    group_commit: crates/pedradb-core/src/concurrent_kernel.rs calls occ_conflict
+ok    group_commit: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls occ_conflict
+ok    group_commit: live handler validate_occ_batch in crates/pedradb-core/src/concurrent_kernel.rs
+ok    group_fence: crates/pedradb-core/src/db_kernel.rs calls fence_publish_seq
+ok    group_fence: live_caller crates/pedradb-core/src/db_kernel.rs calls fence_publish_seq
+ok    group_fence: live handler max_appended_seq in crates/pedradb-core/src/db_kernel.rs
+ok    compact_decision: crates/pedradb-core/src/db_kernel.rs calls compact_pick
+ok    compact_retention: crates/pedradb-core/src/merge_kernel.rs calls point_version_fate
+ok    dictionary_link: crates/pedradb-core/src/db_open_kernel.rs calls reopen_outcome
+ok    apply_step: crates/pedradb-raft/src/lib_kernel.rs calls apply_advance
+ok    apply_step: live_caller crates/pedradb-store/src/lib_kernel.rs calls apply_advance
+ok    apply_step: live handler apply_range in crates/pedradb-store/src/lib_kernel.rs
+ok    apply_put_plan: crates/pedradb-store/src/lib_kernel.rs calls apply_put_plan
+ok    apply_put_plan: live_caller crates/pedradb-store/src/lib_kernel.rs calls apply_put_plan
+ok    apply_put_plan: live handler apply_range in crates/pedradb-store/src/lib_kernel.rs
+ok    grant_persist: crates/pedradb-raft/src/lib_kernel.rs calls grant_after_persist
+ok    grant_persist: live_caller crates/pedradb-store/src/lib_kernel.rs calls grant_after_persist
+ok    grant_persist: live handler on_request_vote in crates/pedradb-store/src/lib_kernel.rs
+ok    durable_term: crates/pedradb-store/src/lib_kernel.rs calls durable_term_if_newer
+ok    durable_term: live_caller crates/pedradb-store/src/lib_kernel.rs calls durable_term_if_newer
+ok    durable_term: live handler durable_become_follower_if_newer in crates/pedradb-store/src/lib_kernel.rs
+ok    durable_term: live_caller crates/pedradb-raft/src/lib_kernel.rs calls durable_term_if_newer
+ok    durable_term: live handler handle_request_vote_with_persist in crates/pedradb-raft/src/lib_kernel.rs
+ok    vlog_recover: crates/pedradb-core/src/db_open_kernel.rs calls vlog_recover_action
+ok    blob_gc_pick: crates/pedradb-core/src/db_kernel.rs calls blob_gc_action
+ok    tx_glue: crates/pedradb-store/src/lib_kernel.rs calls tx_range_action
+ok    tx_glue: live_caller crates/pedradb-store/src/lib_kernel.rs calls tx_range_action
+ok    tx_glue: live handler tx_finish in crates/pedradb-store/src/lib_kernel.rs
+ok    rpc_mode: crates/pedradb-store/src/lib_kernel.rs calls allow_direct_rpc
+ok    rpc_mode: live_caller crates/pedradb-store/src/lib_kernel.rs calls allow_direct_rpc
+ok    rpc_mode: live handler set_rpc_mode in crates/pedradb-store/src/lib_kernel.rs
+ok    group_publish: crates/pedradb-core/src/concurrent_kernel.rs calls may_publish_group
+ok    group_publish: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls may_publish_group
+ok    group_publish: live handler finish_group_off_lock in crates/pedradb-core/src/concurrent_kernel.rs
+ok    rwlock_client_may_mutate: crates/pedradb-core/src/concurrent_kernel.rs calls rwlock_client_may_mutate
+ok    rwlock_client_may_mutate: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls rwlock_client_may_mutate
+ok    rwlock_client_may_mutate: live handler finish_group_off_lock in crates/pedradb-core/src/concurrent_kernel.rs
+ok    forall_schedules: crates/pedradb-core/src/concurrent_kernel.rs calls forall_schedules_admitted
+ok    forall_schedules: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls forall_schedules_admitted
+ok    forall_schedules: live handler claim_forall_schedules in crates/pedradb-core/src/concurrent_kernel.rs
+ok    l28_durability: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_durability_ok
+ok    l28_durability: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_durability_ok
+ok    l28_durability: live handler main in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_left: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_left_ok
+ok    l28_tcp_left: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_left_ok
+ok    l28_tcp_left: live handler tcp_node_disk_left_joint in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_hw: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_hw_ok
+ok    l28_tcp_hw: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_hw_ok
+ok    l28_tcp_hw: live handler tcp_node_disk_high_water in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_part: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_part_ok
+ok    l28_tcp_part: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_part_ok
+ok    l28_tcp_part: live handler tcp_node_removed_not_participating in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_apply: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_apply_ok
+ok    l28_tcp_apply: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_apply_ok
+ok    l28_tcp_apply: live handler tcp_node_recover_apply_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_napply: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_napply_ok
+ok    l28_tcp_napply: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_napply_ok
+ok    l28_tcp_napply: live handler tcp_node_removed_recover_apply_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_trunc: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_trunc_ok
+ok    l28_tcp_trunc: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_trunc_ok
+ok    l28_tcp_trunc: live handler tcp_node_removed_truncate_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_odrop: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_odrop_ok
+ok    l28_tcp_odrop: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_odrop_ok
+ok    l28_tcp_odrop: live handler tcp_node_removed_orphan_drop_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_abort: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_abort_ok
+ok    l28_tcp_abort: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_abort_ok
+ok    l28_tcp_abort: live handler tcp_node_removed_abort_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_nowms: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_nowms_ok
+ok    l28_tcp_nowms: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_nowms_ok
+ok    l28_tcp_nowms: live handler tcp_node_removed_now_ms_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_dterm: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_dterm_ok
+ok    l28_tcp_dterm: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_dterm_ok
+ok    l28_tcp_dterm: live handler tcp_node_removed_durable_term_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_hist: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_hist_ok
+ok    l28_tcp_hist: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_hist_ok
+ok    l28_tcp_hist: live handler tcp_node_removed_hist_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_fence: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_fence_ok
+ok    l28_tcp_fence: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_fence_ok
+ok    l28_tcp_fence: live handler tcp_node_removed_fence_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_clear: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_clear_ok
+ok    l28_tcp_clear: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_clear_ok
+ok    l28_tcp_clear: live handler tcp_node_removed_clear_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_pre: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_pre_ok
+ok    l28_tcp_pre: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_pre_ok
+ok    l28_tcp_pre: live handler tcp_node_removed_pre_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_peer: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_peer_ok
+ok    l28_tcp_peer: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_peer_ok
+ok    l28_tcp_peer: live handler tcp_node_removed_peer_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_lid: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_lid_ok
+ok    l28_tcp_lid: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_lid_ok
+ok    l28_tcp_lid: live handler tcp_node_removed_lid_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_rdr: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_rdr_ok
+ok    l28_tcp_rdr: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_rdr_ok
+ok    l28_tcp_rdr: live handler tcp_node_removed_rdr_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_dsc: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_dsc_ok
+ok    l28_tcp_dsc: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_dsc_ok
+ok    l28_tcp_dsc: live handler tcp_node_removed_dsc_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_pld: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_pld_ok
+ok    l28_tcp_pld: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_pld_ok
+ok    l28_tcp_pld: live handler tcp_node_removed_pld_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_std: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_std_ok
+ok    l28_tcp_std: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_std_ok
+ok    l28_tcp_std: live handler tcp_node_removed_std_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_hnt: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_hnt_ok
+ok    l28_tcp_hnt: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_hnt_ok
+ok    l28_tcp_hnt: live handler tcp_node_hint_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_slot: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_slot_ok
+ok    l28_tcp_slot: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_slot_ok
+ok    l28_tcp_slot: live handler tcp_node_drop_repl_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_sth: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_sth_ok
+ok    l28_tcp_sth: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_sth_ok
+ok    l28_tcp_sth: live handler tcp_node_drop_st_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    l28_tcp_pj: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_pj_ok
+ok    l28_tcp_pj: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_pj_ok
+ok    l28_tcp_pj: live handler tcp_node_plant_joint_ok in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    sched_plant_joint: crates/pedradb-world/src/lib_kernel.rs calls plant_joint_schedule_ok
+ok    sched_plant_joint: live_caller crates/pedradb-world/src/lib_kernel.rs calls plant_joint_schedule_ok
+ok    sched_plant_joint: live handler run in crates/pedradb-world/src/lib_kernel.rs
+ok    world_trajectory: crates/pedradb-world/src/lib_kernel.rs calls trajectory_violation
+ok    world_trajectory: live_caller crates/pedradb-world/src/lib_kernel.rs calls trajectory_violation
+ok    world_trajectory: live handler exchange in crates/pedradb-world/src/lib_kernel.rs
+ok    world_trajectory_fold: check_trajectory lives and is used in crates/pedradb-world/src/world_kernel.rs
+ok    liveness_claim: crates/pedradb-store/src/lib_kernel.rs calls liveness_admitted
+ok    liveness_claim: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls liveness_admitted
+ok    liveness_claim: crates/pedradb-store/src/bin/montanha-tcp_kernel.rs calls liveness_admitted
+ok    liveness_claim: live_caller crates/pedradb-store/src/lib_kernel.rs calls liveness_admitted
+ok    liveness_claim: live handler claim_eventual_election in crates/pedradb-store/src/lib_kernel.rs
+ok    fsync_promote: crates/pedradb-sim/src/recording.rs calls fsync_promotes_pending
+ok    fsync_promote: live_caller crates/pedradb-sim/src/recording.rs calls fsync_promotes_pending
+ok    fsync_promote: live handler sync_data in crates/pedradb-sim/src/recording.rs
+ok    media_durable: crates/pedradb-core/src/db_kernel.rs calls media_durable_admitted
+ok    media_durable: live_caller crates/pedradb-core/src/db_kernel.rs calls media_durable_admitted
+ok    media_durable: live handler claim_media_durable in crates/pedradb-core/src/db_kernel.rs
+ok    tcg_guest: crates/pedradb-world/src/lib_kernel.rs calls tcg_guest_admitted
+ok    tcg_guest: live_caller crates/pedradb-world/src/lib_kernel.rs calls tcg_guest_admitted
+ok    tcg_guest: live handler claim_tcg_guest in crates/pedradb-world/src/lib_kernel.rs
+ok    fdatasync_rc: fdatasync_rc_ok lives and is used in crates/pedradb-posix/src/lib_kernel.rs
+ok    fdatasync_rc: live_caller crates/pedradb-posix/src/lib_kernel.rs calls fdatasync_rc_ok
+ok    fdatasync_rc: live handler fdatasync_file in crates/pedradb-posix/src/lib_kernel.rs
+ok    cqe_res: crates/pedradb-io-uring/src/ring_kernel.rs calls cqe_res_ok
+ok    cqe_res: live_caller crates/pedradb-io-uring/src/ring_kernel.rs calls cqe_res_ok
+ok    cqe_res: live handler fsync in crates/pedradb-io-uring/src/ring_kernel.rs
+ok    cqe_tags: crates/pedradb-io-uring/src/ring_kernel.rs calls next_user_data
+ok    cqe_tags: live_caller crates/pedradb-io-uring/src/ring_kernel.rs calls next_user_data
+ok    cqe_tags: live handler submit_sqe in crates/pedradb-io-uring/src/ring_kernel.rs
+ok    cqe_leftover: crates/pedradb-io-uring/src/ring_kernel.rs calls cqe_act
+ok    cqe_leftover: live_caller crates/pedradb-io-uring/src/ring_kernel.rs calls cqe_act
+ok    cqe_leftover: live handler harvest_ready_cqe in crates/pedradb-io-uring/src/ring_kernel.rs
+ok    cqe_submit: crates/pedradb-io-uring/src/ring_kernel.rs calls submit_complete_act
+ok    cqe_submit: live_caller crates/pedradb-io-uring/src/ring_kernel.rs calls submit_complete_act
+ok    cqe_submit: live handler submit_sqe in crates/pedradb-io-uring/src/ring_kernel.rs
+ok    cqe_ring_refusal: cqe_ring_model_admitted lives and is used in crates/pedradb-io-uring/src/cqe_kernel.rs
+ok    c_len: crates/pedradb-capi/src/lib_kernel.rs calls c_len_admitted
+ok    c_len: live_caller crates/pedradb-capi/src/lib_kernel.rs calls c_len_admitted
+ok    c_len: live handler montanha_fdb_transaction_set in crates/pedradb-capi/src/lib_kernel.rs
+ok    crc_match: crates/pedradb-core/src/wal/reader_kernel.rs calls crc_match_ok
+ok    crc_match: crates/pedradb-core/src/sst/scan_kernel.rs calls crc_match_ok
+ok    crc_match: crates/pedradb-core/src/vlog_kernel.rs calls crc_match_ok
+ok    crc_match: crates/pedradb-core/src/manifest_mod_kernel.rs calls crc_match_ok
+ok    crc_match: crates/pedradb-core/src/history_kernel.rs calls crc_match_ok
+ok    crc_match: crates/pedradb-core/src/change_feed_kernel.rs calls crc_match_ok
+ok    crc_match: crates/pedradb-core/src/verify_kernel.rs calls crc_match_ok
+ok    crc_match: live_caller crates/pedradb-core/src/wal/reader_kernel.rs calls crc_match_ok
+ok    crc_match: live handler read_record in crates/pedradb-core/src/wal/reader_kernel.rs
+ok    sst_crc: crates/pedradb-core/src/sst/table_kernel.rs calls sst_crc_fate
+ok    sst_crc: live_caller crates/pedradb-core/src/sst/table_kernel.rs calls sst_crc_fate
+ok    sst_crc: live handler decode in crates/pedradb-core/src/sst/table_kernel.rs
+ok    cf_family: key_in_cf_family lives and is used in crates/pedradb-core/src/cf_kernel.rs
+ok    cf_family: crates/pedradb-core/src/memtable_kernel.rs calls key_in_cf_family
+ok    cf_family: crates/pedradb-core/src/sst/table_kernel.rs calls key_in_cf_family
+ok    cf_family: crates/pedradb-core/src/db_kernel.rs calls key_in_cf_family
+ok    cf_family: crates/rocksdb-compat/src/lib_kernel.rs calls key_in_cf_family
+ok    cf_family: live_caller crates/pedradb-core/src/sst/table_kernel.rs calls key_in_cf_family
+ok    cf_family: live handler write_l0_sst_for_family in crates/pedradb-core/src/sst/table_kernel.rs
+ok    cf_family_of: cf_family_of lives and is used in crates/pedradb-core/src/cf_kernel.rs
+ok    cf_family_of: live_caller crates/pedradb-core/src/cf_kernel.rs calls cf_family_of
+ok    cf_family_of: live handler infer_sst_cf in crates/pedradb-core/src/cf_kernel.rs
+ok    cf_encode_effective: cf_encode_effective lives and is used in crates/pedradb-core/src/cf_kernel.rs
+ok    cf_encode_effective: crates/rocksdb-compat/src/lib_kernel.rs calls cf_encode_effective
+ok    cf_encode_effective: live_caller crates/rocksdb-compat/src/lib_kernel.rs calls cf_encode_effective
+ok    cf_encode_effective: live handler encode_pooled in crates/rocksdb-compat/src/lib_kernel.rs
+ok    encode_cf_key: encode_cf_key lives and is used in crates/pedradb-core/src/cf_kernel.rs
+ok    encode_cf_key: crates/pedradb-core/src/db_kernel.rs calls encode_cf_key
+ok    encode_cf_key: crates/rocksdb-compat/src/lib_kernel.rs calls encode_cf_key
+ok    encode_cf_key: live_caller crates/rocksdb-compat/src/lib_kernel.rs calls encode_cf_key
+ok    encode_cf_key: live handler encode in crates/rocksdb-compat/src/lib_kernel.rs
+ok    encode_cf_key: live_caller crates/pedradb-core/src/db_kernel.rs calls encode_cf_key
+ok    encode_cf_key: live handler compact_ssts_only_cf in crates/pedradb-core/src/db_kernel.rs
+ok    decode_cf_key: decode_cf_key lives and is used in crates/pedradb-core/src/cf_kernel.rs
+ok    decode_cf_key: crates/rocksdb-compat/src/lib_kernel.rs calls decode_cf_key
+ok    decode_cf_key: live_caller crates/rocksdb-compat/src/lib_kernel.rs calls decode_cf_key
+ok    decode_cf_key: live handler decode in crates/rocksdb-compat/src/lib_kernel.rs
+ok    infer_sst_cf: infer_sst_cf lives and is used in crates/pedradb-core/src/cf_kernel.rs
+ok    infer_sst_cf: crates/pedradb-core/src/sst/table_kernel.rs calls infer_sst_cf
+ok    infer_sst_cf: live_caller crates/pedradb-core/src/sst/table_kernel.rs calls infer_sst_cf
+ok    infer_sst_cf: live handler write_l0_sst_for_family in crates/pedradb-core/src/sst/table_kernel.rs
+ok    compact_rewrites_sst_cf: compact_rewrites_sst_cf lives and is used in crates/pedradb-core/src/cf_kernel.rs
+ok    compact_rewrites_sst_cf: crates/pedradb-core/src/db_kernel.rs calls compact_rewrites_sst_cf
+ok    compact_rewrites_sst_cf: live_caller crates/pedradb-core/src/db_kernel.rs calls compact_rewrites_sst_cf
+ok    compact_rewrites_sst_cf: live handler compact_ssts_only_cf in crates/pedradb-core/src/db_kernel.rs
+ok    visible_at: visible_at lives and is used in crates/pedradb-core/src/merge_kernel.rs
+ok    visible_at: crates/pedradb-core/src/memtable_kernel.rs calls visible_at
+ok    ikey_pack: pack_sequence_and_type lives and is used in crates/pedradb-core/src/key_kernel.rs
+ok    ikey_pack: live_caller crates/pedradb-core/src/key_kernel.rs calls pack_sequence_and_type
+ok    ikey_pack: live handler encode_into in crates/pedradb-core/src/key_kernel.rs
+ok    write_record_count: write_record_count_ok lives and is used in crates/pedradb-core/src/batch_kernel.rs
+ok    pin_gc: crates/pedradb-core/src/db_kernel.rs calls gc_oldest_from_pin
+ok    wait_for_deadlock: wait_for_deadlock lives and is used in crates/rocksdb-compat/src/locktab_kernel.rs
+ok    flush_publish: may_publish_manifest lives and is used in crates/pedradb-core/src/flush_kernel.rs
+ok    probe_order: first_probe_on_equal_lo lives and is used in crates/pedradb-core/src/probe_order_kernel.rs
+ok    run_disjoint: crates/pedradb-core/src/db_kernel.rs calls run_pairwise_disjoint_los
+ok    run_disjoint: live_caller crates/pedradb-core/src/db_kernel.rs calls run_pairwise_disjoint_los
+ok    run_disjoint: live handler rebuild_sst_runs in crates/pedradb-core/src/db_kernel.rs
+ok    iter_window: crates/rocksdb-compat/src/lib_kernel.rs calls iter_window_keep
+ok    l28_napply_retry: crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_napply_retry_admitted
+ok    l28_napply_retry: live_caller crates/pedradb-store/src/bin/cluster_real_kernel.rs calls l28_tcp_napply_retry_admitted
+ok    l28_napply_retry: live handler main in crates/pedradb-store/src/bin/cluster_real_kernel.rs
+ok    zero_glue: crates/pedradb-core/src/db_kernel.rs calls zero_glue_admitted
+ok    zero_glue: live_caller crates/pedradb-core/src/db_kernel.rs calls zero_glue_admitted
+ok    zero_glue: live handler claim_zero_glue in crates/pedradb-core/src/db_kernel.rs
+ok    lock_interleavings: crates/pedradb-core/src/concurrent_kernel.rs calls lock_interleavings_admitted
+ok    lock_interleavings: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls lock_interleavings_admitted
+ok    lock_interleavings: live handler claim_lock_interleavings_proven in crates/pedradb-core/src/concurrent_kernel.rs
+ok    leveling: crates/pedradb-core/src/db_kernel.rs calls level_target_bytes
+ok    leveling: live_caller crates/pedradb-core/src/db_kernel.rs calls level_target_bytes
+ok    leveling: live handler prepare_pushdown_compact in crates/pedradb-core/src/db_kernel.rs
+ok    leveling_pick: crates/pedradb-core/src/db_kernel.rs calls pick_l0_to_l1
+ok    leveling_pick: live_caller crates/pedradb-core/src/db_kernel.rs calls pick_l0_to_l1
+ok    leveling_pick: live handler prepare_l0_compact in crates/pedradb-core/src/db_kernel.rs
+ok    leveling_pushdown: crates/pedradb-core/src/db_kernel.rs calls pick_pushdown
+ok    leveling_pushdown: live_caller crates/pedradb-core/src/db_kernel.rs calls pick_pushdown
+ok    leveling_pushdown: live handler prepare_pushdown_compact in crates/pedradb-core/src/db_kernel.rs
+ok    d1_durability: d1_holds lives and is used in crates/pedradb-spec/src/properties_kernel.rs
+ok    r1_no_resurrection: r1_answer_ok lives and is used in crates/pedradb-spec/src/properties_kernel.rs
+ok    t1_atomicity: t1_holds lives and is used in crates/pedradb-spec/src/properties_kernel.rs
+ok    c1_quorum: c1_holds lives and is used in crates/pedradb-spec/src/properties_kernel.rs
+ok    leveled_enabled: crates/pedradb-core/src/concurrent_kernel.rs calls leveled_enabled
+ok    leveled_enabled: crates/pedradb-core/src/db_kernel.rs calls leveled_enabled
+ok    leveled_enabled: live_caller crates/pedradb-core/src/db_kernel.rs calls leveled_enabled
+ok    leveled_enabled: live handler compact_leveled in crates/pedradb-core/src/db_kernel.rs
+ok    leveling_disjoint: crates/pedradb-core/src/db_kernel.rs calls is_disjoint
+ok    leveling_disjoint: is_disjoint lives and is used in crates/pedradb-core/src/leveling_kernel.rs
+ok    leveling_disjoint: live_caller crates/pedradb-core/src/db_kernel.rs calls is_disjoint
+ok    leveling_disjoint: live handler repair_stacked_levels in crates/pedradb-core/src/db_kernel.rs
+ok    leveling_overlaps: overlaps lives and is used in crates/pedradb-core/src/leveling_kernel.rs
+ok    leveling_total_bytes: crates/pedradb-core/src/db_kernel.rs calls total_bytes
+ok    leveling_total_bytes: total_bytes lives and is used in crates/pedradb-core/src/leveling_kernel.rs
+ok    leveling_total_bytes: live_caller crates/pedradb-core/src/db_kernel.rs calls total_bytes
+ok    leveling_total_bytes: live handler prepare_pushdown_compact in crates/pedradb-core/src/db_kernel.rs
+ok    tombstone_reaches_window: tombstone_reaches_window lives and is used in crates/pedradb-core/src/sst/scan_kernel.rs
+ok    key_in_window: key_in_window lives and is used in crates/pedradb-core/src/sst/scan_kernel.rs
+ok    point_bounds_overlap: point_bounds_overlap lives and is used in crates/pedradb-core/src/sst/scan_kernel.rs
+ok    sst_block_crc: crates/pedradb-core/src/sst/table_kernel.rs calls sst_block_crc_ok
+ok    sst_block_crc: live_caller crates/pedradb-core/src/sst/table_kernel.rs calls sst_block_crc_ok
+ok    sst_block_crc: live handler split_block_crc in crates/pedradb-core/src/sst/table_kernel.rs
+ok    sst_magic: crates/pedradb-core/src/sst/table_kernel.rs calls sst_magic_is_pedra
+ok    sst_magic: crates/pedradb-ops/src/dir_kind.rs calls sst_magic_is_pedra
+ok    sst_magic: live_caller crates/pedradb-core/src/sst/table_kernel.rs calls sst_magic_is_pedra
+ok    sst_magic: live handler decode in crates/pedradb-core/src/sst/table_kernel.rs
+ok    sst_magic: live_caller crates/pedradb-ops/src/dir_kind.rs calls sst_magic_is_pedra
+ok    sst_magic: live handler classify_dir_env in crates/pedradb-ops/src/dir_kind.rs
+ok    is_length_resyncable: crates/pedradb-core/src/wal/reader_kernel.rs calls is_length_resyncable
+ok    is_length_resyncable: live_caller crates/pedradb-core/src/wal/reader_kernel.rs calls is_length_resyncable
+ok    is_length_resyncable: live handler collect_prefix_all in crates/pedradb-core/src/wal/reader_kernel.rs
+ok    physical_payload_act: crates/pedradb-core/src/wal/reader_kernel.rs calls physical_payload_act
+ok    physical_payload_act: live_caller crates/pedradb-core/src/wal/reader_kernel.rs calls physical_payload_act
+ok    physical_payload_act: live handler read_record in crates/pedradb-core/src/wal/reader_kernel.rs
+ok    fragment_act: crates/pedradb-core/src/wal/reader_kernel.rs calls fragment_act
+ok    fragment_act: live_caller crates/pedradb-core/src/wal/reader_kernel.rs calls fragment_act
+ok    fragment_act: live handler read_record in crates/pedradb-core/src/wal/reader_kernel.rs
+ok    from_record_type: crates/pedradb-core/src/wal/reader_kernel.rs calls from_record_type
+ok    from_record_type: live_caller crates/pedradb-core/src/wal/reader_kernel.rs calls from_record_type
+ok    from_record_type: live handler read_record in crates/pedradb-core/src/wal/reader_kernel.rs
+ok    compact_split: compact_should_split lives and is used in crates/pedradb-core/src/compact_kernel.rs
+ok    compact_split_at: compact_should_split_at lives and is used in crates/pedradb-core/src/compact_kernel.rs
+ok    lone_tombstone: lone_tombstone_fate lives and is used in crates/pedradb-core/src/compact_kernel.rs
+ok    lone_tombstone: crates/pedradb-core/src/merge_kernel.rs calls lone_tombstone_fate
+ok    lone_tombstone: live_caller crates/pedradb-core/src/merge_kernel.rs calls lone_tombstone_fate
+ok    lone_tombstone: live handler gc_snapshot_safe in crates/pedradb-core/src/merge_kernel.rs
+ok    changelog_should_store: crates/pedradb-core/src/db_kernel.rs calls changelog_should_store
+ok    changelog_should_store: live_caller crates/pedradb-core/src/db_kernel.rs calls changelog_should_store
+ok    changelog_should_store: live handler maybe_persist_changelog_after_durable_commit in crates/pedradb-core/src/db_kernel.rs
+ok    changelog_budget: crates/pedradb-core/src/db_put_kernel.rs calls changelog_rebuild_within_budget
+ok    changelog_budget: live_caller crates/pedradb-core/src/db_put_kernel.rs calls changelog_rebuild_within_budget
+ok    changelog_budget: live handler maybe_rebuild_feed_from_live in crates/pedradb-core/src/db_put_kernel.rs
+ok    changelog_durable_commit: crates/pedradb-core/src/db_put_kernel.rs calls changelog_durable_commit_fate
+ok    changelog_durable_commit: live_caller crates/pedradb-core/src/db_put_kernel.rs calls changelog_durable_commit_fate
+ok    changelog_durable_commit: live handler commit_ops_with in crates/pedradb-core/src/db_put_kernel.rs
+ok    wal_archive_delete: crates/pedradb-core/src/db_kernel.rs calls wal_archive_delete_plan
+ok    wal_archive_delete: live_caller crates/pedradb-core/src/db_kernel.rs calls wal_archive_delete_plan
+ok    wal_archive_delete: live handler delete_wal_archives in crates/pedradb-core/src/db_kernel.rs
+ok    bulk_manifest_persist: crates/pedradb-core/src/db_kernel.rs calls bulk_manifest_persist_fate
+ok    bulk_manifest_persist: live_caller crates/pedradb-core/src/db_kernel.rs calls bulk_manifest_persist_fate
+ok    bulk_manifest_persist: live handler persist_bulk_manifest in crates/pedradb-core/src/db_kernel.rs
+ok    point_cache_validity: crates/pedradb-core/src/db_kernel.rs calls point_cache_validity
+ok    point_cache_validity: live_caller crates/pedradb-core/src/db_kernel.rs calls point_cache_validity
+ok    point_cache_validity: live handler get_after_point_miss in crates/pedradb-core/src/db_kernel.rs
+ok    point_cache_validity: live_caller crates/pedradb-core/src/db_kernel.rs calls point_cache_validity
+ok    point_cache_validity: live handler get_at in crates/pedradb-core/src/db_kernel.rs
+ok    point_cache_validity: live_caller crates/pedradb-core/src/db_kernel.rs calls point_cache_validity
+ok    point_cache_validity: live handler last_under_user_prefix in crates/pedradb-core/src/db_kernel.rs
+ok    point_tombstone: crates/pedradb-core/src/db_kernel.rs calls point_tombstone_plan
+ok    point_tombstone: live_caller crates/pedradb-core/src/db_kernel.rs calls point_tombstone_plan
+ok    point_tombstone: live handler lookup in crates/pedradb-core/src/db_kernel.rs
+ok    dir_sync_plan: crates/pedradb-core/src/db_kernel.rs calls dir_sync_plan
+ok    dir_sync_plan: live_caller crates/pedradb-core/src/db_kernel.rs calls dir_sync_plan
+ok    dir_sync_plan: live handler sync_dir_if_required in crates/pedradb-core/src/db_kernel.rs
+ok    fence_admission: crates/pedradb-core/src/db_kernel.rs calls fence_admission_plan
+ok    fence_admission: live_caller crates/pedradb-core/src/db_kernel.rs calls fence_admission_plan
+ok    fence_admission: live handler ensure_not_fenced in crates/pedradb-core/src/db_kernel.rs
+ok    fence_record: crates/pedradb-core/src/db_kernel.rs calls fence_record_plan
+ok    fence_record: live_caller crates/pedradb-core/src/db_kernel.rs calls fence_record_plan
+ok    fence_record: live handler fence_durability in crates/pedradb-core/src/db_kernel.rs
+ok    group_batch_sync: crates/pedradb-core/src/db_kernel.rs calls group_batch_sync_plan
+ok    group_batch_sync: live_caller crates/pedradb-core/src/db_kernel.rs calls group_batch_sync_plan
+ok    group_batch_sync: live handler group_prepare in crates/pedradb-core/src/db_kernel.rs
+ok    pit_resync_rewrite_plan: crates/pedradb-core/src/db_open_kernel.rs calls pit_resync_rewrite_plan
+ok    pit_resync_rewrite_plan: live_caller crates/pedradb-core/src/db_open_kernel.rs calls pit_resync_rewrite_plan
+ok    pit_resync_rewrite_plan: live handler open_with_env_sourced in crates/pedradb-core/src/db_open_kernel.rs
+ok    parked_pair: crates/pedradb-core/src/db_kernel.rs calls parked_pair_plan
+ok    parked_pair: live_caller crates/pedradb-core/src/db_kernel.rs calls parked_pair_plan
+ok    parked_pair: live handler parked_oldest_pair_arcs in crates/pedradb-core/src/db_kernel.rs
+ok    auto_flush_gate: crates/pedradb-core/src/db_kernel.rs calls auto_flush_gate
+ok    auto_flush_gate: live_caller crates/pedradb-core/src/db_kernel.rs calls auto_flush_gate
+ok    auto_flush_gate: live handler maybe_auto_flush in crates/pedradb-core/src/db_kernel.rs
+ok    mem_auto_flush: crates/pedradb-core/src/db_kernel.rs calls mem_auto_flush_plan
+ok    mem_auto_flush: live_caller crates/pedradb-core/src/db_kernel.rs calls mem_auto_flush_plan
+ok    mem_auto_flush: live handler maybe_auto_flush in crates/pedradb-core/src/db_kernel.rs
+ok    manifest_publish_plan: crates/pedradb-core/src/db_kernel.rs calls manifest_publish_plan
+ok    manifest_publish_plan: live_caller crates/pedradb-core/src/db_kernel.rs calls manifest_publish_plan
+ok    manifest_publish_plan: live handler persist_manifest in crates/pedradb-core/src/db_kernel.rs
+ok    changelog_store_plan: crates/pedradb-core/src/db_kernel.rs calls changelog_store_plan
+ok    changelog_store_plan: live_caller crates/pedradb-core/src/db_kernel.rs calls changelog_store_plan
+ok    changelog_store_plan: live handler changelog_store_point in crates/pedradb-core/src/db_kernel.rs
+ok    parked_pop_plan: crates/pedradb-core/src/db_kernel.rs calls parked_pop_plan
+ok    parked_pop_plan: live_caller crates/pedradb-core/src/db_kernel.rs calls parked_pop_plan
+ok    parked_pop_plan: live handler take_oldest_parked in crates/pedradb-core/src/db_kernel.rs
+ok    put_handler_plan: crates/pedradb-core/src/db_put_kernel.rs calls put_handler_plan
+ok    put_handler_plan: live_caller crates/pedradb-core/src/db_put_kernel.rs calls put_handler_plan
+ok    put_handler_plan: live handler apply_batch_with in crates/pedradb-core/src/db_put_kernel.rs
+ok    open_wal_head_plan: crates/pedradb-core/src/db_open_kernel.rs calls open_wal_head_plan
+ok    open_wal_head_plan: live_caller crates/pedradb-core/src/db_open_kernel.rs calls open_wal_head_plan
+ok    open_wal_head_plan: live handler open_with_env_sourced in crates/pedradb-core/src/db_open_kernel.rs
+ok    group_ack_plan: crates/pedradb-core/src/db_kernel.rs calls group_ack_plan
+ok    group_ack_plan: live_caller crates/pedradb-core/src/db_kernel.rs calls group_ack_plan
+ok    group_ack_plan: live handler lone_sync_commit in crates/pedradb-core/src/db_kernel.rs
+ok    lock_alphabet_linearizes_n2: crates/pedradb-core/src/concurrent_put_kernel.rs calls lock_alphabet_linearizes_n2
+ok    lock_alphabet_linearizes_n2: live_caller crates/pedradb-core/src/concurrent_put_kernel.rs calls lock_alphabet_linearizes_n2
+ok    lock_alphabet_linearizes_n2: live handler put_with_seq in crates/pedradb-core/src/concurrent_put_kernel.rs
+ok    cf_flush_plan: crates/pedradb-core/src/db_kernel.rs calls cf_flush_plan
+ok    cf_flush_plan: live_caller crates/pedradb-core/src/db_kernel.rs calls cf_flush_plan
+ok    cf_flush_plan: live handler maybe_auto_flush in crates/pedradb-core/src/db_kernel.rs
+ok    flusher_gate_plan: crates/pedradb-core/src/concurrent_kernel.rs calls flusher_gate_plan
+ok    flusher_gate_plan: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls flusher_gate_plan
+ok    flusher_gate_plan: live handler await_flush_debt in crates/pedradb-core/src/concurrent_kernel.rs
+ok    flusher_gate_plan: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls flusher_gate_plan
+ok    flusher_gate_plan: live handler await_l0_park in crates/pedradb-core/src/concurrent_kernel.rs
+ok    flusher_gate_plan: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls flusher_gate_plan
+ok    flusher_gate_plan: live handler submit_one in crates/pedradb-core/src/concurrent_kernel.rs
+ok    flusher_gate_plan: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls flusher_gate_plan
+ok    flusher_gate_plan: live handler submit_inner in crates/pedradb-core/src/concurrent_kernel.rs
+ok    flusher_gate_plan: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls flusher_gate_plan
+ok    flusher_gate_plan: live handler assist_flush_debt in crates/pedradb-core/src/concurrent_kernel.rs
+ok    parked_debt_plan: crates/pedradb-core/src/concurrent_kernel.rs calls parked_debt_plan
+ok    parked_debt_plan: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls parked_debt_plan
+ok    parked_debt_plan: live handler await_flush_debt in crates/pedradb-core/src/concurrent_kernel.rs
+ok    parked_debt_plan: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls parked_debt_plan
+ok    parked_debt_plan: live handler assist_flush_debt in crates/pedradb-core/src/concurrent_kernel.rs
+ok    flush_plan: crates/pedradb-core/src/db_kernel.rs calls flush_plan
+ok    flush_plan: live_caller crates/pedradb-core/src/db_kernel.rs calls flush_plan
+ok    flush_plan: live handler flush in crates/pedradb-core/src/db_kernel.rs
+ok    first_install: crates/pedradb-core/src/db_kernel.rs calls first_install_action
+ok    first_install: live_caller crates/pedradb-core/src/db_kernel.rs calls first_install_action
+ok    first_install: live handler recover_ssts in crates/pedradb-core/src/db_kernel.rs
+ok    probe_order_covering: probe_order_covering lives and is used in crates/pedradb-core/src/probe_order_kernel.rs
+ok    group_validate: group_validate lives and is used in crates/pedradb-core/src/group_commit_kernel.rs
+ok    occ_member_fate: occ_member_fate lives and is used in crates/pedradb-core/src/group_commit_kernel.rs
+ok    occ_batch_plan: crates/pedradb-core/src/concurrent_kernel.rs calls occ_batch_plan
+ok    occ_batch_plan: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls occ_batch_plan
+ok    occ_batch_plan: live handler validate_occ_batch in crates/pedradb-core/src/concurrent_kernel.rs
+ok    occ_batch_plan: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls occ_batch_plan
+ok    occ_batch_plan: live handler lone_commit in crates/pedradb-core/src/concurrent_kernel.rs
+ok    pct_default_depth: crates/pedradb-core/src/concurrent_kernel.rs calls pct_campaign_default_depth
+ok    pct_default_depth: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls pct_campaign_default_depth
+ok    pct_default_depth: live handler claim_default_pct_depth_not_raised in crates/pedradb-core/src/concurrent_kernel.rs
+ok    default_pct_depth_raised: default_pct_depth_raised lives and is used in crates/pedradb-core/src/group_commit_kernel.rs
+ok    fsync_lie_tcg: fsync_lie_closes_tcg_guest lives and is used in crates/pedradb-core/src/group_commit_kernel.rs
+ok    stacked_liars: stacked_fsync_liars_admitted lives and is used in crates/pedradb-core/src/group_commit_kernel.rs
+ok    env_crash: crash_legal lives and is used in crates/pedradb-core/src/env_crash_kernel.rs
+ok    env_crash: crates/pedradb-sim/src/three_teeth_plants.rs calls crash_legal
+ok    env_append: append lives and is used in crates/pedradb-core/src/env_crash_kernel.rs
+ok    env_append: crates/pedradb-sim/src/three_teeth_plants.rs calls append
+ok    env_sync: sync lives and is used in crates/pedradb-core/src/env_crash_kernel.rs
+ok    env_sync: crates/pedradb-sim/src/three_teeth_plants.rs calls sync
+ok    env_barrier_floor: barrier_floor_holds lives and is used in crates/pedradb-core/src/env_crash_kernel.rs
+ok    env_barrier_floor: crates/pedradb-sim/src/three_teeth_plants.rs calls barrier_floor_holds
+ok    env_no_invented: no_invented_bytes_holds lives and is used in crates/pedradb-core/src/env_crash_kernel.rs
+ok    env_no_invented: crates/pedradb-sim/src/three_teeth_plants.rs calls no_invented_bytes_holds
+ok    env_honest_sync: honest_sync_protects_all lives and is used in crates/pedradb-core/src/env_crash_kernel.rs
+ok    env_honest_sync: crates/pedradb-sim/src/three_teeth_plants.rs calls honest_sync_protects_all
+ok    wal_state: inv_wal lives and is used in crates/pedradb-core/src/wal/wal_state_kernel.rs
+ok    wal_state: crates/pedradb-sim/src/three_teeth_plants.rs calls inv_wal
+ok    wal_append: wal_append lives and is used in crates/pedradb-core/src/wal/wal_state_kernel.rs
+ok    wal_append: crates/pedradb-sim/src/three_teeth_plants.rs calls wal_append
+ok    wal_sync: wal_sync lives and is used in crates/pedradb-core/src/wal/wal_state_kernel.rs
+ok    wal_sync: crates/pedradb-sim/src/three_teeth_plants.rs calls wal_sync
+ok    wal_ack: wal_ack lives and is used in crates/pedradb-core/src/wal/wal_state_kernel.rs
+ok    wal_ack: crates/pedradb-sim/src/three_teeth_plants.rs calls wal_ack
+ok    wal_rotate: wal_rotate lives and is used in crates/pedradb-core/src/wal/wal_state_kernel.rs
+ok    wal_rotate: crates/pedradb-sim/src/three_teeth_plants.rs calls wal_rotate
+ok    wal_acked_survives: acked_survives_every_legal_crash lives and is used in crates/pedradb-core/src/wal/wal_state_kernel.rs
+ok    wal_acked_survives: crates/pedradb-sim/src/three_teeth_plants.rs calls acked_survives_every_legal_crash
+ok    ae_f16_gate: ae_f16_safe lives and is used in crates/pedradb-raft/src/ae_kernel.rs
+ok    raft_recover_applied: recover_last_applied lives and is used in crates/pedradb-raft/src/commit_kernel.rs
+ok    raft_recover_applied: crates/pedradb-raft/src/lib_kernel.rs calls recover_last_applied
+ok    raft_recover_applied: live_caller crates/pedradb-raft/src/lib_kernel.rs calls recover_last_applied
+ok    raft_recover_applied: live handler open in crates/pedradb-raft/src/lib_kernel.rs
+ok    d1_put_ok: put_ok lives and is used in crates/pedradb-core/src/d1_modelo_kernel.rs
+ok    d1_put_ok: crates/pedradb-sim/src/three_teeth_plants.rs calls put_ok
+ok    d1_modelo: d1_modelo lives and is used in crates/pedradb-core/src/d1_modelo_kernel.rs
+ok    d1_modelo: crates/pedradb-sim/src/three_teeth_plants.rs calls d1_modelo
+ok    point_get_prefer: point_get_prefer_applied lives and is used in crates/pedradb-store/src/si_kernel.rs
+ok    point_get_prefer: crates/pedradb-store/src/lib_kernel.rs calls point_get_prefer_applied
+ok    point_get_prefer: live_caller crates/pedradb-store/src/lib_kernel.rs calls point_get_prefer_applied
+ok    point_get_prefer: live handler best_reader_for_key in crates/pedradb-store/src/lib_kernel.rs
+ok    point_get_wm: point_get_watermark lives and is used in crates/pedradb-store/src/si_kernel.rs
+ok    snap_txn_clear: snapshot_needs_txn_meta_clear lives and is used in crates/pedradb-store/src/snapshot_kernel.rs
+ok    snap_txn_clear: crates/pedradb-store/src/lib_kernel.rs calls snapshot_needs_txn_meta_clear
+ok    snap_txn_clear: live_caller crates/pedradb-store/src/lib_kernel.rs calls snapshot_needs_txn_meta_clear
+ok    snap_txn_clear: live handler on_install_snapshot in crates/pedradb-store/src/lib_kernel.rs
+ok    len_tag: value_len_tag lives and is used in crates/pedradb-store/src/index_val_kernel.rs
+ok    exact_children: exact_value_children lives and is used in crates/pedradb-store/src/index_val_kernel.rs
+ok    exact_children: crates/pedradb-store/src/layers_kernel.rs calls exact_value_children
+ok    exact_children: crates/pedradb-store/src/fdb_layers_kernel.rs calls exact_value_children
+ok    exact_children: live_caller crates/pedradb-store/src/layers_kernel.rs calls exact_value_children
+ok    exact_children: live handler table_index_value_range in crates/pedradb-store/src/layers_kernel.rs
+ok    exact_children: live_caller crates/pedradb-store/src/fdb_layers_kernel.rs calls exact_value_children
+ok    exact_children: live handler idx_children in crates/pedradb-store/src/fdb_layers_kernel.rs
+ok    compact_floor: compact_index_floor lives and is used in crates/pedradb-store/src/compact_kernel.rs
+ok    compact_floor: crates/pedradb-store/src/lib_kernel.rs calls compact_index_floor
+ok    compact_floor: live_caller crates/pedradb-store/src/lib_kernel.rs calls compact_index_floor
+ok    compact_floor: live handler compact_through in crates/pedradb-store/src/lib_kernel.rs
+ok    compact_ready: compact_ready lives and is used in crates/pedradb-store/src/compact_kernel.rs
+ok    compact_ready: crates/pedradb-store/src/lib_kernel.rs calls compact_ready
+ok    compact_ready: live_caller crates/pedradb-store/src/lib_kernel.rs calls compact_ready
+ok    compact_ready: live handler maybe_compact_logs in crates/pedradb-store/src/lib_kernel.rs
+ok    compact_peer_counts: peer_counts_for_compact lives and is used in crates/pedradb-store/src/compact_kernel.rs
+ok    compact_peer_counts: crates/pedradb-store/src/lib_kernel.rs calls peer_counts_for_compact
+ok    compact_peer_counts: live_caller crates/pedradb-store/src/lib_kernel.rs calls peer_counts_for_compact
+ok    compact_peer_counts: live handler maybe_compact_logs in crates/pedradb-store/src/lib_kernel.rs
+ok    write_ack_append: on_append lives and is used in crates/pedradb-core/src/write_ack_kernel.rs
+ok    write_ack_append: crates/pedradb-core/src/concurrent_kernel.rs calls on_append
+ok    write_ack_append: crates/pedradb-sim/src/three_teeth_plants.rs calls on_append
+ok    write_ack_barrier: on_barrier lives and is used in crates/pedradb-core/src/write_ack_kernel.rs
+ok    write_ack_barrier: crates/pedradb-core/src/concurrent_kernel.rs calls on_barrier
+ok    write_ack_barrier: crates/pedradb-sim/src/three_teeth_plants.rs calls on_barrier
+ok    write_ack_ack: on_ack lives and is used in crates/pedradb-core/src/write_ack_kernel.rs
+ok    write_ack_ack: crates/pedradb-core/src/concurrent_kernel.rs calls on_ack
+ok    write_ack_ack: crates/pedradb-sim/src/three_teeth_plants.rs calls on_ack
+ok    lsm_probe: lsm_probe lives and is used in crates/pedradb-core/src/lsm_r1_kernel.rs
+ok    lsm_probe: crates/pedradb-sim/src/three_teeth_plants.rs calls lsm_probe
+ok    lsm_compact: lsm_compact lives and is used in crates/pedradb-core/src/lsm_r1_kernel.rs
+ok    lsm_compact: crates/pedradb-sim/src/three_teeth_plants.rs calls lsm_compact
+ok    lsm_reopen: lsm_reopen lives and is used in crates/pedradb-core/src/lsm_r1_kernel.rs
+ok    lsm_reopen: crates/pedradb-sim/src/three_teeth_plants.rs calls lsm_reopen
+ok    r1_modelo: r1_modelo lives and is used in crates/pedradb-core/src/lsm_r1_kernel.rs
+ok    r1_modelo: crates/pedradb-sim/src/three_teeth_plants.rs calls r1_modelo
+ok    tx_abort: tx_abort lives and is used in crates/pedradb-store/src/t1_modelo_kernel.rs
+ok    tx_recover: tx_recover lives and is used in crates/pedradb-store/src/t1_modelo_kernel.rs
+ok    t1_modelo: t1_modelo lives and is used in crates/pedradb-store/src/t1_modelo_kernel.rs
+ok    c1_advance_commit: c1_advance_commit lives and is used in crates/pedradb-raft/src/c1_modelo_kernel.rs
+ok    c1_modelo: c1_modelo lives and is used in crates/pedradb-raft/src/c1_modelo_kernel.rs
+ok    write_admission: crates/pedradb-core/src/db_put_kernel.rs calls write_admission_idle
+ok    write_admit: crates/pedradb-core/src/db_kernel.rs calls write_admit
+ok    wal_sync_required: crates/pedradb-core/src/db_put_kernel.rs calls wal_sync_required
+ok    seq_exhausted: crates/pedradb-core/src/db_open_kernel.rs calls seq_exhausted
+ok    batch_is_empty: crates/pedradb-core/src/db_open_kernel.rs calls batch_is_empty
+ok    fence_on_sync_fail: crates/pedradb-core/src/db_open_kernel.rs calls fence_on_sync_fail
+ok    wal_commit_plan: crates/pedradb-core/src/db_open_kernel.rs calls wal_commit_plan
+ok    torn_head_empty_log: torn_head_is_empty_log lives and is used in crates/pedradb-core/src/write_admission_kernel.rs
+ok    torn_tail_needs_cut: crates/pedradb-core/src/db_open_kernel.rs calls torn_tail_needs_cut
+ok    seq_after_feed: crates/pedradb-core/src/db_open_kernel.rs calls seq_after_feed
+ok    pit_resync_rewrite: pit_resync_needs_rewrite lives and is used in crates/pedradb-core/src/write_admission_kernel.rs
+ok    dir_sync_required: dir_sync_required lives and is used in crates/pedradb-core/src/write_admission_kernel.rs
+ok    auto_flush_due: crates/pedradb-core/src/db_kernel.rs calls auto_flush_due
+ok    snap_empty: crates/pedradb-core/src/db_kernel.rs calls snap_is_empty
+ok    snap_below_watermark: crates/pedradb-core/src/db_put_kernel.rs calls snap_below_watermark
+ok    mem_point_decides: crates/pedradb-core/src/db_kernel.rs calls mem_point_decides
+ok    prefer_newer_seq: crates/pedradb-core/src/db_kernel.rs calls prefer_newer_seq
+ok    scale_probes: point_get_probes lives and is used in crates/pedradb-core/src/scale_kernel.rs
+ok    scale_warm: warm_cap_bytes lives and is used in crates/pedradb-core/src/scale_kernel.rs
+ok    scale_probes_worst: probes_worst lives and is used in crates/pedradb-core/src/scale_kernel.rs
+ok    scale_predict: crates/pedradb-core/examples/scale_spectrum.rs calls predict_get_ns
+ok    scale_happy_hot: crates/pedradb-core/examples/scale_spectrum.rs calls happy_hot_bps
+ok    scale_forecast: crates/pedradb-cli/src/main.rs calls scale_forecast
+ok    scale_forecast: live_caller crates/pedradb-cli/src/main.rs calls scale_forecast
+ok    scale_forecast: live handler scale_model_cmd in crates/pedradb-cli/src/main.rs
+ok    pipeline_drain_cap: crates/pedradb-core/src/concurrent_kernel.rs calls pipeline_drain_cap
+ok    async_merge_policy: crates/pedradb-core/src/concurrent_kernel.rs calls async_merge_policy
+ok    merge_eligible: crates/pedradb-core/src/concurrent_kernel.rs calls merge_eligible
+ok    flight_capped_window_us: crates/pedradb-core/src/concurrent_kernel.rs calls flight_capped_window_us
+ok    flight_capped_window_us: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls flight_capped_window_us
+ok    flight_capped_window_us: live handler effective_group_window_us in crates/pedradb-core/src/concurrent_kernel.rs
+ok    herd_collect_us: crates/pedradb-core/src/concurrent_kernel.rs calls herd_collect_us
+ok    herd_collect_us: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls herd_collect_us
+ok    herd_collect_us: live handler lead in crates/pedradb-core/src/concurrent_kernel.rs
+ok    seal_async_first_drain: crates/pedradb-core/src/concurrent_kernel.rs calls seal_async_first_drain
+ok    seal_async_first_drain: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls seal_async_first_drain
+ok    seal_async_first_drain: live handler lead in crates/pedradb-core/src/concurrent_kernel.rs
+ok    solo_leader_bypass: crates/pedradb-core/src/concurrent_kernel.rs calls solo_leader_bypass
+ok    solo_leader_bypass: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls solo_leader_bypass
+ok    solo_leader_bypass: live handler lead in crates/pedradb-core/src/concurrent_kernel.rs
+ok    herd_full: crates/pedradb-core/src/concurrent_kernel.rs calls herd_full
+ok    post_group_grace_us: crates/pedradb-core/src/concurrent_kernel.rs calls post_group_grace_us
+ok    post_group_grace_us: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls post_group_grace_us
+ok    post_group_grace_us: live handler lead in crates/pedradb-core/src/concurrent_kernel.rs
+ok    leftover_page_advice: leftover_page_advice lives and is used in crates/pedradb-core/src/leftover_page_kernel.rs
+ok    scan_readahead_window: scan_readahead_window lives and is used in crates/pedradb-core/src/scan_readahead_kernel.rs
+ok    serial_cs_ns: serial_cs_ns lives and is used in crates/pedradb-core/src/write_cycle_kernel.rs
+ok    spine_replay: spine_replay lives and is used in crates/pedradb-core/src/durability_spine_kernel.rs
+ok    cold_permille: cold_permille lives and is used in crates/pedradb-core/src/ratio_curve_kernel.rs
+ok    product_crown: product_crown lives and is used in crates/pedradb-core/src/product_crown_kernel.rs
+ok    reserve_frame: crates/pedradb-core/src/wal/writer_kernel.rs calls reserve_frame
+ok    reserve_frame: live_caller crates/pedradb-core/src/wal/writer_kernel.rs calls reserve_frame
+ok    reserve_frame: live handler reserve_pending in crates/pedradb-core/src/wal/writer_kernel.rs
+ok    pwrite_off_lock: crates/pedradb-core/src/wal/mod_kernel.rs calls pwrite_off_lock
+ok    pwrite_off_lock: live_caller crates/pedradb-core/src/wal/mod_kernel.rs calls pwrite_off_lock
+ok    pwrite_off_lock: live handler take_pwrite_job in crates/pedradb-core/src/wal/mod_kernel.rs
+ok    l0_compact_due: crates/pedradb-core/src/db_kernel.rs calls l0_compact_due
+ok    l0_compact_due: crates/pedradb-core/src/concurrent_kernel.rs calls l0_compact_due
+ok    l0_compact_due: crates/rocksdb-compat/src/lib_kernel.rs calls l0_compact_due
+ok    l0_compact_due: live_caller crates/pedradb-core/src/db_kernel.rs calls l0_compact_due
+ok    l0_compact_due: live handler maybe_auto_compact in crates/pedradb-core/src/db_kernel.rs
+ok    l0_compact_due: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls l0_compact_due
+ok    l0_compact_due: live handler maybe_compact_l0_at_trigger in crates/pedradb-core/src/concurrent_kernel.rs
+ok    l0_compact_due: live_caller crates/pedradb-core/src/concurrent_kernel.rs calls l0_compact_due
+ok    l0_compact_due: live handler drain_l0_below_trigger in crates/pedradb-core/src/concurrent_kernel.rs
+ok    l0_compact_due: live_caller crates/rocksdb-compat/src/lib_kernel.rs calls l0_compact_due
+ok    l0_compact_due: live handler spawn_compact_worker in crates/rocksdb-compat/src/lib_kernel.rs
+ok    workload_class: crates/pedradb-core/src/db_kernel.rs calls workload_class
+ok    workload_class: live_caller crates/pedradb-core/src/db_kernel.rs calls workload_class
+ok    workload_class: live handler workload_class_now in crates/pedradb-core/src/db_kernel.rs
+ok    filter_partition: crates/pedradb-core/src/bloom_kernel.rs calls filter_partition
+ok    filter_partition: live_caller crates/pedradb-core/src/bloom_kernel.rs calls filter_partition
+ok    filter_partition: live handler may_contain in crates/pedradb-core/src/bloom_kernel.rs
+ok    filter_partition: live_caller crates/pedradb-core/src/bloom_kernel.rs calls filter_partition
+ok    filter_partition: live handler insert in crates/pedradb-core/src/bloom_kernel.rs
+== store live (RFC-0152: queued RV/AE is the catalog kernel) ==
+ok    vote: live_callers crates/pedradb-store/src/lib_kernel.rs / on_request_vote
+ok    ae_entry: live_callers crates/pedradb-store/src/lib_kernel.rs / on_append_entries
+ok    grant_persist: live_callers crates/pedradb-store/src/lib_kernel.rs / on_request_vote
+ok    ae_ack: live_callers crates/pedradb-store/src/lib_kernel.rs / on_append_entries
+ok    commit_raft: live_callers crates/pedradb-store/src/lib_kernel.rs / broadcast_append_after_propose
+ok    joint_election: live_callers crates/pedradb-store/src/lib_kernel.rs / election_has_joint_quorum
+ok    joint_leave: live_callers crates/pedradb-store/src/lib_kernel.rs / pending_joint_on
+ok    pending_joint_node: live_callers crates/pedradb-store/src/lib_kernel.rs / pending_joint
+ok    joint_leave_ok: live_callers crates/pedradb-store/src/lib_kernel.rs / leave_joint
+ok    election_grant_from: live_callers crates/pedradb-store/src/lib_kernel.rs / on_request_vote_reply
+ok    joint_target: live_callers crates/pedradb-store/src/lib_kernel.rs / remove_member_joint
+ok    joint_add_target: live_callers crates/pedradb-store/src/lib_kernel.rs / add_member_joint
+ok    queued_leave_finish: live_callers crates/pedradb-store/src/lib_kernel.rs / finish_uncommitted_leave
+ok    disk_membership: live_callers crates/pedradb-store/src/lib_kernel.rs / bind_cluster_identity
+ok    high_water: live_callers crates/pedradb-store/src/lib_kernel.rs / open_single_node_with_rng_opts
+ok    participating_member: live_callers crates/pedradb-store/src/lib_kernel.rs / is_participating
+ok    identity_before_applied: live_callers crates/pedradb-store/src/lib_kernel.rs / apply_range
+ok    recover_apply: live_callers crates/pedradb-store/src/lib_kernel.rs / recover_apply_committed
+ok    recover_apply_node: live_callers crates/pedradb-store/src/lib_kernel.rs / recover_apply_committed
+ok    recover_truncate: live_callers crates/pedradb-store/src/lib_kernel.rs / persist_truncated_logs
+ok    recover_drop_orphan: live_callers crates/pedradb-store/src/lib_kernel.rs / persist_log_db
+ok    recover_abort: live_callers crates/pedradb-store/src/lib_kernel.rs / abort_leftover_intents
+ok    persist_meta: live_callers crates/pedradb-store/src/lib_kernel.rs / persist_u64_meta_all
+ok    persist_hist: live_callers crates/pedradb-store/src/lib_kernel.rs / persist_si_keys
+ok    persist_fence: live_callers crates/pedradb-store/src/lib_kernel.rs / fence_txn_aborted
+ok    force_clear: live_callers crates/pedradb-store/src/lib_kernel.rs / force_local_clear_keys
+ok    drop_preimages: live_callers crates/pedradb-store/src/lib_kernel.rs / drop_preimages
+ok    open_peer_disk: live_callers crates/pedradb-store/src/lib_kernel.rs / open_with_envs_rng_opts
+ok    local_id_member: live_callers crates/pedradb-store/src/lib_kernel.rs / local_node_id
+ok    reader_local: live_callers crates/pedradb-store/src/lib_kernel.rs / ids_first_if_local
+ok    discard_uncommitted: live_callers crates/pedradb-store/src/lib_kernel.rs / discard_uncommitted_from
+ok    discard_leader: live_callers crates/pedradb-store/src/lib_kernel.rs / finish_queued_propose
+ok    removed_step_down: live_callers crates/pedradb-store/src/lib_kernel.rs / install_applied_membership
+ok    hint_member: live_callers crates/pedradb-store/src/lib_kernel.rs / leader_hint
+ok    drop_repl_slot: live_callers crates/pedradb-store/src/lib_kernel.rs / install_applied_membership
+ok    drop_sent_through: live_callers crates/pedradb-store/src/lib_kernel.rs / remove_member
+ok    apply_step: live_callers crates/pedradb-store/src/lib_kernel.rs / apply_range
+== raft→store live_callers (RFC-0152 C) ==
+== tcb freeze (RFC-0056 P2.5) ==
+ok    tcb freeze: allowlisted crates/montanha-fdb-recipes/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-capi/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/adaptive_bloom_budget_kernel.rs — RFC-0320 Adaptive Bloom filter bit-budget allocator kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/arena_generational_aba_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/asymmetric_lease_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/asymmetric_partition_fencing_kernel.rs — RFC-0322 Asymmetric partition two-way fencing kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/asymmetric_partition_quorum_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/async_cancellation_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/async_pool_decoupling_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/atomic_generation_quiescence_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/backpressure_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/bidi_iterator_reversal_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/bitemporal_index_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/block_cache_disambiguation_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/block_cache_hysteretic_partition_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/bloom_hash_entropy_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/bloom_soundness_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/boot_id_lockfile_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/bounded_alloc_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/buggify_hooks_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/bulk_ingest_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/bulk_run_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/cache_canary_sentinel_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/cache_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/causal_history_bisimulation_kernel.rs — RFC-0327 Transaction causal history closure and bisimulation judge kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/causal_seam_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/change_feed_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/checkpoint_barrier_kernel.rs — RFC-0316 Point-in-time continuous checkpoint barrier kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/cloud_campaign_oracle_kernel.rs — RFC-0322 Cloud continuous campaign multi-fault oracle kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/cloud_hypervisor_pause_kernel.rs — RFC-0321 Cloud VM hypervisor pause and preemption detector kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/cloud_multitenant_fair_io_kernel.rs — RFC-0321 Cloud multi-tenant Deficit Round-Robin I/O scheduler kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/cloud_silent_corruption_quarantine_kernel.rs — RFC-0321 Cloud silent data corruption quarantine circuit breaker kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/cloud_storage_watchdog_kernel.rs — RFC-0322 Cloud block storage I/O watchdog kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/codec_inversion_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/codec_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/column_family_epoch_wal_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/compaction_banach_contraction_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/compaction_hysteresis_pacer_kernel.rs — RFC-0313 Compaction anti-thrashing hysteresis controller kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/compaction_lyapunov_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/compaction_merge_semilattice_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/compaction_overlap_matrix_kernel.rs — RFC-0314 Leveled compaction overlap minimization matrix kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/compaction_pacing_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/compaction_spectral_decoupling_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/comparator_axiom_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/composite_key_framing_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/concurrent_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/concurrent_open_kernel.rs — RFC-0157 stage 2 split; include! trampoline not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/concurrent_put_kernel.rs — RFC-0157 stage 2 split; include! trampoline not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/corrupt_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/crash_refinement_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/cross_cf_isolation_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/cross_device_barrier_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/crypto_nonce_space_time_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/db/lookup_archive_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/db_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/db_open_kernel.rs — RFC-0157 stage 2 split; include! trampoline not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/db_put_kernel.rs — RFC-0157 stage 2 split; include! trampoline not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/decay_model_kernel.rs — RFC-0315 Deterministic complexity decay model evaluator kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/decompression_expansion_cap_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/decompression_scratch_isolation_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/delta_restart_monotonicity_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/dense_time_scheduler_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/direct_io_contract_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/direct_io_sector_alignment_kernel.rs — RFC-0312 NVMe Direct-I/O physical sector alignment and slicing kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/disk_pressure_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/distributed_lease_epoch_kernel.rs — RFC-0319 Distributed leader lease epoch barrier kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/dma_generation_fence_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/domain_bounds_kernel.rs — RFC-0328 Domain bounds, newtypes & closed algebraic barriers
+ok    tcb freeze: allowlisted crates/pedradb-core/src/dual_log_recovery_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/enospc_drain_headroom_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/entropy_residue_verifier_kernel.rs — RFC-0318 Shannon entropy residue verifier kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/env_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/ephemeral_key_zeroization_kernel.rs — RFC-0318 Volatile key zeroization sentinel kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/error_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/extent_dispersal_vfs_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/fault_isolation_bitrot_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/fd_quota_governor_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/federated_cursor_continuity_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/ffi_provenance_guard_kernel.rs — RFC-0326 FFI raw buffer provenance and Miri Tree Borrows alignment kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/file_identity_superblock_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/foster_lyapunov_pacer_kernel.rs — RFC-0311 Foster-Lyapunov stochastic ingestion pacer kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/foster_lyapunov_stochastic_stall_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/front_coding_block_iter_kernel.rs — RFC-0316 Differential prefix front-coding block iterator kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/ftl_anti_amnesia_token_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/ftl_erase_boundary_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/group_commit_fair_share_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/group_commit_queue_kernel.rs — RFC-0309 Zero-Twin Loom concurrency synchronization kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/hardware_liar_resilience_kernel.rs — RFC-0326 Hardware fsync liar detection and persistent canary judge kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/health_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/history_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/host_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/hot_backup_inode_closure_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/hot_path_zero_alloc_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/io_rate_limiter_conservation_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/io_ring_completion_order_kernel.rs — RFC-0317 Asynchronous I/O completion queue ring order verifier kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/iterator_pinning_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/key_space_quotient_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/lease_expiration_guard_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/liveness_progress_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/lock_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/lsm_bisimulation_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/lyapunov_write_stall_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/manifest_confluence_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/manifest_delta_collapse_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/manifest_mod_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/manifest_version_edit_semiring_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/memtable_flush_bisimulation_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/memtable_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/memtable_retirement_handshake_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/merge_determinism_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/merge_operator_semiring_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/mesh_mtu_fragmentation_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/metal_fsync_barrier_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/mmap_quiescence_barrier_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/monotonic_clock_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/multitenant_namespace_fence_kernel.rs — RFC-0327 Multi-tenant homomorphic prefix isolation and range fence kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/multitenant_prefix_isolation_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/mutation_switch_kernel.rs — RFC-0329 Zero-recompile mutation switching and anti-vacuity kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/non_zeno_monotonic_clock_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/nvme_queue_poset_reorder_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/occ_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/omni_verification_oracle_kernel.rs — RFC-0324 Omni-tool cross-verification runtime arbitrator oracle kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/orphan_sst_cleanup_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/parallel_subcompaction_slice_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/pct_hooks_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/petri_net_background_liveness_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/pinned_slice_lease_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/posix_dir_sync_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/posix_syscall_contract_kernel.rs — RFC-0326 POSIX syscall fail-closed and durability barrier contract kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/preemptible_io_lease_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/prefix_delta_restart_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/prefix_free_key_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/prefix_seek_homomorphism_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/priority_inversion_freedom_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/quiescent_epoch_reclaim_kernel.rs — RFC-0313 Lock-free quiescent epoch memory reclamation kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/ram_preflush_barrier_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/ram_pressure_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/range_delete_merge_semiring_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/range_scan_linear_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/range_tombstone_bloom_dual_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/range_tombstone_fragmentation_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/rc11_relaxed_memory_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/read_amplification_bounds_kernel.rs — RFC-0320 Read amplification expected probe bounds oracle kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/readahead_consumption_feedback_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/release_acquire_cache_coherence_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/replication_catchup_boundary_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/resilient_tx_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/rmw_sched_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/rng_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/rolling_upgrade_homomorphism_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/rum_amplification_pareto_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/schema_homomorphism_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/sector_aligned_io_kernel.rs — RFC-0317 Vectorized scatter-gather sector aligner kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/separator_order_preservation_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/sequence_horizon_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/skiplist_weak_memory_barrier_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/snapshot_compaction_stability_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/snapshot_epoch_lease_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/snapshot_gc_hazard_pointer_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/snapshot_read_linearizability_kernel.rs — RFC-0319 Distributed snapshot read linearizability oracle kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/space_amplification_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/sparse_tuple_homomorphism_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/ssi_conflict_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/ssi_cycle_detector_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/sst/mod_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/sst/table_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/sst_block_decompression_guard_kernel.rs — RFC-0311 SST block decompression bomb and safe varint guard kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/sst_candidate_index_kernel.rs — RFC-0315 Leveled SST interval candidate index kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/sst_metadata_measure_monoid_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/sst_topological_entropy_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/starvation_freedom_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/structural_hardening_kernel.rs — RFC-0323 Structural hardening, domain types, smart constructors and typestate kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/super_atomic_multiget_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/sync_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/time_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/tombstone_soundness_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/tombstone_vacuum_cascade_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/torn_sector_heal_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/torn_write_recovery_kernel.rs — RFC-0310 Torn-write recovery and resilient frame parser kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/trans_crash_bisimulation_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/transactional_overlay_read_view_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/two_stage_compression_dictionary_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/twopc_confluence_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/tx_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/verified_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/verify_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/vlog_blob_gc_refinement_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/vlog_gc_barrier_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/vlog_hole_alignment_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/vlog_integrity_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/vlog_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/wal/format_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/wal/mod_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/wal/reader_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/wal/recover_choose_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/wal/writer_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/wal_archive_healing_kernel.rs — RFC-0327 Autonomic WAL archive healing and torn tail truncation kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/wal_buffer_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/wal_crash_recovery_reconciler_kernel.rs — RFC-0324 WAL crash recovery reconciler and torn/quarantine state machine kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/wal_crypto_chain_recovery_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/wal_durability_barrier_kernel.rs — RFC-0324 WAL physical durability barrier and ticket tracking kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/wal_prune_watermark_kernel.rs — RFC-0312 Multi-CF safe WAL pruning watermark and snapshot barrier kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/wal_segment_seal_kernel.rs — RFC-0314 Atomic WAL segment seal and preallocated extent kernel
+ok    tcb freeze: allowlisted crates/pedradb-core/src/write_diag_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-core/src/zeroize_entropy_kernel.rs — RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications
+ok    tcb freeze: allowlisted crates/pedradb-dcs/src/command_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-dcs/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-fold/src/applied_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-fold/src/bin/fold_smoke_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-fold/src/export_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-fold/src/follow_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-fold/src/host_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-fold/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-fold/src/roles_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-fold/src/ship_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-fold/src/store_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-fold/src/watch_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-http/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-io-uring/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-io-uring/src/ring_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-journal/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-raft/src/bin/pedra-raft-node_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-raft/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-raft/src/net_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-raft/src/persist_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-replicate/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-spec/src/composition_m2_kernel.rs — RFC-0332 M2 grand inductive invariant chaining and composition kernel
+ok    tcb freeze: allowlisted crates/pedradb-spec/src/fault_grid_crash_kernel.rs — RFC-0333 42-cell fault-grid and concurrent crash consistency verification kernel
+ok    tcb freeze: allowlisted crates/pedradb-spec/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-spec/src/syscall_glue_kernel.rs — RFC-0332 POSIX and io_uring contracted syscall glue verification kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/bin/cluster_real_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/bin/montanha-fdb-bench_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/bin/montanha-fdb-compare_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/bin/montanha-perf-gate_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/bin/montanha-scale-gate_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/bin/montanha-store-smoke_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/bin/montanha-tcp_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/client_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/fdb_compat_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/fdb_layers_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/layers_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/msg_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/tcp_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/three_teeth_queued_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-store/src/tls_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-stream/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bandit_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/gate_coverage_floor_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/gate_crash_injection_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/gate_exhaustive_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/gate_seed_ratchet_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/multiproc_trace_smoke_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/peer_msg_tcp_lab_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/world_buggify_matrix_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/world_hunt_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/world_invariant_soak_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/world_partition_storm_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/world_shrink_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/world_smoke_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/world_soak_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/bin/world_swarm_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/buggify_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/coverage_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/net_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/pct_concurrent_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/pct_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/schedule_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/scheduler_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/swarm_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/pedradb-world/src/wenv_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/rocksdb-compat/src/api_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/rocksdb-compat/src/backup_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/rocksdb-compat/src/checkpoint_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/rocksdb-compat/src/env_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/rocksdb-compat/src/knobs_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/rocksdb-compat/src/lib_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/rocksdb-compat/src/shape_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: allowlisted crates/rocksdb-compat/src/txn_kernel.rs — A2a glob rename 2026-09-14; trampoline/glue not a decision kernel
+ok    tcb freeze: 362 decision kernels accounted for
+== three teeth (RFC-0151: AS-IS + twin + named DST plant) ==
+ok    three teeth: ae_entry as_is ae_entry_action_as_is_rewrite_committed
+ok    three teeth: ae_entry plant ae_entry_action_on_live_queued_is_not_ok
+ok    three teeth: ae_ack as_is ae_ack_success_as_is
+ok    three teeth: ae_ack plant ae_ack_success_on_live_queued_is_not_ok
+ok    three teeth: joint_election as_is joint_election_ok_as_is
+ok    three teeth: joint_election plant joint_election_ok_on_live_queued_is_not_ok
+ok    three teeth: election_grant_from as_is election_grant_from_counts_as_is
+ok    three teeth: election_grant_from plant election_grant_from_counts_on_live_queued_is_not_ok
+ok    three teeth: queued_leave_finish as_is queued_leave_finish_ok_as_is
+ok    three teeth: queued_leave_finish plant queued_leave_finish_ok_on_live_queued_is_not_ok
+ok    three teeth: lease as_is lease_live_as_is
+ok    three teeth: lease plant lease_live_on_live_expiry_is_not_ok
+ok    three teeth: dcs_apply as_is dcs_apply_should_advance_as_is
+ok    three teeth: dcs_apply plant dcs_apply_should_advance_result_on_live_queued_is_not_ok
+ok    three teeth: dcs_advance_bool as_is dcs_apply_should_advance_as_is
+ok    three teeth: dcs_advance_bool plant as_is_freezes_on_cas
+ok    three teeth: lease_table as_is lease_table_expired_as_is
+ok    three teeth: lease_table plant as_is_unknown_is_immortal
+ok    three teeth: lease_next_id as_is next_lease_id_as_is
+ok    three teeth: lease_next_id plant as_is_reuse_reanimates
+ok    three teeth: txn as_is txn_commit_action_as_is
+ok    three teeth: txn plant txn_commit_action_on_live_abort_is_not_ok
+ok    three teeth: revert_clears_status as_is revert_clears_status_as_is
+ok    three teeth: revert_clears_status plant revert_clears_status_on_live_queued_is_not_ok
+ok    three teeth: revert_user_action as_is revert_user_action_as_is
+ok    three teeth: revert_user_action plant revert_user_action_on_live_queued_is_not_ok
+ok    three teeth: si_hist_repair as_is si_hist_repair_plan_as_is
+ok    three teeth: si_hist_repair plant si_hist_repair_plan_on_live_gen0_floor_leaves
+ok    three teeth: hist_load_fate as_is hist_load_fate_as_is
+ok    three teeth: hist_load_fate plant hist_load_fate_on_live_merge_and_corrupt
+ok    three teeth: compact as_is may_compact_through_as_is
+ok    three teeth: compact plant may_compact_through_on_live_queued_is_not_ok
+ok    three teeth: snapshot as_is snapshot_touches_user_key_as_is
+ok    three teeth: snapshot plant snapshot_touches_user_key_on_live_queued_is_not_ok
+ok    three teeth: si_reader as_is si_reader_beats_as_is
+ok    three teeth: si_reader plant si_reader_beats_on_live_queued_is_not_ok
+ok    three teeth: index_val as_is len_pref_value_as_is
+ok    three teeth: index_val plant len_pref_value_on_live_queued_is_not_ok
+ok    three teeth: changelog as_is changelog_needs_sst_rebuild_as_is
+ok    three teeth: changelog plant changelog_needs_sst_rebuild_on_live_queued_is_not_ok
+ok    three teeth: range_covers as_is range_tombstone_covers_as_is
+ok    three teeth: range_covers plant range_tombstone_covers_on_live_queued_is_not_ok
+ok    three teeth: write_op_range_end as_is write_op_range_end_as_is
+ok    three teeth: write_op_range_end plant write_op_range_end_on_live_stage_unapplied_is_not_ok
+ok    three teeth: merge_sift as_is sift_step_as_is
+ok    three teeth: merge_sift plant merge_heap_sift_kernel_three_teeth
+ok    three teeth: prefix as_is prefix_exclusive_end_as_is
+ok    three teeth: prefix plant prefix_exclusive_end_on_live_queued_is_not_ok
+ok    three teeth: stream_cursor as_is ack_in_order_as_is
+ok    three teeth: stream_cursor plant ack_in_order_on_live_stream_is_not_ok
+ok    three teeth: stream_next_seq as_is next_seq_as_is
+ok    three teeth: stream_next_seq plant next_seq_on_live_stream_is_not_ok
+ok    three teeth: bearer as_is bearer_token_from_value_as_is
+ok    three teeth: bearer plant bearer_token_from_value_on_live_http_is_not_ok
+ok    three teeth: content_length as_is keep_body_without_cl_as_is
+ok    three teeth: content_length plant keep_body_without_cl_on_live_http_is_not_ok
+ok    three teeth: invalid_cl_zero as_is invalid_cl_as_zero_as_is
+ok    three teeth: invalid_cl_zero plant invalid_cl_as_zero_on_live_http_is_not_ok
+ok    three teeth: cl_repeat_conflict as_is content_length_repeat_ok_as_is
+ok    three teeth: cl_repeat_conflict plant content_length_repeat_ok_on_live_http_is_not_ok
+ok    three teeth: short_body_vs_cl as_is short_body_vs_cl_is_error_as_is
+ok    three teeth: short_body_vs_cl plant short_body_vs_cl_is_error_on_live_http_is_not_ok
+ok    three teeth: fail_closed as_is parse_error_writes_status_as_is
+ok    three teeth: fail_closed plant parse_error_writes_status_on_live_http_is_not_ok
+ok    three teeth: form_plus as_is form_decode_as_is
+ok    three teeth: form_plus plant form_decode_on_live_http_is_not_ok
+ok    three teeth: origin_path as_is origin_form_path_as_is
+ok    three teeth: origin_path plant origin_form_path_on_live_http_is_not_ok
+ok    three teeth: path_after_authority as_is path_after_authority_as_is
+ok    three teeth: path_after_authority plant authority_atoms_discriminate_as_is
+ok    three teeth: strip_http_authority as_is strip_http_authority_as_is
+ok    three teeth: strip_http_authority plant authority_atoms_discriminate_as_is
+ok    three teeth: request_target_authority as_is request_target_authority_as_is
+ok    three teeth: request_target_authority plant host_authority_mismatch_on_live_http_is_not_ok
+ok    three teeth: host_authority_mismatch as_is host_authority_mismatch_as_is
+ok    three teeth: host_authority_mismatch plant host_authority_mismatch_on_live_http_is_not_ok
+ok    three teeth: split_host_port as_is split_host_port_as_is
+ok    three teeth: split_host_port plant authority_atoms_discriminate_as_is
+ok    three teeth: strip_uri_fragment as_is strip_uri_fragment_as_is
+ok    three teeth: strip_uri_fragment plant origin_strips_absolute_and_network
+ok    three teeth: strip_authority_for_routing as_is strip_authority_for_routing_as_is
+ok    three teeth: strip_authority_for_routing plant strip_flag
+ok    three teeth: form_plus_byte as_is form_plus_byte_as_is
+ok    three teeth: form_plus_byte plant plus_is_space_before_percent
+ok    three teeth: from_hex as_is from_hex_as_is
+ok    three teeth: from_hex plant hex_letters_decode_as_is_does_not
+ok    three teeth: plus_before_percent as_is plus_before_percent_as_is
+ok    three teeth: plus_before_percent plant plus_order_flag_discriminates_as_is
+ok    three teeth: query_values_conflict as_is query_values_conflict_as_is
+ok    three teeth: query_values_conflict plant f155_query_conflict
+ok    three teeth: query_u64_conflict as_is query_u64_conflict_as_is
+ok    three teeth: query_u64_conflict plant f155_query_conflict
+ok    three teeth: query_part_is_bare_name as_is query_part_is_bare_name_as_is
+ok    three teeth: query_part_is_bare_name plant f155_query_conflict
+ok    three teeth: ascii_lower as_is ascii_lower_as_is
+ok    three teeth: ascii_lower plant ascii_fold_discriminates_as_is
+ok    three teeth: ascii_upper as_is ascii_upper_as_is
+ok    three teeth: ascii_upper plant ascii_fold_discriminates_as_is
+ok    three teeth: is_bearer_scheme as_is is_bearer_scheme_as_is
+ok    three teeth: is_bearer_scheme plant bearer_case_insensitive
+ok    three teeth: is_non_bearer_auth_scheme as_is is_non_bearer_auth_scheme_as_is
+ok    three teeth: is_non_bearer_auth_scheme plant non_bearer_scheme_gate
+ok    three teeth: normalize_http_method as_is normalize_http_method_as_is
+ok    three teeth: normalize_http_method plant kv_http_method_case_insensitive
+ok    three teeth: authorization_matches as_is authorization_matches_as_is
+ok    three teeth: authorization_matches plant authorization_matches_on_live_http_is_not_ok
+ok    three teeth: isolated as_is isolated_id_matches_as_is
+ok    three teeth: isolated plant isolated_id_matches_on_live_fold_is_not_ok
+ok    three teeth: isolated_child as_is isolated_child_byte_as_is
+ok    three teeth: isolated_child plant theorem_next_byte_domain
+ok    three teeth: children as_is packed_children_end_as_is
+ok    three teeth: children plant packed_children_end_on_live_subspace_is_not_ok
+ok    three teeth: fields as_is encode_fields_as_is
+ok    three teeth: fields plant encode_fields_on_live_directory_is_not_ok
+ok    three teeth: journal_pin as_is may_advance_pin_as_is
+ok    three teeth: journal_pin plant may_advance_pin_on_live_journal_is_not_ok
+ok    three teeth: journal_catch_up_pin as_is catch_up_pins_on_read_as_is
+ok    three teeth: journal_catch_up_pin plant catch_up_pins_on_read_on_live_journal_is_not_ok
+ok    three teeth: journal_fold_pin as_is fold_pins_on_read_as_is
+ok    three teeth: journal_fold_pin plant fold_pins_on_read_on_live_journal_is_not_ok
+ok    three teeth: journal_next_pin as_is next_pin_as_is
+ok    three teeth: journal_next_pin plant next_pin_on_live_journal_is_not_ok
+ok    three teeth: pack as_is pack_cut_tag_as_is
+ok    three teeth: pack plant pack_cut_tag_on_live_subspace_is_not_ok
+ok    three teeth: children_start as_is packed_children_start_as_is
+ok    three teeth: children_start plant packed_children_start_on_raw_parent_is_not_ok
+ok    three teeth: children_half_open as_is key_in_half_open_as_is
+ok    three teeth: children_half_open plant key_in_half_open_on_missing_end_is_not_ok
+ok    three teeth: children_next_byte as_is next_byte_in_packed_children_as_is
+ok    three teeth: children_next_byte plant theorem_next_byte_domain
+ok    three teeth: fields_kept as_is field_kept_as_is
+ok    three teeth: fields_kept plant field_kept_not_nul_offset
+ok    three teeth: fields_suffix as_is child_bytes_after_as_is
+ok    three teeth: fields_suffix plant unpack_keeps_nul_inside_id
+ok    three teeth: fields_decode as_is decode_fields_as_is
+ok    three teeth: fields_decode plant decode_fields_on_raw_nul_split_is_not_ok
+ok    three teeth: fields_pair_nul as_is encode_fields_as_is
+ok    three teeth: fields_pair_nul plant payload_round_trips_nul_zip
+ok    three teeth: ship_guard as_is pull_plan_as_is
+ok    three teeth: ship_guard plant pull_plan_on_live_ship_is_not_ok
+ok    three teeth: ship_stamp as_is pull_plan_as_is
+ok    three teeth: ship_stamp plant stamp_changed_on_rewrite_is_not_ok
+ok    three teeth: bloom_header as_is bloom_header_ok_as_is
+ok    three teeth: bloom_header plant bloom_header_ok_on_live_decode_is_not_ok
+ok    three teeth: bloom_insert as_is insert_as_is
+ok    three teeth: bloom_insert plant insert_on_live_sst_is_not_ok
+ok    three teeth: bloom_may_contain as_is may_contain_as_is
+ok    three teeth: bloom_may_contain plant may_contain_on_live_sst_is_not_ok
+ok    three teeth: scan_guard as_is scan_reads_file_as_is
+ok    three teeth: scan_guard plant scan_reads_file_on_live_sst_is_not_ok
+ok    three teeth: si_read as_is snapshot_read_plan_as_is
+ok    three teeth: si_read plant snapshot_read_plan_on_live_queued_is_not_ok
+ok    three teeth: fold_range as_is fold_event_hides_key_as_is
+ok    three teeth: fold_range plant fold_event_hides_key_on_live_fold_is_not_ok
+ok    three teeth: manifest_recover as_is sst_recover_action_as_is_scan_on_damage
+ok    three teeth: manifest_recover plant sst_recover_action_on_live_missing_sst_is_not_ok
+ok    three teeth: reopen_outcome as_is reopen_outcome_as_is_silent
+ok    three teeth: reopen_outcome plant reopen_outcome_on_live_crc_is_not_ok
+ok    three teeth: wal_rotate_decision as_is wal_rotate_decision_as_is_ignore_pin
+ok    three teeth: wal_rotate_decision plant wal_segment_is_empty_on_live_zero_is_not_ok
+ok    three teeth: occ_snap_published as_is occ_snap_uses_published_as_is
+ok    three teeth: occ_snap_published plant occ_snap_uses_published_on_live_inflight_is_not_ok
+ok    three teeth: group_commit as_is occ_conflict_as_is_serialized
+ok    three teeth: group_commit plant occ_conflict_on_live_group_is_not_ok
+ok    three teeth: group_fence as_is fence_publish_seq_as_is
+ok    three teeth: group_fence plant fence_publish_seq_on_live_group_is_not_ok
+ok    three teeth: compact_decision as_is compact_pick_as_is
+ok    three teeth: compact_decision plant compact_pick_on_live_merge_is_not_ok
+ok    three teeth: compact_retention as_is point_version_fate_as_is_drop_under_snapshot
+ok    three teeth: compact_retention plant point_version_fate_on_live_snapshot_is_not_ok
+ok    three teeth: apply_put_plan as_is apply_put_plan_as_is
+ok    three teeth: apply_put_plan plant apply_put_plan_on_live_reserved_and_floor
+ok    three teeth: durable_term as_is durable_term_if_newer_as_is
+ok    three teeth: durable_term plant durable_term_rollback_on_live_queued_is_not_ok
+ok    three teeth: vlog_recover as_is vlog_recover_action_as_is_ignore_swing
+ok    three teeth: vlog_recover plant vlog_recover_action_on_live_swing_is_not_ok
+ok    three teeth: blob_gc_pick as_is blob_gc_action_as_is_rewrite_active
+ok    three teeth: blob_gc_pick plant blob_gc_action_on_live_active_is_not_ok
+ok    three teeth: tx_glue as_is tx_range_action_as_is_local_only
+ok    three teeth: tx_glue plant tx_range_action_on_live_majority_is_not_ok
+ok    three teeth: rpc_mode as_is allow_direct_rpc_as_is
+ok    three teeth: rpc_mode plant allow_direct_rpc_on_live_queued_is_not_ok
+ok    three teeth: group_publish as_is may_publish_group_as_is
+ok    three teeth: group_publish plant may_publish_group_on_live_group_is_not_ok
+ok    three teeth: rwlock_client_may_mutate as_is rwlock_client_may_mutate_as_is
+ok    three teeth: rwlock_client_may_mutate plant rwlock_client_may_mutate_on_live_off_lock_is_not_ok
+ok    three teeth: forall_schedules as_is forall_schedules_admitted_as_is
+ok    three teeth: forall_schedules plant forall_schedules_admitted_on_live_group_is_not_ok
+ok    three teeth: l28_durability as_is l28_durability_ok_as_is
+ok    three teeth: l28_durability plant l28_durability_ok_on_live_store_is_not_ok
+ok    three teeth: sched_plant_joint as_is plant_joint_schedule_ok_as_is
+ok    three teeth: sched_plant_joint plant world_opt_in_schedule_emits_plant_committed_joint
+ok    three teeth: world_trajectory as_is trajectory_violation_as_is
+ok    three teeth: world_trajectory plant trajectory_violation_on_applied_regression_is_not_ok
+ok    three teeth: world_trajectory_fold as_is check_trajectory_as_is
+ok    three teeth: world_trajectory_fold plant check_trajectory_on_resurrected_watermark_is_not_ok
+ok    three teeth: liveness_claim as_is liveness_admitted_as_is
+ok    three teeth: liveness_claim plant liveness_admitted_on_live_store_is_not_ok
+ok    three teeth: fsync_promote as_is fsync_promotes_pending_as_is
+ok    three teeth: fsync_promote plant fsync_promotes_pending_on_live_sim_is_not_ok
+ok    three teeth: media_durable as_is media_durable_admitted_as_is
+ok    three teeth: media_durable plant media_durable_admitted_on_live_db_is_not_ok
+ok    three teeth: tcg_guest as_is tcg_guest_admitted_as_is
+ok    three teeth: tcg_guest plant tcg_guest_admitted_on_live_world_is_not_ok
+ok    three teeth: fdatasync_rc as_is fdatasync_rc_ok_as_is
+ok    three teeth: fdatasync_rc plant fdatasync_rc_ok_on_live_posix_is_not_ok
+ok    three teeth: cqe_res as_is cqe_res_ok_as_is
+ok    three teeth: cqe_res plant cqe_res_ok_on_live_uring_is_not_ok
+ok    three teeth: cqe_tags as_is next_user_data_as_is
+ok    three teeth: cqe_tags plant unique_tags_discard_leftover_same_opcode
+ok    three teeth: cqe_leftover as_is cqe_act_as_is
+ok    three teeth: cqe_leftover plant cqe_act_as_is_adopts_leftover
+ok    three teeth: cqe_submit as_is submit_complete_act_as_is
+ok    three teeth: cqe_submit plant harvest_on_submit_err_uses_cqe
+ok    three teeth: cqe_ring_refusal as_is cqe_ring_model_admitted_as_is
+ok    three teeth: cqe_ring_refusal plant cqe_ring_model_is_not_admitted
+ok    three teeth: c_len as_is c_len_admitted_as_is
+ok    three teeth: c_len plant c_len_admitted_on_live_capi_is_not_ok
+ok    three teeth: crc_match as_is crc_match_ok_as_is
+ok    three teeth: crc_match plant crc_match_ok_on_live_wal_is_not_ok
+ok    three teeth: sst_crc as_is sst_crc_fate_as_is
+ok    three teeth: sst_crc plant sst_crc_fate_on_live_sst_is_not_ok
+ok    three teeth: cf_encode_effective as_is cf_encode_effective_as_is
+ok    three teeth: cf_encode_effective plant cf_encode_effective_on_live_default_raw_is_not_ok
+ok    three teeth: encode_cf_key as_is encode_cf_key_as_is
+ok    three teeth: encode_cf_key plant encode_cf_key_on_live_sst_bounds_is_not_ok
+ok    three teeth: decode_cf_key as_is decode_cf_key_as_is
+ok    three teeth: decode_cf_key plant decode_cf_key_on_live_sst_bounds_is_not_ok
+ok    three teeth: infer_sst_cf as_is infer_sst_cf_as_is
+ok    three teeth: infer_sst_cf plant infer_sst_cf_on_live_flush_tag_is_not_ok
+ok    three teeth: compact_rewrites_sst_cf as_is compact_rewrites_sst_cf_as_is
+ok    three teeth: compact_rewrites_sst_cf plant compact_rewrites_sst_cf_on_live_meta_is_not_ok
+ok    three teeth: ikey_pack as_is pack_sequence_and_type_as_is
+ok    three teeth: ikey_pack plant pack_sequence_and_type_on_live_db_is_not_ok
+ok    three teeth: pin_gc as_is gc_oldest_from_pin_as_is
+ok    three teeth: pin_gc plant gc_oldest_from_pin_on_live_reclaim_is_not_ok
+ok    three teeth: l28_napply_retry as_is l28_tcp_napply_retry_admitted_as_is
+ok    three teeth: l28_napply_retry plant l28_real_tcp_removed_recover_apply
+ok    three teeth: zero_glue as_is zero_glue_admitted_as_is
+ok    three teeth: zero_glue plant zero_glue_admitted_on_live_db_is_not_ok
+ok    three teeth: lock_interleavings as_is lock_interleavings_admitted_as_is
+ok    three teeth: lock_interleavings plant claim_lock_interleavings_refused_after_put
+ok    three teeth: leveling as_is level_target_bytes_as_is
+ok    three teeth: leveling plant level_target_bytes_on_live_deep_level_is_not_ok
+ok    three teeth: d1_durability as_is d1_holds_as_is
+ok    three teeth: d1_durability plant d1_as_is_does_not_imply_d1
+ok    three teeth: r1_no_resurrection as_is r1_answer_ok_as_is
+ok    three teeth: r1_no_resurrection plant r1_as_is_does_not_imply_r1
+ok    three teeth: t1_atomicity as_is t1_holds_as_is
+ok    three teeth: t1_atomicity plant t1_as_is_does_not_imply_t1
+ok    three teeth: c1_quorum as_is c1_holds_as_is
+ok    three teeth: c1_quorum plant c1_as_is_does_not_imply_c1
+ok    three teeth: leveled_enabled as_is leveled_enabled_as_is
+ok    three teeth: leveled_enabled plant leveled_env_switch_is_not_ok
+ok    three teeth: leveling_disjoint as_is is_disjoint_as_is
+ok    three teeth: leveling_disjoint plant is_disjoint_on_live_stack_is_not_ok
+ok    three teeth: leveling_overlaps as_is overlaps_as_is
+ok    three teeth: leveling_overlaps plant overlaps_on_live_slice_is_not_ok
+ok    three teeth: leveling_total_bytes as_is total_bytes_as_is
+ok    three teeth: leveling_total_bytes plant total_bytes_on_live_level_is_not_ok
+ok    three teeth: tombstone_reaches_window as_is tombstone_reaches_window_as_is
+ok    three teeth: tombstone_reaches_window plant half_open_boundaries
+ok    three teeth: key_in_window as_is key_in_window_as_is
+ok    three teeth: key_in_window plant key_in_window_on_live_window_is_not_ok
+ok    three teeth: point_bounds_overlap as_is point_bounds_overlap_as_is
+ok    three teeth: point_bounds_overlap plant point_bounds_overlap_on_live_bounds_is_not_ok
+ok    three teeth: sst_block_crc as_is sst_block_crc_ok_as_is
+ok    three teeth: sst_block_crc plant sst_block_crc_uses_crc_match_ok
+ok    three teeth: is_length_resyncable as_is is_length_resyncable_as_is
+ok    three teeth: is_length_resyncable plant resync_only_length_class
+ok    three teeth: physical_payload_act as_is physical_payload_act_as_is
+ok    three teeth: physical_payload_act plant physical_oversize_and_torn
+ok    three teeth: fragment_act as_is fragment_act_as_is
+ok    three teeth: fragment_act plant orphan_middle_last_fail_stop
+ok    three teeth: from_record_type as_is from_record_type_as_is
+ok    three teeth: from_record_type plant from_record_type_on_wire_type_is_not_ok
+ok    three teeth: compact_split as_is compact_should_split_as_is
+ok    three teeth: compact_split plant compact_should_split_bounds_one_output_file
+ok    three teeth: compact_split_at as_is compact_should_split_at_as_is
+ok    three teeth: compact_split_at plant compact_split_mutants_never_split_is_not_ok
+ok    three teeth: lone_tombstone as_is lone_tombstone_fate_as_is_ignore_bottommost
+ok    three teeth: lone_tombstone plant theorem_lone_tombstone_on_finite_domain
+ok    three teeth: changelog_should_store as_is changelog_should_store_as_is
+ok    three teeth: changelog_should_store plant debounce_as_is_ignores_interval
+ok    three teeth: changelog_budget as_is changelog_rebuild_within_budget_as_is
+ok    three teeth: changelog_budget plant rebuild_budget_bounds_materialization
+ok    three teeth: changelog_durable_commit as_is changelog_durable_commit_fate_as_is
+ok    three teeth: changelog_durable_commit plant changelog_durable_commit_fate_on_live_client_sync_counts
+ok    three teeth: wal_archive_delete as_is wal_archive_delete_plan_as_is
+ok    three teeth: wal_archive_delete plant wal_archive_delete_plan_on_live_unpublished_window_keeps
+ok    three teeth: bulk_manifest_persist as_is bulk_manifest_persist_fate_as_is
+ok    three teeth: bulk_manifest_persist plant bulk_manifest_persist_fate_on_live_sync_persists_now
+ok    three teeth: point_cache_validity as_is point_cache_validity_as_is
+ok    three teeth: point_cache_validity plant point_cache_validity_on_live_publish_advanced_skips_fill
+ok    three teeth: point_tombstone as_is point_tombstone_plan_as_is
+ok    three teeth: point_tombstone plant point_tombstone_plan_on_live_range_hidden_serves_deleted
+ok    three teeth: dir_sync_plan as_is dir_sync_plan_as_is
+ok    three teeth: dir_sync_plan plant dir_sync_plan_on_live_sync_mode_pays_now
+ok    three teeth: fence_admission as_is fence_admission_plan_as_is
+ok    three teeth: fence_admission plant fence_admission_plan_on_live_fenced_refuses
+ok    three teeth: fence_record as_is fence_record_plan_as_is
+ok    three teeth: fence_record plant fence_record_plan_on_live_first_fence_owns_report
+ok    three teeth: group_batch_sync as_is group_batch_sync_plan_as_is
+ok    three teeth: group_batch_sync plant group_batch_sync_plan_on_live_sync_batch_forces_group
+ok    three teeth: pit_resync_rewrite_plan as_is pit_resync_rewrite_plan_as_is
+ok    three teeth: pit_resync_rewrite_plan plant pit_resync_rewrite_plan_on_live_resync_rewrites
+ok    three teeth: parked_pair as_is parked_pair_plan_as_is
+ok    three teeth: parked_pair plant parked_pair_plan_on_live_short_queue_waits
+ok    three teeth: auto_flush_gate as_is auto_flush_gate_as_is
+ok    three teeth: auto_flush_gate plant auto_flush_gate_on_live_both_under_skips_scan
+ok    three teeth: mem_auto_flush as_is mem_auto_flush_plan_as_is
+ok    three teeth: mem_auto_flush plant mem_auto_flush_plan_on_live_armed_over_limit_flushes
+ok    three teeth: manifest_publish_plan as_is manifest_publish_plan_as_is
+ok    three teeth: manifest_publish_plan plant manifest_publish_plan_on_live_unsynced_sst_holds
+ok    three teeth: changelog_store_plan as_is changelog_store_plan_as_is
+ok    three teeth: changelog_store_plan plant changelog_store_plan_on_live_failed_publish_skips
+ok    three teeth: parked_pop_plan as_is parked_pop_plan_as_is
+ok    three teeth: parked_pop_plan plant parked_pop_plan_on_live_nonempty_queue_pops
+ok    three teeth: put_handler_plan as_is put_handler_plan_as_is
+ok    three teeth: put_handler_plan plant put_handler_plan_on_live_empty_skips_wal
+ok    three teeth: open_wal_head_plan as_is open_wal_head_plan_as_is
+ok    three teeth: open_wal_head_plan plant open_wal_head_plan_on_live_missing_skips
+ok    three teeth: group_ack_plan as_is group_ack_plan_as_is
+ok    three teeth: group_ack_plan plant group_ack_plan_on_live_io_fail_fences
+ok    three teeth: lock_alphabet_linearizes_n2 as_is lock_alphabet_linearizes_n2_as_is
+ok    three teeth: lock_alphabet_linearizes_n2 plant lock_alphabet_n2_linearizes_write_then_submit
+ok    three teeth: cf_flush_plan as_is cf_flush_plan_as_is
+ok    three teeth: cf_flush_plan plant cf_flush_plan_on_live_over_limit_flushes
+ok    three teeth: flusher_gate_plan as_is flusher_gate_plan_as_is
+ok    three teeth: flusher_gate_plan plant flusher_gate_plan_on_live_workerless_parks_nowhere
+ok    three teeth: parked_debt_plan as_is parked_debt_plan_as_is
+ok    three teeth: parked_debt_plan plant parked_debt_plan_on_live_at_cap_parks
+ok    three teeth: flush_plan as_is flush_plan_as_is_lose_tail
+ok    three teeth: flush_plan plant theorem_flush_plan_on_finite_domain
+ok    three teeth: first_install as_is first_install_action_as_is_proceed_always
+ok    three teeth: first_install plant f196_first_install_tolerance
+ok    three teeth: probe_order_covering as_is probe_order_covering_as_is
+ok    three teeth: probe_order_covering plant probe_order_covering_on_live_gate_is_not_ok
+ok    three teeth: group_validate as_is occ_conflict_as_is_serialized
+ok    three teeth: group_validate plant group_members_are_simultaneous
+ok    three teeth: occ_member_fate as_is occ_member_fate_as_is
+ok    three teeth: occ_member_fate plant occ_member_fate_on_live_conflict_is_not_ok
+ok    three teeth: occ_batch_plan as_is occ_batch_plan_as_is
+ok    three teeth: occ_batch_plan plant occ_batch_plan_on_live_lagging_is_not_ok
+ok    three teeth: pct_default_depth as_is pct_campaign_default_depth_as_is
+ok    three teeth: pct_default_depth plant pct_depth_is_not_forall_schedules
+ok    three teeth: default_pct_depth_raised as_is default_pct_depth_raised_as_is
+ok    three teeth: default_pct_depth_raised plant pct_depth_is_not_forall_schedules
+ok    three teeth: fsync_lie_tcg as_is fsync_lie_closes_tcg_guest_as_is
+ok    three teeth: fsync_lie_tcg plant fsync_ok_is_not_media_proof
+ok    three teeth: stacked_liars as_is stacked_fsync_liars_admitted_as_is
+ok    three teeth: stacked_liars plant fsync_ok_is_not_media_proof
+ok    three teeth: env_crash as_is crash_legal_as_is
+ok    three teeth: env_crash plant env_crash_on_live_recording_is_not_ok
+ok    three teeth: env_append as_is crash_legal_as_is
+ok    three teeth: env_append plant env_crash_on_live_recording_is_not_ok
+ok    three teeth: env_sync as_is sync_lying_promotes_as_is
+ok    three teeth: env_sync plant env_crash_on_live_recording_is_not_ok
+ok    three teeth: env_barrier_floor as_is crash_legal_as_is
+ok    three teeth: env_barrier_floor plant env_crash_on_live_recording_is_not_ok
+ok    three teeth: env_no_invented as_is crash_legal_as_is
+ok    three teeth: env_no_invented plant env_crash_on_live_recording_is_not_ok
+ok    three teeth: env_honest_sync as_is sync_lying_promotes_as_is
+ok    three teeth: env_honest_sync plant env_crash_on_live_recording_is_not_ok
+ok    three teeth: wal_state as_is inv_wal_as_is
+ok    three teeth: wal_state plant wal_inv_on_live_recording_is_not_ok
+ok    three teeth: wal_append as_is wal_append_as_is
+ok    three teeth: wal_append plant wal_inv_on_live_recording_is_not_ok
+ok    three teeth: wal_sync as_is wal_sync_as_is
+ok    three teeth: wal_sync plant wal_inv_on_live_recording_is_not_ok
+ok    three teeth: wal_ack as_is wal_ack_as_is
+ok    three teeth: wal_ack plant wal_inv_on_live_recording_is_not_ok
+ok    three teeth: wal_rotate as_is wal_rotate_as_is
+ok    three teeth: wal_rotate plant wal_inv_on_live_recording_is_not_ok
+ok    three teeth: wal_acked_survives as_is acked_survives_as_is
+ok    three teeth: wal_acked_survives plant wal_inv_on_live_recording_is_not_ok
+ok    three teeth: ae_f16_gate as_is ae_f16_safe_as_is
+ok    three teeth: ae_f16_gate plant ae_f16_safe_on_live_queued_is_not_ok
+ok    three teeth: raft_recover_applied as_is recover_last_applied_as_is
+ok    three teeth: raft_recover_applied plant recover_last_applied_on_live_queued_is_not_ok
+ok    three teeth: d1_put_ok as_is put_ok_as_is
+ok    three teeth: d1_put_ok plant d1_modelo_on_live_recording_is_not_ok
+ok    three teeth: d1_modelo as_is d1_modelo_as_is
+ok    three teeth: d1_modelo plant d1_modelo_on_live_recording_is_not_ok
+ok    three teeth: point_get_prefer as_is point_get_prefer_applied_as_is
+ok    three teeth: point_get_prefer plant point_get_uses_range_applied
+ok    three teeth: point_get_wm as_is point_get_watermark_as_is
+ok    three teeth: point_get_wm plant point_get_uses_range_applied
+ok    three teeth: snap_txn_clear as_is snapshot_needs_txn_meta_clear_as_is
+ok    three teeth: snap_txn_clear plant always_clear_txn_meta
+ok    three teeth: len_tag as_is value_len_tag_as_is
+ok    three teeth: len_tag plant len_tag_is_injective
+ok    three teeth: exact_children as_is exact_value_children_as_is
+ok    three teeth: exact_children plant as_is_leaks_nul_sibling
+ok    three teeth: compact_floor as_is compact_index_floor_as_is
+ok    three teeth: compact_floor plant as_is_floor_re_requests_compacted_index
+ok    three teeth: compact_ready as_is compact_ready_as_is
+ok    three teeth: compact_ready plant as_is_ready_at_zero_compacts_nothing
+ok    three teeth: compact_peer_counts as_is peer_counts_for_compact_as_is
+ok    three teeth: compact_peer_counts plant offline_peer_still_counts
+ok    three teeth: write_ack_append as_is write_ack_ledger_as_is
+ok    three teeth: write_ack_append plant verified_write_ack_on_live_profile_is_not_ok
+ok    three teeth: write_ack_barrier as_is write_ack_ledger_as_is
+ok    three teeth: write_ack_barrier plant verified_write_ack_on_live_profile_is_not_ok
+ok    three teeth: write_ack_ack as_is write_ack_ledger_as_is
+ok    three teeth: write_ack_ack plant verified_write_ack_on_live_profile_is_not_ok
+ok    three teeth: lsm_probe as_is lsm_probe_as_is
+ok    three teeth: lsm_probe plant r1_modelo_on_live_delete_shape_is_not_ok
+ok    three teeth: lsm_compact as_is lsm_compact_as_is
+ok    three teeth: lsm_compact plant r1_modelo_on_live_delete_shape_is_not_ok
+ok    three teeth: lsm_reopen as_is lsm_reopen_as_is
+ok    three teeth: lsm_reopen plant r1_modelo_on_live_delete_shape_is_not_ok
+ok    three teeth: r1_modelo as_is r1_modelo_as_is
+ok    three teeth: r1_modelo plant r1_modelo_on_live_delete_shape_is_not_ok
+ok    three teeth: tx_abort as_is tx_abort_as_is
+ok    three teeth: tx_abort plant t1_modelo_on_live_abort_reopen_is_not_ok
+ok    three teeth: tx_recover as_is tx_recover_as_is
+ok    three teeth: tx_recover plant t1_modelo_on_live_abort_reopen_is_not_ok
+ok    three teeth: t1_modelo as_is t1_modelo_as_is
+ok    three teeth: t1_modelo plant t1_modelo_on_live_abort_reopen_is_not_ok
+ok    three teeth: c1_advance_commit as_is c1_advance_commit_as_is
+ok    three teeth: c1_advance_commit plant c1_modelo_on_live_queued_joint_is_not_ok
+ok    three teeth: c1_modelo as_is c1_modelo_as_is
+ok    three teeth: c1_modelo plant c1_modelo_on_live_queued_joint_is_not_ok
+ok    three teeth: write_admission as_is write_admission_idle_as_is
+ok    three teeth: write_admission plant write_admission_idle_on_live_stall_is_not_ok
+ok    three teeth: write_admit as_is write_admit_as_is
+ok    three teeth: write_admit plant write_admit_on_live_mem_over_is_not_ok
+ok    three teeth: wal_sync_required as_is wal_sync_required_as_is
+ok    three teeth: wal_sync_required plant wal_sync_required_on_live_client_true_is_not_ok
+ok    three teeth: seq_exhausted as_is seq_exhausted_as_is
+ok    three teeth: seq_exhausted plant seq_exhausted_on_live_ceiling_is_not_ok
+ok    three teeth: batch_is_empty as_is batch_is_empty_as_is
+ok    three teeth: batch_is_empty plant batch_is_empty_on_live_zero_is_not_ok
+ok    three teeth: fence_on_sync_fail as_is fence_on_sync_fail_as_is
+ok    three teeth: fence_on_sync_fail plant fence_on_sync_fail_on_live_required_fail_is_not_ok
+ok    three teeth: wal_commit_plan as_is wal_commit_plan_as_is
+ok    three teeth: wal_commit_plan plant wal_commit_plan_on_live_sync_fail_is_not_ok
+ok    three teeth: torn_head_empty_log as_is torn_head_is_empty_log_as_is
+ok    three teeth: torn_head_empty_log plant torn_head_is_empty_log_on_live_large_wal_is_not_ok
+ok    three teeth: torn_tail_needs_cut as_is torn_tail_needs_cut_as_is
+ok    three teeth: torn_tail_needs_cut plant torn_tail_needs_cut_on_live_overhang_is_not_ok
+ok    three teeth: seq_after_feed as_is seq_after_feed_as_is
+ok    three teeth: seq_after_feed plant seq_after_feed_on_live_newer_is_not_ok
+ok    three teeth: pit_resync_rewrite as_is pit_resync_needs_rewrite_as_is
+ok    three teeth: pit_resync_rewrite plant pit_resync_needs_rewrite_on_live_resync_is_not_ok
+ok    three teeth: dir_sync_required as_is dir_sync_required_as_is
+ok    three teeth: dir_sync_required plant dir_sync_required_on_live_sync_is_not_ok
+ok    three teeth: auto_flush_due as_is auto_flush_due_as_is
+ok    three teeth: auto_flush_due plant auto_flush_due_on_live_over_limit_is_not_ok
+ok    three teeth: snap_empty as_is snap_is_empty_as_is
+ok    three teeth: snap_empty plant snap_is_empty_on_live_zero_is_not_ok
+ok    three teeth: snap_below_watermark as_is snap_below_watermark_as_is
+ok    three teeth: snap_below_watermark plant snap_below_watermark_on_live_below_is_not_ok
+ok    three teeth: mem_point_decides as_is mem_point_decides_as_is
+ok    three teeth: mem_point_decides plant mem_point_decides_on_live_hit_is_not_ok
+ok    three teeth: prefer_newer_seq as_is prefer_newer_seq_as_is
+ok    three teeth: prefer_newer_seq plant prefer_newer_seq_on_live_older_first_is_not_ok
+ok    three teeth: scale_probes as_is point_get_probes_as_is
+ok    three teeth: scale_probes plant point_get_probes_on_all_files_walk_is_not_ok
+ok    three teeth: scale_warm as_is warm_cap_bytes_as_is
+ok    three teeth: scale_warm plant warm_cap_bytes_on_unbounded_warm_is_not_ok
+ok    three teeth: scale_probes_worst as_is probes_worst_as_is
+ok    three teeth: scale_probes_worst plant probes_worst_on_all_files_walk_is_not_ok
+ok    three teeth: scale_predict as_is predict_get_ns_as_is
+ok    three teeth: scale_predict plant predict_get_ns_on_ignoring_noisy_is_not_ok
+ok    three teeth: scale_happy_hot as_is happy_hot_bps_as_is
+ok    three teeth: scale_happy_hot plant happy_hot_bps_on_always_hot_is_not_ok
+ok    three teeth: scale_forecast as_is scale_forecast_as_is
+ok    three teeth: scale_forecast plant scale_forecast_on_always_hot_walk_is_not_ok
+ok    three teeth: pipeline_drain_cap as_is pipeline_drain_cap_as_is
+ok    three teeth: pipeline_drain_cap plant rfc0201_drain_cap_full_below_misuse_floor
+ok    three teeth: async_merge_policy as_is async_merge_policy_as_is
+ok    three teeth: async_merge_policy plant rfc0201_async_merge_policy_boundary_and_pins
+ok    three teeth: merge_eligible as_is merge_eligible_as_is
+ok    three teeth: merge_eligible plant rfc0217_group_window_merge_eligibility_boundary
+ok    three teeth: flight_capped_window_us as_is flight_capped_window_us_as_is
+ok    three teeth: flight_capped_window_us plant rfc0217_p04_window_never_exceeds_flight
+ok    three teeth: herd_collect_us as_is herd_collect_us_as_is
+ok    three teeth: herd_collect_us plant herd_collect_waits_only_for_missing_inflight
+ok    three teeth: seal_async_first_drain as_is seal_async_first_drain_as_is
+ok    three teeth: seal_async_first_drain plant seal_async_first_drain_boundary
+ok    three teeth: solo_leader_bypass as_is solo_leader_bypass_as_is
+ok    three teeth: solo_leader_bypass plant solo_leader_bypass_boundary
+ok    three teeth: herd_full as_is herd_full_as_is
+ok    three teeth: herd_full plant herd_collect_waits_only_for_missing_inflight
+ok    three teeth: post_group_grace_us as_is post_group_grace_us_as_is
+ok    three teeth: post_group_grace_us plant herd_collect_waits_only_for_missing_inflight
+ok    three teeth: leftover_page_advice as_is leftover_page_advice_as_is
+ok    three teeth: leftover_page_advice plant default_budget_never_drops
+ok    three teeth: scan_readahead_window as_is scan_readahead_window_as_is
+ok    three teeth: scan_readahead_window plant fitting_store_never_reads_ahead
+ok    three teeth: serial_cs_ns as_is serial_cs_ns_as_is
+ok    three teeth: serial_cs_ns plant rfc0192_write_off_lock_drops_cs_by_wr
+ok    three teeth: spine_replay as_is spine_replay_as_is
+ok    three teeth: spine_replay plant spine_any_sequence_keeps_inv_and_d1
+ok    three teeth: product_crown as_is product_crown_as_is
+ok    three teeth: product_crown plant crown_agrees_on_every_reachable_ledger
+ok    three teeth: reserve_frame as_is reserve_frame_as_is
+ok    three teeth: reserve_frame plant rfc0193_reserve_frame_advances_ticket
+ok    three teeth: pwrite_off_lock as_is pwrite_off_lock_as_is
+ok    three teeth: pwrite_off_lock plant rfc0193_pwrite_off_lock_requires_want_and_capability
+ok    three teeth: l0_compact_due as_is l0_compact_due_as_is
+ok    three teeth: l0_compact_due plant l0_compact_due_on_live_at_trigger_is_not_ok
+ok    three teeth: workload_class as_is workload_class_as_is
+ok    three teeth: workload_class plant workload_class_on_live_scan_window_is_not_ok
+ok    three teeth: filter_partition as_is filter_partition_as_is
+ok    three teeth: filter_partition plant filter_partition_on_live_scan_window_is_not_ok
+ok    three teeth: 254 pairs
+== proof vs campaign (RFC-0166 P2.4) ==
+ok    proof vs campaign: 309 proof objects, 26 campaign gates
+== proof_depth (RFC-0170: atom|close|extract; model stand-in until P2.2) ==
+ok    vote: proof_depth=atom (2026-09-11)
+ok    ae_entry: proof_depth=atom (2026-09-10)
+ok    ae_ack: proof_depth=atom (2026-09-10)
+ok    commit_raft: proof_depth=atom (2026-09-11)
+ok    joint_election: proof_depth=atom (2026-09-10)
+ok    joint_leave: proof_depth=atom (2026-09-11)
+ok    pending_joint_node: proof_depth=atom (2026-09-11)
+ok    joint_leave_ok: proof_depth=atom (2026-09-11)
+ok    election_grant_from: proof_depth=atom (2026-09-10)
+ok    joint_target: proof_depth=atom (2026-09-11)
+ok    joint_add_target: proof_depth=atom (2026-09-11)
+ok    queued_leave_finish: proof_depth=atom (2026-09-10)
+ok    disk_membership: proof_depth=atom (2026-09-11)
+ok    high_water: proof_depth=atom (2026-09-11)
+ok    participating_member: proof_depth=atom (2026-09-11)
+ok    identity_before_applied: proof_depth=atom (2026-09-11)
+ok    recover_apply: proof_depth=atom (2026-09-11)
+ok    recover_apply_node: proof_depth=atom (2026-09-11)
+ok    recover_truncate: proof_depth=atom (2026-09-11)
+ok    recover_drop_orphan: proof_depth=atom (2026-09-11)
+ok    recover_abort: proof_depth=atom (2026-09-11)
+ok    persist_meta: proof_depth=atom (2026-09-11)
+ok    persist_hist: proof_depth=atom (2026-09-11)
+ok    persist_fence: proof_depth=atom (2026-09-11)
+ok    force_clear: proof_depth=atom (2026-09-11)
+ok    drop_preimages: proof_depth=atom (2026-09-11)
+ok    open_peer_disk: proof_depth=atom (2026-09-11)
+ok    local_id_member: proof_depth=atom (2026-09-11)
+ok    reader_local: proof_depth=atom (2026-09-11)
+ok    discard_uncommitted: proof_depth=atom (2026-09-11)
+ok    discard_leader: proof_depth=atom (2026-09-11)
+ok    removed_step_down: proof_depth=atom (2026-09-11)
+ok    hint_member: proof_depth=atom (2026-09-11)
+ok    drop_repl_slot: proof_depth=atom (2026-09-11)
+ok    drop_sent_through: proof_depth=atom (2026-09-11)
+ok    lease: proof_depth=atom (2026-09-10)
+ok    dcs_apply: proof_depth=atom (2026-09-13)
+ok    dcs_advance_bool: proof_depth=atom (2026-09-13)
+ok    lease_table: proof_depth=atom (2026-09-13)
+ok    lease_next_id: proof_depth=atom (2026-09-13)
+ok    txn: proof_depth=atom (2026-09-10)
+ok    revert_clears_status: proof_depth=atom (2026-09-10)
+ok    revert_user_action: proof_depth=atom (2026-09-10)
+ok    should_repair_si_hist: proof_depth=atom (2026-09-13)
+ok    si_hist_repair: proof_depth=atom (2026-09-10)
+ok    discard_cut: proof_depth=atom (2026-09-11)
+ok    leftover_txn_is_aborted: proof_depth=atom (2026-09-11)
+ok    next_txn_id_after: proof_depth=atom (2026-09-11)
+ok    recover_si_generation: proof_depth=atom (2026-09-13)
+ok    hist_load_fate: proof_depth=atom (2026-09-10)
+ok    prepare_error_aborts_earlier: proof_depth=atom (2026-09-11)
+ok    reserve_si_gen: proof_depth=atom (2026-09-11)
+ok    unreserve_si_gen: proof_depth=atom (2026-09-11)
+ok    compact: proof_depth=atom (2026-09-13)
+ok    compact_unleft: proof_depth=atom (2026-09-11)
+ok    snapshot: proof_depth=atom (2026-09-13)
+ok    si_reader: proof_depth=atom (2026-09-13)
+ok    index_val: proof_depth=atom (2026-09-13)
+ok    changelog: proof_depth=atom (2026-09-13)
+ok    range_covers: proof_depth=atom (2026-09-13)
+ok    write_op_range_end: proof_depth=atom (2026-09-13)
+ok    merge_sift: proof_depth=close
+ok    prefix: proof_depth=atom (2026-09-13)
+ok    stream_cursor: proof_depth=atom (2026-09-13)
+ok    stream_next_seq: proof_depth=atom (2026-09-13)
+ok    bearer: proof_depth=close
+ok    content_length: proof_depth=atom (2026-09-13)
+ok    invalid_cl_zero: proof_depth=atom (2026-09-13)
+ok    cl_repeat_conflict: proof_depth=atom (2026-09-13)
+ok    short_body_vs_cl: proof_depth=atom (2026-09-13)
+ok    fail_closed: proof_depth=atom (2026-09-13)
+ok    form_plus: proof_depth=atom (2026-09-13)
+ok    origin_path: proof_depth=atom (2026-09-13)
+ok    path_after_authority: proof_depth=atom (2026-09-13)
+ok    strip_http_authority: proof_depth=atom (2026-09-13)
+ok    request_target_authority: proof_depth=atom (2026-09-13)
+ok    host_authority_mismatch: proof_depth=atom (2026-09-13)
+ok    split_host_port: proof_depth=atom (2026-09-13)
+ok    strip_uri_fragment: proof_depth=atom (2026-09-13)
+ok    strip_authority_for_routing: proof_depth=atom (2026-09-13)
+ok    form_plus_byte: proof_depth=atom (2026-09-13)
+ok    from_hex: proof_depth=atom (2026-09-13)
+ok    plus_before_percent: proof_depth=atom (2026-09-13)
+ok    query_values_conflict: proof_depth=atom (2026-09-13)
+ok    query_u64_conflict: proof_depth=atom (2026-09-13)
+ok    query_part_is_bare_name: proof_depth=atom (2026-09-13)
+ok    ascii_lower: proof_depth=atom (2026-09-12)
+ok    ascii_upper: proof_depth=atom (2026-09-12)
+ok    is_bearer_scheme: proof_depth=atom (2026-09-12)
+ok    is_non_bearer_auth_scheme: proof_depth=atom (2026-09-12)
+ok    normalize_http_method: proof_depth=atom (2026-09-12)
+ok    authorization_matches: proof_depth=atom (2026-09-12)
+ok    isolated: proof_depth=atom (2026-09-13)
+ok    isolated_child: proof_depth=atom (2026-09-13)
+ok    children: proof_depth=atom (2026-09-14)
+ok    fields: proof_depth=atom (2026-09-14)
+ok    journal_pin: proof_depth=atom (2026-09-13)
+ok    journal_catch_up_pin: proof_depth=atom (2026-09-13)
+ok    journal_fold_pin: proof_depth=atom (2026-09-13)
+ok    journal_next_pin: proof_depth=atom (2026-09-13)
+ok    wal_recover: proof_depth=atom (2026-09-12)
+ok    pack: proof_depth=atom (2026-09-14)
+ok    children_start: proof_depth=atom (2026-09-14)
+ok    children_half_open: proof_depth=atom (2026-09-14)
+ok    children_next_byte: proof_depth=atom (2026-09-14)
+ok    fields_kept: proof_depth=atom (2026-09-14)
+ok    fields_suffix: proof_depth=atom (2026-09-14)
+ok    fields_decode: proof_depth=atom (2026-09-14)
+ok    fields_pair_nul: proof_depth=atom (2026-09-14)
+ok    ship_guard: proof_depth=atom (2026-09-13)
+ok    ship_stamp: proof_depth=atom (2026-09-13)
+ok    bloom_header: proof_depth=atom (2026-09-13)
+ok    bloom_insert: proof_depth=atom (2026-09-13)
+ok    bloom_may_contain: proof_depth=atom (2026-09-13)
+ok    scan_guard: proof_depth=atom (2026-09-13)
+ok    si_read: proof_depth=atom (2026-09-13)
+ok    fold_range: proof_depth=atom (2026-09-13)
+ok    manifest_recover: proof_depth=atom (2026-09-10)
+ok    reopen_outcome: proof_depth=atom (2026-09-10)
+ok    flush_decision: proof_depth=atom (2026-09-12)
+ok    wal_rotate_decision: proof_depth=close
+ok    occ_snap_published: proof_depth=atom (2026-09-14)
+ok    group_commit: proof_depth=atom (2026-09-13)
+ok    group_fence: proof_depth=atom (2026-09-13)
+ok    compact_decision: proof_depth=atom (2026-09-10)
+ok    compact_retention: proof_depth=atom (2026-09-10)
+ok    dictionary_link: proof_depth=atom (2026-09-13)
+ok    apply_step: proof_depth=atom (2026-09-13)
+ok    apply_put_plan: proof_depth=atom (2026-09-10)
+ok    grant_persist: proof_depth=atom (2026-09-11)
+ok    durable_term: proof_depth=atom (2026-09-10)
+ok    vlog_recover: proof_depth=atom (2026-09-10)
+ok    blob_gc_pick: proof_depth=atom (2026-09-10)
+ok    tx_glue: proof_depth=atom (2026-09-10)
+ok    rpc_mode: proof_depth=atom (2026-09-13)
+ok    group_publish: proof_depth=close
+ok    rwlock_client_may_mutate: proof_depth=atom (2026-09-11)
+ok    forall_schedules: proof_depth=atom (2026-09-14)
+ok    l28_durability: proof_depth=atom (2026-09-13)
+ok    l28_tcp_left: proof_depth=atom (2026-09-11)
+ok    l28_tcp_hw: proof_depth=atom (2026-09-11)
+ok    l28_tcp_part: proof_depth=atom (2026-09-11)
+ok    l28_tcp_apply: proof_depth=atom (2026-09-11)
+ok    l28_tcp_napply: proof_depth=atom (2026-09-11)
+ok    l28_tcp_trunc: proof_depth=atom (2026-09-11)
+ok    l28_tcp_odrop: proof_depth=atom (2026-09-11)
+ok    l28_tcp_abort: proof_depth=atom (2026-09-11)
+ok    l28_tcp_nowms: proof_depth=atom (2026-09-11)
+ok    l28_tcp_dterm: proof_depth=atom (2026-09-11)
+ok    l28_tcp_hist: proof_depth=atom (2026-09-11)
+ok    l28_tcp_fence: proof_depth=atom (2026-09-11)
+ok    l28_tcp_clear: proof_depth=atom (2026-09-11)
+ok    l28_tcp_pre: proof_depth=atom (2026-09-11)
+ok    l28_tcp_peer: proof_depth=atom (2026-09-11)
+ok    l28_tcp_lid: proof_depth=atom (2026-09-11)
+ok    l28_tcp_rdr: proof_depth=atom (2026-09-11)
+ok    l28_tcp_dsc: proof_depth=atom (2026-09-11)
+ok    l28_tcp_pld: proof_depth=atom (2026-09-11)
+ok    l28_tcp_std: proof_depth=atom (2026-09-11)
+ok    l28_tcp_hnt: proof_depth=atom (2026-09-11)
+ok    l28_tcp_slot: proof_depth=atom (2026-09-11)
+ok    l28_tcp_sth: proof_depth=atom (2026-09-11)
+ok    l28_tcp_pj: proof_depth=atom (2026-09-11)
+ok    sched_plant_joint: proof_depth=atom (2026-09-10)
+ok    world_trajectory: proof_depth=atom (2026-09-14)
+ok    world_trajectory_fold: proof_depth=atom (2026-09-14)
+ok    liveness_claim: proof_depth=atom (2026-09-14)
+ok    fsync_promote: proof_depth=atom (2026-09-13)
+ok    media_durable: proof_depth=atom (2026-09-14)
+ok    tcg_guest: proof_depth=atom (2026-09-14)
+ok    fdatasync_rc: proof_depth=atom (2026-09-14)
+ok    cqe_res: proof_depth=atom (2026-09-12)
+ok    cqe_tags: proof_depth=atom (2026-09-12)
+ok    cqe_leftover: proof_depth=atom (2026-09-12)
+ok    cqe_submit: proof_depth=atom (2026-09-12)
+ok    cqe_ring_refusal: proof_depth=atom (2026-09-12)
+ok    c_len: proof_depth=atom (2026-09-13)
+ok    crc_match: proof_depth=atom (2026-09-13)
+ok    sst_crc: proof_depth=atom (2026-09-13)
+ok    cf_family: proof_depth=atom (2026-09-12)
+ok    cf_family_of: proof_depth=atom (2026-09-12)
+ok    cf_encode_effective: proof_depth=atom (2026-09-10)
+ok    encode_cf_key: proof_depth=atom (2026-09-10)
+ok    decode_cf_key: proof_depth=atom (2026-09-10)
+ok    infer_sst_cf: proof_depth=atom (2026-09-10)
+ok    compact_rewrites_sst_cf: proof_depth=atom (2026-09-10)
+ok    visible_at: proof_depth=atom (2026-09-12)
+ok    ikey_pack: proof_depth=atom (2026-09-13)
+ok    write_record_count: proof_depth=atom (2026-09-12)
+ok    pin_gc: proof_depth=atom (2026-09-10)
+ok    wait_for_deadlock: proof_depth=atom (2026-09-11)
+ok    flush_publish: proof_depth=atom (2026-09-12)
+ok    probe_order: proof_depth=atom (2026-09-13)
+ok    run_disjoint: proof_depth=atom (2026-09-13)
+ok    iter_window: proof_depth=atom (2026-09-12)
+ok    l28_napply_retry: proof_depth=atom (2026-09-13)
+ok    zero_glue: proof_depth=atom (2026-09-13)
+ok    lock_interleavings: proof_depth=atom (2026-09-14)
+ok    leveling: proof_depth=atom (2026-09-10)
+ok    leveling_pick: proof_depth=atom (2026-09-12)
+ok    leveling_pushdown: proof_depth=atom (2026-09-12)
+ok    d1_durability: proof_depth=atom (2026-09-12)
+ok    r1_no_resurrection: proof_depth=atom (2026-09-12)
+ok    t1_atomicity: proof_depth=atom (2026-09-12)
+ok    c1_quorum: proof_depth=atom (2026-09-12)
+ok    leveled_enabled: proof_depth=atom (2026-09-13)
+ok    leveling_disjoint: proof_depth=atom (2026-09-13)
+ok    leveling_overlaps: proof_depth=atom (2026-09-13)
+ok    leveling_total_bytes: proof_depth=atom (2026-09-13)
+ok    tombstone_reaches_window: proof_depth=atom (2026-09-13)
+ok    key_in_window: proof_depth=atom (2026-09-13)
+ok    point_bounds_overlap: proof_depth=atom (2026-09-13)
+ok    sst_block_crc: proof_depth=atom (2026-09-13)
+ok    sst_magic: proof_depth=atom (2026-09-13)
+ok    is_length_resyncable: proof_depth=atom (2026-09-13)
+ok    physical_payload_act: proof_depth=atom (2026-09-13)
+ok    fragment_act: proof_depth=atom (2026-09-13)
+ok    from_record_type: proof_depth=atom (2026-09-13)
+ok    compact_split: proof_depth=atom (2026-09-13)
+ok    compact_split_at: proof_depth=atom (2026-09-13)
+ok    lone_tombstone: proof_depth=atom (2026-09-13)
+ok    changelog_should_store: proof_depth=atom (2026-09-13)
+ok    changelog_budget: proof_depth=atom (2026-09-13)
+ok    changelog_durable_commit: proof_depth=atom (2026-09-13)
+ok    wal_archive_delete: proof_depth=atom (2026-09-13)
+ok    bulk_manifest_persist: proof_depth=atom (2026-09-13)
+ok    point_cache_validity: proof_depth=atom (2026-09-13)
+ok    point_tombstone: proof_depth=atom (2026-09-13)
+ok    dir_sync_plan: proof_depth=atom (2026-09-13)
+ok    fence_admission: proof_depth=atom (2026-09-13)
+ok    fence_record: proof_depth=atom (2026-09-13)
+ok    group_batch_sync: proof_depth=atom (2026-09-13)
+ok    pit_resync_rewrite_plan: proof_depth=atom (2026-09-13)
+ok    parked_pair: proof_depth=atom (2026-09-13)
+ok    auto_flush_gate: proof_depth=atom (2026-09-13)
+ok    mem_auto_flush: proof_depth=atom (2026-09-13)
+ok    manifest_publish_plan: proof_depth=atom (2026-09-13)
+ok    changelog_store_plan: proof_depth=atom (2026-09-13)
+ok    parked_pop_plan: proof_depth=atom (2026-09-13)
+ok    put_handler_plan: proof_depth=atom (2026-09-14)
+ok    open_wal_head_plan: proof_depth=atom (2026-09-14)
+ok    group_ack_plan: proof_depth=atom (2026-09-13)
+ok    lock_alphabet_linearizes_n2: proof_depth=atom (2026-09-15)
+ok    cf_flush_plan: proof_depth=atom (2026-09-13)
+ok    flusher_gate_plan: proof_depth=atom (2026-09-13)
+ok    parked_debt_plan: proof_depth=atom (2026-09-13)
+ok    flush_plan: proof_depth=atom (2026-09-13)
+ok    first_install: proof_depth=atom (2026-09-13)
+ok    probe_order_covering: proof_depth=atom (2026-09-13)
+ok    group_validate: proof_depth=atom (2026-09-13)
+ok    occ_member_fate: proof_depth=atom (2026-09-11)
+ok    occ_batch_plan: proof_depth=atom (2026-09-12)
+ok    pct_default_depth: proof_depth=atom (2026-09-14)
+ok    default_pct_depth_raised: proof_depth=atom (2026-09-14)
+ok    fsync_lie_tcg: proof_depth=atom (2026-09-14)
+ok    stacked_liars: proof_depth=atom (2026-09-14)
+ok    env_crash: proof_depth=atom (2026-09-12)
+ok    env_append: proof_depth=atom (2026-09-12)
+ok    env_sync: proof_depth=atom (2026-09-12)
+ok    env_barrier_floor: proof_depth=atom (2026-09-12)
+ok    env_no_invented: proof_depth=atom (2026-09-12)
+ok    env_honest_sync: proof_depth=atom (2026-09-12)
+ok    wal_state: proof_depth=atom (2026-09-12)
+ok    wal_append: proof_depth=atom (2026-09-12)
+ok    wal_sync: proof_depth=atom (2026-09-12)
+ok    wal_ack: proof_depth=atom (2026-09-12)
+ok    wal_rotate: proof_depth=atom (2026-09-12)
+ok    wal_acked_survives: proof_depth=atom (2026-09-12)
+ok    ae_f16_gate: proof_depth=atom (2026-09-13)
+ok    raft_recover_applied: proof_depth=atom (2026-09-13)
+ok    d1_put_ok: proof_depth=atom (2026-09-12)
+ok    d1_modelo: proof_depth=atom (2026-09-12)
+ok    point_get_prefer: proof_depth=atom (2026-09-13)
+ok    point_get_wm: proof_depth=atom (2026-09-13)
+ok    snap_txn_clear: proof_depth=atom (2026-09-13)
+ok    len_tag: proof_depth=atom (2026-09-13)
+ok    exact_children: proof_depth=atom (2026-09-13)
+ok    compact_floor: proof_depth=atom (2026-09-13)
+ok    compact_ready: proof_depth=atom (2026-09-13)
+ok    compact_peer_counts: proof_depth=atom (2026-09-13)
+ok    write_ack_append: proof_depth=atom (2026-09-12)
+ok    write_ack_barrier: proof_depth=atom (2026-09-12)
+ok    write_ack_ack: proof_depth=atom (2026-09-12)
+ok    lsm_probe: proof_depth=atom (2026-09-13)
+ok    lsm_compact: proof_depth=atom (2026-09-13)
+ok    lsm_reopen: proof_depth=atom (2026-09-13)
+ok    r1_modelo: proof_depth=atom (2026-09-12)
+ok    tx_abort: proof_depth=atom (2026-09-13)
+ok    tx_recover: proof_depth=atom (2026-09-13)
+ok    t1_modelo: proof_depth=atom (2026-09-12)
+ok    c1_advance_commit: proof_depth=atom (2026-09-12)
+ok    c1_modelo: proof_depth=atom (2026-09-12)
+ok    write_admission: proof_depth=atom (2026-09-12)
+ok    write_admit: proof_depth=atom (2026-09-12)
+ok    wal_sync_required: proof_depth=atom (2026-09-11)
+ok    seq_exhausted: proof_depth=atom (2026-09-12)
+ok    batch_is_empty: proof_depth=atom (2026-09-10)
+ok    fence_on_sync_fail: proof_depth=atom (2026-09-12)
+ok    wal_commit_plan: proof_depth=atom (2026-09-12)
+ok    torn_head_empty_log: proof_depth=atom (2026-09-12)
+ok    torn_tail_needs_cut: proof_depth=atom (2026-09-12)
+ok    seq_after_feed: proof_depth=atom (2026-09-12)
+ok    pit_resync_rewrite: proof_depth=atom (2026-09-12)
+ok    dir_sync_required: proof_depth=atom (2026-09-10)
+ok    auto_flush_due: proof_depth=atom (2026-09-12)
+ok    snap_empty: proof_depth=atom (2026-09-12)
+ok    snap_below_watermark: proof_depth=atom (2026-09-12)
+ok    mem_point_decides: proof_depth=atom (2026-09-12)
+ok    prefer_newer_seq: proof_depth=atom (2026-09-12)
+ok    scale_probes: proof_depth=atom (2026-09-13)
+ok    scale_warm: proof_depth=atom (2026-09-13)
+ok    scale_probes_worst: proof_depth=atom (2026-09-13)
+ok    scale_predict: proof_depth=atom (2026-09-13)
+ok    scale_happy_hot: proof_depth=atom (2026-09-13)
+ok    scale_forecast: proof_depth=atom (2026-09-13)
+ok    pipeline_drain_cap: proof_depth=atom (2026-09-14)
+ok    async_merge_policy: proof_depth=atom (2026-09-14)
+ok    merge_eligible: proof_depth=atom (2026-09-14)
+ok    flight_capped_window_us: proof_depth=atom (2026-09-14)
+ok    herd_collect_us: proof_depth=atom (2026-09-14)
+ok    seal_async_first_drain: proof_depth=atom (2026-09-16)
+ok    solo_leader_bypass: proof_depth=atom (2026-09-15)
+ok    herd_full: proof_depth=atom (2026-09-14)
+ok    post_group_grace_us: proof_depth=atom (2026-09-14)
+ok    leftover_page_advice: proof_depth=atom (2026-09-14)
+ok    scan_readahead_window: proof_depth=atom (2026-09-14)
+ok    serial_cs_ns: proof_depth=atom (2026-09-14)
+ok    spine_replay: proof_depth=atom (2026-09-14)
+ok    cold_permille: proof_depth=atom (2026-09-14)
+ok    product_crown: proof_depth=atom (2026-09-14)
+ok    reserve_frame: proof_depth=atom (2026-09-16)
+ok    pwrite_off_lock: proof_depth=atom (2026-09-16)
+ok    l0_compact_due: proof_depth=atom (2026-09-16)
+ok    workload_class: proof_depth=atom (2026-09-17)
+ok    filter_partition: proof_depth=atom (2026-09-17)
+ok    proof_depth counts: extract=0 close=4 atom=331 model=0 count=7
+ok    proof_depth freeze matches live {'extract': 0, 'close': 4, 'atom': 331, 'model': 0, 'count': 7}
+== single_artifact fraction (RFC-0174 P0.2): sa=328 data_fate=0 ==
+ok    single_artifact freeze matches live 328
+ok    data_fate freeze matches live 0
+== residuals freeze (RFC-0061) ==
+ok    kernel enrollment: 362 kernels, 0 suffix-less via `//! kernel:` marker
+ok    kernel fn surface: 4353 pub fns in 362 kernels — 851 classified (entry/as_is/clone), 3502 baseline allowlisted
+ok    residuals freeze: 29 rows
+== class scan (RFC-0157 P1.1: 0156 classes, waiver = residual id) ==
+ok    class scan: 403 files — 5 FFI rc sites, 3 C ABI len params, 2 CQE tag sites, 0 waivered
+
+summary: 2053 ok, 0 gap, 0 fail

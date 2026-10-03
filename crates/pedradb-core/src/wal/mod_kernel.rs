@@ -628,10 +628,27 @@ impl<F: EnvFile> Wal<F> {
     /// Flush buffered WAL data without taking ownership (for `Db` paths with `Drop`).
     ///
     /// # Errors
-    /// Returns [`std::io::Error`] if flushing fails.
+    /// Returns [`std::io::Error`] if flushing or draining fails.
     pub fn flush(&mut self) -> Result<()> {
         self.write_pending_frame()?;
+        self.drain_staged()?;
         self.writer.flush()
+    }
+
+    /// Hand the staged group-commit bytes to the sink (RFC-0209 order
+    /// rule (b): every barrier — WAL truncate/rotate, `flush`, close —
+    /// must drain first). Staged bytes are logical segment content: a
+    /// barrier that skips the drain either truncates them away or sees
+    /// the drained watermark (`position`) stuck at 0, wrongly concludes
+    /// the segment is empty, and skips the WAL rotate — and with it the
+    /// MANIFEST pay-point that installs the flushed L0 (the orphaned-L0
+    /// durability hole, 2026-10-03).
+    ///
+    /// # Errors
+    /// Returns [`std::io::Error`] if the sink write fails (staged bytes
+    /// return to the buffer; the drain is retryable).
+    pub(crate) fn drain_staged(&mut self) -> Result<()> {
+        self.writer.drain_staged()
     }
 
     /// Logical bytes written to the current segment (framed payload size;
@@ -651,6 +668,12 @@ impl<F: EnvFile> Wal<F> {
     pub fn close(mut self) -> Result<()> {
         self.flush()?;
         self.writer.truncate_to_logical()
+    }
+
+    /// Discard any uncommitted in-memory staged/framed data and shrink the
+    /// physical file to `offset` (RFC-0333).
+    pub(crate) fn discard_uncommitted(&mut self, offset: u64) -> Result<()> {
+        self.writer.discard_uncommitted(offset)
     }
 }
 
@@ -1411,4 +1434,75 @@ mod probe_tests {
         drop(w);
         let _ = std::fs::remove_dir_all(&dir);
     }
+    // RFC-0331 V1.4 — calibration mutant 1009 (locked write ignores its
+    // reserved span): deterministic kill, orchestrated interleave. The
+    // mutex serializes these tests against each other: MutantGuard is
+    // process-global and the env knobs are read at Wal::create.
+
+    static RFC0331_V14_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn rfc0331_v14_baseline_inflight_ticket_plus_locked_write() {
+        let _v14 = RFC0331_V14_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("PEDRA_WAL_BUFFER", "0");
+        std::env::set_var("PEDRA_WAL_PWRITE", "1");
+        let dir = rfc0209_dir("v14-base");
+        let path = dir.join("wal.log");
+        {
+            let mut w = Wal::create(&path).unwrap();
+            w.encode_write_op_batches(&[rfc0209_put(1).as_slice()])
+                .unwrap();
+            let job = w.take_pwrite_job().unwrap().expect("pwrite job");
+            assert_eq!(
+                w.position(),
+                0,
+                "reserve must not move the drained watermark"
+            );
+            w.encode_write_op_batches(&[rfc0209_put(2).as_slice()])
+                .unwrap();
+            w.write_pending_frame().unwrap();
+            let (t, l) = job.run().unwrap();
+            w.finish_pwrite(t, l);
+        }
+        let recs = Wal::recover(&path).unwrap();
+        assert_eq!(
+            recs.len(),
+            2,
+            "baseline: spans are exclusive, both records intact"
+        );
+    }
+
+    #[test]
+    fn rfc0331_v14_mutant_1009_locked_write_at_position_is_killed() {
+        let _v14 = RFC0331_V14_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("PEDRA_WAL_BUFFER", "0");
+        std::env::set_var("PEDRA_WAL_PWRITE", "1");
+        let dir = rfc0209_dir("v14-m1009");
+        let path = dir.join("wal.log");
+        {
+            let mut w = Wal::create(&path).unwrap();
+            w.encode_write_op_batches(&[rfc0209_put(1).as_slice()])
+                .unwrap();
+            let job = w.take_pwrite_job().unwrap().expect("pwrite job");
+            w.encode_write_op_batches(&[rfc0209_put(2).as_slice()])
+                .unwrap();
+            {
+                let _g = crate::mutation_switch_kernel::MutantGuard::activate(
+                    crate::mutation_switch_kernel::MUTANT_WAL_WRITE_AT_POSITION,
+                );
+                w.write_pending_frame().unwrap();
+            }
+            let (t, l) = job.run().unwrap();
+            w.finish_pwrite(t, l);
+        }
+        match Wal::recover(&path) {
+            Ok(recs) => assert_ne!(
+                recs.len(),
+                2,
+                "mutant 1009 (locked write at position) must be DETECTED: two intact records means the kill oracle is vacuous"
+            ),
+            Err(_) => {} // damaged region at recovery: kill confirmed
+        }
+    }
+
 }
