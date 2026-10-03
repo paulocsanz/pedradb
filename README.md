@@ -62,8 +62,8 @@ model written beside it. CI runs `scripts/formal/pedra_formal.py --lint`
 in its own job (seconds — never starved by a long test build): drift
 between a kernel and its extract stamp fails the build, and the current
 tree has **0 drift FAILs and 0 classification debt FAILs** (summary:
-**2,050 ok, 0 gap, 0 fail** in [`lint.log`](lint.log)). Any drift or unclassified public
-surface fails CI. The engine crate has **1,094 passing tests** (4 ignored).
+**2,053 ok, 0 gap, 0 fail** in [`lint.log`](lint.log)). Any drift or unclassified public
+surface fails CI. The engine crate has **1,325 passing tests** (4 ignored).
 
 Decision kernels enforce the **Three Teeth Principle** (RFC-0151 / RFC-0329):
 synthetic mutants planted in the decision kernels are killed with a 100% kill

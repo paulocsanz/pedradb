@@ -74,6 +74,9 @@ HISTORICAL_MENTIONS = frozenset({
     "blocked_residuals_status.sh",
     "linux_det_io_ci.sh",
     "qemu_subset_revalidate.sh",
+    # Internal lab tooling / generators excluded from the public mirror (RFC-0331)
+    "gen_proof_shims.py",
+    "tcg_world_smoke.sh",
 })
 
 
