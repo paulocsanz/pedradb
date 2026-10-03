@@ -182,5 +182,5 @@ SST put/get (the expensive TiKV path).
 ## Related
 
 - [`architecture.md`](architecture.md) — mission + delivery slices (all local)  
-- [`distribution-design.md`](distribution-design.md) — how an *outer* multi-Raft DB would look (not PedraDB features)  
-- [`engine-landscape-and-ideal-path.md`](engine-landscape-and-ideal-path.md) — why this LSM  
+- `distribution-design.md` — how an *outer* multi-Raft DB would look (not PedraDB features)  
+- `engine-landscape-and-ideal-path.md` — why this LSM  

@@ -3,7 +3,7 @@
 **Status:** user-facing minimal docs for justify-use  
 **Updated:** 2026-08-14  
 **API:** `pedradb-core` — `Db`, `Transaction`, `OpenOptions`  
-**Engine maturity:** [RFC-0014](rfc/0014-rocks-pebble-redwood-maturity.md)
+**Engine maturity:** RFC-0014
 
 ---
 
@@ -212,7 +212,7 @@ Linux live `io_uring` soak: `scripts/io_uring_linux_soak.sh` (CI job
 `io-uring-linux-soak`). Docker Desktop needs `--privileged` (`io_uring_setup`
 is EPERM under default seccomp).
 
-Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-audit-pedradb-correctness-fixes.md). Unsafe/FFI inventory: [2026-08-22 audit](audits/2026-08-22-unsafe-and-ffi.md).
+Full contract: rustdoc on `db` module. Audit fix backlog: RFC-0015. Unsafe/FFI inventory: 2026-08-22 audit.
 
 ---
 
@@ -246,7 +246,7 @@ age out. Restore/checkpoint dirs stay flat until the first archive round.
 |-----|--------|
 | `Db::open(path)` | Directory; creates if missing |
 | `Db::open_with(path, OpenOptions)` | `sync` flag |
-| `Db::open_with_env` / `open_with_host` | Inject `Env` / full `Host` (DST; see [dst-seams](dst-seams.md)) |
+| `Db::open_with_env` / `open_with_host` | Inject `Env` / full `Host` (DST; see dst-seams) |
 | `pedradb_io_uring::open` / `IoUringEnv` | Linux **io_uring** write+fsync Env (POSIX fallback on macOS/dev) |
 | `Db::get` / `put` / `delete` | Auto-commit |
 | `Db::begin` → `Transaction` | Exclusive `&mut Db` (single-writer) |
@@ -271,7 +271,7 @@ age out. Restore/checkpoint dirs stay flat until the first archive round.
 | `Db::create_checkpoint(dest)` | Point-in-time copy (flush + file set); openable as a DB |
 | `pedradb_ops::BackupEngine` | Local base backup, `ship_wal`, `restore` / `restore_pitr`, verify |
 | `pedradb_ops::migrate_to_latest` / `inspect_format` | Format inspect + rewrite **Pedra** SSTs/MANIFEST to current writer |
-| `pedradb_ops::migrate_from_rocks` / CLI `migrate-from-rocks` | RocksDB → new Pedra dir (MANIFEST v5). Copies every CF (default raw, named `cf\0key`). Refuses merge / blob / wide-column / user timestamps. **Not drop-in on-disk**; kernel never opens a C++ SST ([RFC-0186](rfc/0186-rocks-to-pedra-v5-migrate.md)). Feature `from-rocks` links the C++ reader. |
+| `pedradb_ops::migrate_from_rocks` / CLI `migrate-from-rocks` | RocksDB → new Pedra dir (MANIFEST v5). Copies every CF (default raw, named `cf\0key`). Refuses merge / blob / wide-column / user timestamps. **Not drop-in on-disk**; kernel never opens a C++ SST (RFC-0186). Feature `from-rocks` links the C++ reader. |
 | CLI `pedra backup\|restore\|pitr\|ship-wal\|migrate\|migrate-from-rocks\|inspect` | Ops suite from the command line |
 | `Db::stats()` → `DbStats` | Mem/SST/WAL + `gc_line()` (`earliest_readable`, pins, `auto_reclaim`) + vlog/amp counters |
 | `CheckpointMeta` | `last_sequence`, `sst_count`, `earliest_readable_seq` (PDBCKP02; v1 still readable) |
@@ -312,14 +312,14 @@ Multi-node / wire (RFC-0012 **delivered**):
 **DCS over Raft (e2e):** leader runs `PeerClient::propose_dcs(DcsCommand::Create{...})`; followers answer `dcs_get` with the same key after commit.
 
 **MontanhaDb (Montan-HA-DB)** — multi-node HA product on PedraDB:  
-[docs/montanhadb.md](montanhadb.md)
+docs/montanhadb.md
 
 **Montanha-Store** (`pedradb-store`): multi-Raft ranges + **DCS on store**
 (`dcs_create` / `dcs_cas` → `apply_dcs_command` on commit). Layering:
-[montanha-layering-dcs-on-store.md](montanha-layering-dcs-on-store.md).
+montanha-layering-dcs-on-store.md.
 
 **Patroni-shaped HA + live leadership stream (design):**  
-[docs/live-leadership-and-patroni-shaped-ha.md](live-leadership-and-patroni-shaped-ha.md) — two planes (truth vs best-effort), open sessions, fencing by revision, roadmap.
+docs/live-leadership-and-patroni-shaped-ha.md — two planes (truth vs best-effort), open sessions, fencing by revision, roadmap.
 
 ---
 
@@ -559,6 +559,6 @@ default flip changed no official number.
 
 ## See also
 
-- [RFC-0001](rfc/0001-pedradb-high-level-spec.md) — product spec  
-- [RFC-0004](rfc/0004-transaction-api.md) — transaction  
-- [positioning.md](positioning.md) — why this exists  
+- RFC-0001 — product spec  
+- RFC-0004 — transaction  
+- positioning.md — why this exists  

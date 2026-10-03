@@ -53,10 +53,14 @@ Rocks's async WAL so a comparison is the same durability class.
 
 Decision kernels are proved on the file `rustc` links (Charon + Aeneas →
 Lean). The catalog has **151 pairs**, each one the shipped function, not a
-model written beside it. CI runs `scripts/formal/pedra_formal.py --lint`:
-drift between a kernel and its extract stamp fails the build, and the
-current tree is **0 FAIL** (the ratchet still rejects a non-drift FAIL
-count above 107). The engine crate has **1,094 passing tests** (4 ignored).
+model written beside it. CI runs `scripts/formal/pedra_formal.py --lint`
+in its own job (seconds — never starved by a long test build): drift
+between a kernel and its extract stamp fails the build, and the current
+tree has **0 drift FAILs**. The remaining lint output is **1002 FAIL
+lines of registered classification debt** (public functions outside the
+frozen residual surface), held at a ratchet ceiling of 1002 — growth is
+red; paying it down is the open work. The engine crate has **1,094
+passing tests** (4 ignored).
 
 Not proved: the OS, the disk, rustc, Aeneas, Lean, or Z3. Store and raft
 are not in this repository, so their proofs are not either.
@@ -71,6 +75,23 @@ PedraDB provides zero-lock-contention health diagnostics and internal metrics di
 - **Diagnostic Issues & Remediations**: Automatic detection of L0/memtable write stalls, snapshot pin leaks (analogous to Postgres `datfrozenxid` wraparound risk), cache thrashing, and corruption events, paired with typed remediation recommendations.
 - **Pure Expositions**: OpenMetrics/Prometheus (`format_prometheus_metrics`) and structured JSON (`format_json_status`) formatting without external telemetry dependencies.
 - Detailed guide: [`docs/metrics.md`](docs/metrics.md).
+
+## Known issues (alpha)
+
+- **Transient stale read after an acknowledged write.** Under concurrent
+  writers, a `get` can briefly return `None` (or an older value) for a key
+  whose `put`/`commit` already returned `Ok` on the same thread — one
+  group-commit path publishes the visible sequence after the ack. The
+  quickstart below is the exposed shape. It self-heals microseconds later.
+  Found by this repo's differential oracle; fix in progress in the
+  development tree.
+- **Concurrent async writers can tear WAL records.** When several
+  `no_sync` writers mix the locked write path with off-lock positional
+  writes, two records can overlap and damage the mid-log region; recovery
+  then **fails closed** at reopen (`WAL resync skipped damaged region
+  mid-log`) instead of serving wrong data. Found by this repo's recovery
+  tests; fix landing in the development tree and pending here.
+- The format and the API can still break.
 
 ## Benchmarks
 

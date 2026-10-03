@@ -1167,7 +1167,7 @@ def check_residuals(
             if extra:
                 r.fail(f"residuals freeze: never id(s) not in never_floor {extra}")
         rfc_text = rfc.read_text(encoding="utf-8") if rfc.is_file() else ""
-        if not rfc.is_file() and rfc.parent.is_dir():
+        if not rfc.is_file() and rfc_dir.is_dir():
             # public tree ships no docs/rfc; the never-floor list itself is
             # still frozen and cross-checked against the catalog above
             r.fail(f"residuals freeze: missing {RFC_0061}")

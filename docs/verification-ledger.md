@@ -2,7 +2,7 @@
 
 **Status:** living (atualizado no mesmo commit que o código que move uma linha de camada)
 **ID:** ledger-0187
-**Parents:** [0187](rfc/0187-teorema-experimento-tcb.md)
+**Parents:** 0187
 **Gate:** `python3 scripts/check_ledger_consistency.py` (bloqueante; vermelho em inconsistência com `scripts/formal/catalog.json`)
 
 Toda garantia do Pedra mora em uma de três camadas. Este ledger é a lista
@@ -112,7 +112,7 @@ Quatro frases sobre o fn que o rustc liga. Camada só sobe
 
 ### Herdados do 0187 — estado terminal (RFC-0191 P2.4)
 
-Os três gates herdados do [0187](rfc/0187-teorema-experimento-tcb.md) NÃO
+Os três gates herdados do 0187 NÃO
 foram re-fatiados para o RFC-0191 e NÃO foram descartados — permanecem
 exatamente onde o 0187 os deixou:
 

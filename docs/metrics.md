@@ -208,6 +208,6 @@ if report.status == pedradb_core::HealthStatus::ActionRequired {
 
 ## 5. Architectural References
 
-- **RFC-0269**: [Sistema Unificado de Métricas, Saúde, Intervenção e Telemetria](rfc/0269-sistema-unificado-metricas-saude-intervencao-telemetria.md)
-- **Comparative Research Report**: [Comparative Study of Database Internals & Health Observability](reports/2026-09-24-internal-metrics-and-health-observability.md)
-- **Zero-Twin Verification Policy**: [RFC-0270](rfc/0270-zero-twin-verification.md)
+- **RFC-0269**: Sistema Unificado de Métricas, Saúde, Intervenção e Telemetria
+- **Comparative Research Report**: Comparative Study of Database Internals & Health Observability
+- **Zero-Twin Verification Policy**: RFC-0270

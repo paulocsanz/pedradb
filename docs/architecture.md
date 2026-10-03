@@ -19,7 +19,7 @@ LSM (WiscKey / Monkey / Lazy Leveling), optional outer multi-node product that
 *embeds* PedraDB.
 
 Local library only. No server, no multi-node in this product.  
-Doctrine: [`positioning.md`](positioning.md) (phases A→D: justify → real → fast → trust).
+Doctrine: `positioning.md` (phases A→D: justify → real → fast → trust).
 
 ## Architecture (layered)
 
@@ -108,7 +108,7 @@ The **one** limit PedraDB shares with FDB is OCC conflict rate for long-running
 concurrent transactions — a property of optimistic concurrency control itself,
 not of any deployment topology.
 
-Full analysis: [`docs/fdb-limitations-analysis.md`](fdb-limitations-analysis.md).
+Full analysis: `docs/fdb-limitations-analysis.md`.
 
 ## Anti-features (deliberately NOT in the core)
 
@@ -126,7 +126,7 @@ as possible.
   library** only — like RocksDB. Horizontal scale and cross-node TX belong to a
   **different product** that *embeds* PedraDB per node (like TiKV embeds
   RocksDB). Research on that outer shape lives in
-  [`distribution-design.md`](distribution-design.md); it is **not** PedraDB
+  `distribution-design.md`; it is **not** PedraDB
   scope.
 
 ## Testing strategy: deterministic simulation
