@@ -5,6 +5,7 @@
 /vendor
 **/*.rs.bk
 *.log
+!lint.log
 /tmp
 
 # Research PDFs stay local; fichas / txt / catalog go in git.
@@ -23,4 +24,17 @@
 
 __pycache__/
 *.pyc
+
+# Stray CLI-arg dirs (e.g. a quoted `--help`): never commit.
+/--help/
+
+# Formal verification build artifacts (llbc / Lean extracts): outputs, not sources.
+/formal/out/
+
+# Cross-compiled build cache: never commit.
+/target-linux-arm64/
 formal/aeneas/repro/dyn-iterator/out/
+
+# DST campaign ephemeral progress files
+progress-*.jsonl
+**/progress-*.jsonl

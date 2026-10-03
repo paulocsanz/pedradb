@@ -19,6 +19,28 @@ pub const DEFAULT_RAM_HARD_NUM: u64 = 9;
 /// Default hard watermark ratio denominator: 10.
 pub const DEFAULT_RAM_HARD_DENOM: u64 = 10;
 
+/// Errors in RAM pressure configuration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RamPressureConfigError {
+    ZeroDenominator,
+    RatioExceedsUnity { num: u64, denom: u64 },
+    InvertedWatermarks { soft: u64, hard: u64 },
+    ZeroBudget,
+}
+
+impl std::fmt::Display for RamPressureConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ZeroDenominator => write!(f, "Ratio denominator cannot be 0"),
+            Self::RatioExceedsUnity { num, denom } => write!(f, "Ratio {num}/{denom} exceeds unity (1.0)"),
+            Self::InvertedWatermarks { soft, hard } => write!(f, "Soft watermark ({soft}) must be strictly less than hard ({hard})"),
+            Self::ZeroBudget => write!(f, "RAM budget cannot be 0"),
+        }
+    }
+}
+
+impl std::error::Error for RamPressureConfigError {}
+
 /// Action to take on write admission under RAM pressure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RamPressureVerdict {
@@ -28,6 +50,72 @@ pub enum RamPressureVerdict {
     EvictCaches,
     /// RAM is at or above hard watermark: throttle writer, aggressively flush and reclaim.
     ThrottleWriter,
+}
+
+impl std::fmt::Display for RamPressureVerdict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Admit => write!(f, "Admit"),
+            Self::EvictCaches => write!(f, "EvictCaches"),
+            Self::ThrottleWriter => write!(f, "ThrottleWriter"),
+        }
+    }
+}
+
+/// Fully validated RAM pressure configuration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RamPressureConfig {
+    pub budget: u64,
+    pub soft_watermark: u64,
+    pub hard_watermark: u64,
+}
+
+impl RamPressureConfig {
+    pub fn try_new(
+        budget: u64,
+        soft_ratio: (u64, u64),
+        hard_ratio: (u64, u64),
+    ) -> Result<Self, RamPressureConfigError> {
+        if budget == 0 {
+            return Err(RamPressureConfigError::ZeroBudget);
+        }
+        if soft_ratio.1 == 0 || hard_ratio.1 == 0 {
+            return Err(RamPressureConfigError::ZeroDenominator);
+        }
+        if soft_ratio.0 > soft_ratio.1 {
+            return Err(RamPressureConfigError::RatioExceedsUnity { num: soft_ratio.0, denom: soft_ratio.1 });
+        }
+        if hard_ratio.0 > hard_ratio.1 {
+            return Err(RamPressureConfigError::RatioExceedsUnity { num: hard_ratio.0, denom: hard_ratio.1 });
+        }
+        let soft_watermark = budget
+            .saturating_mul(soft_ratio.0)
+            .checked_div(soft_ratio.1)
+            .unwrap_or(0);
+        let hard_watermark = budget
+            .saturating_mul(hard_ratio.0)
+            .checked_div(hard_ratio.1)
+            .unwrap_or(0);
+        if soft_watermark >= hard_watermark {
+            return Err(RamPressureConfigError::InvertedWatermarks { soft: soft_watermark, hard: hard_watermark });
+        }
+        Ok(Self {
+            budget,
+            soft_watermark,
+            hard_watermark,
+        })
+    }
+
+    #[must_use]
+    pub fn evaluate(&self, current_bytes: u64) -> RamPressureVerdict {
+        if current_bytes >= self.hard_watermark {
+            RamPressureVerdict::ThrottleWriter
+        } else if current_bytes >= self.soft_watermark {
+            RamPressureVerdict::EvictCaches
+        } else {
+            RamPressureVerdict::Admit
+        }
+    }
 }
 
 /// Calculate soft and hard watermarks for a given budget in bytes.
@@ -225,4 +313,48 @@ mod tests {
         let resolved = resolve_ram_budget(None, Some(phys));
         assert_eq!(resolved, Some(6_000_000_000));
     }
+
+    #[test]
+    fn test_ram_pressure_config_structural_invariants_red_to_green() {
+        // Red test 1: Zero budget rejected
+        assert_eq!(
+            RamPressureConfig::try_new(0, (7, 10), (9, 10)),
+            Err(RamPressureConfigError::ZeroBudget)
+        );
+
+        // Red test 2: Zero denominator rejected
+        assert_eq!(
+            RamPressureConfig::try_new(1000, (7, 0), (9, 10)),
+            Err(RamPressureConfigError::ZeroDenominator)
+        );
+        assert_eq!(
+            RamPressureConfig::try_new(1000, (7, 10), (9, 0)),
+            Err(RamPressureConfigError::ZeroDenominator)
+        );
+
+        // Red test 3: Ratio > 1.0 rejected
+        assert_eq!(
+            RamPressureConfig::try_new(1000, (11, 10), (9, 10)),
+            Err(RamPressureConfigError::RatioExceedsUnity { num: 11, denom: 10 })
+        );
+
+        // Red test 4: Inverted or equal watermarks rejected
+        assert_eq!(
+            RamPressureConfig::try_new(1000, (9, 10), (7, 10)),
+            Err(RamPressureConfigError::InvertedWatermarks { soft: 900, hard: 700 })
+        );
+        assert_eq!(
+            RamPressureConfig::try_new(1000, (8, 10), (8, 10)),
+            Err(RamPressureConfigError::InvertedWatermarks { soft: 800, hard: 800 })
+        );
+
+        // Green test: Valid config evaluates thresholds correctly
+        let cfg = RamPressureConfig::try_new(1000, (7, 10), (9, 10)).expect("valid config");
+        assert_eq!(cfg.evaluate(500), RamPressureVerdict::Admit);
+        assert_eq!(cfg.evaluate(700), RamPressureVerdict::EvictCaches);
+        assert_eq!(cfg.evaluate(899), RamPressureVerdict::EvictCaches);
+        assert_eq!(cfg.evaluate(900), RamPressureVerdict::ThrottleWriter);
+        assert_eq!(cfg.evaluate(1500), RamPressureVerdict::ThrottleWriter);
+    }
 }
+

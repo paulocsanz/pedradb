@@ -41,11 +41,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Formal glue lint (drift = fail; debt ceiling 1002, realigned 2026-10-03)
+      - name: Formal glue lint (drift = fail; debt ceiling 0, realigned 2026-10-03)
         run: |
           set +e
           python3 scripts/formal/pedra_formal.py --lint > lint.log 2>&1
-          python3 scripts/ci_ratchet.py lint lint.log 1002
+          python3 scripts/ci_ratchet.py lint lint.log 0
       - name: Upload lint log on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -58,5 +58,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Public-mirror hygiene (no internal docs, no dangling internal links)
+      - name: Public-mirror hygiene (manifest surface, no internal docs, no dangling internal links)
         run: python3 scripts/check_public_hygiene.py
+      - name: Cross-references (every named script must exist)
+        run: python3 scripts/check_xrefs.py

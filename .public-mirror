@@ -1,0 +1,6 @@
+Public mirror tree (RFC-0331).
+Written by scripts/sync_public_repo.sh; never commit this file internally.
+Its presence engages pedra_formal.py mirror mode: the residuals freeze
+reports owner-RFC and never_floor/RFC-0061 text coherence as N/A because
+docs/rfc is internal-only by policy. Every other freeze tooth is
+unchanged and must pass here exactly as it does internally.

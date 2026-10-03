@@ -30,7 +30,33 @@ pub enum PreemptedIoLeaseViolation {
         issued_at_tick: u64,
         current_tick: u64,
     },
+    ZeroTokenId,
+    ZeroBytesAllowed,
+    ZeroDurationTicks,
+    ZeroRequestedBytes,
 }
+
+impl std::fmt::Display for PreemptedIoLeaseViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ExpiredIoLeaseExecuted { token_id, max_duration_ticks, elapsed_ticks, bytes } => {
+                write!(f, "Expired IO lease executed: token {token_id}, max {max_duration_ticks}, elapsed {elapsed_ticks}, bytes {bytes}")
+            }
+            Self::QuotaExceededPerIo { requested_bytes, max_allowed_bytes } => {
+                write!(f, "Quota exceeded: requested {requested_bytes} > allowed {max_allowed_bytes}")
+            }
+            Self::ClockSkewDetected { token_id, issued_at_tick, current_tick } => {
+                write!(f, "Clock skew detected: token {token_id} issued at {issued_at_tick} > current {current_tick}")
+            }
+            Self::ZeroTokenId => write!(f, "Token ID cannot be 0"),
+            Self::ZeroBytesAllowed => write!(f, "Bytes allowed cannot be 0"),
+            Self::ZeroDurationTicks => write!(f, "Duration ticks cannot be 0"),
+            Self::ZeroRequestedBytes => write!(f, "Requested bytes cannot be 0"),
+        }
+    }
+}
+
+impl std::error::Error for PreemptedIoLeaseViolation {}
 
 /// Token de lease temporal de I/O concedido pelo rate limiter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +69,31 @@ pub struct IoLeaseToken {
     pub issued_at_tick: u64,
     /// Duração máxima de validade do lease em ticks (ex: 50 ticks = 50ms).
     pub max_duration_ticks: u64,
+}
+
+impl IoLeaseToken {
+    pub fn try_new(
+        token_id: u64,
+        bytes_allowed: u64,
+        issued_at_tick: u64,
+        max_duration_ticks: u64,
+    ) -> Result<Self, PreemptedIoLeaseViolation> {
+        if token_id == 0 {
+            return Err(PreemptedIoLeaseViolation::ZeroTokenId);
+        }
+        if bytes_allowed == 0 {
+            return Err(PreemptedIoLeaseViolation::ZeroBytesAllowed);
+        }
+        if max_duration_ticks == 0 {
+            return Err(PreemptedIoLeaseViolation::ZeroDurationTicks);
+        }
+        Ok(Self {
+            token_id,
+            bytes_allowed,
+            issued_at_tick,
+            max_duration_ticks,
+        })
+    }
 }
 
 /// Decisão tomada na borda da chamada de sistema de I/O.
@@ -113,6 +164,9 @@ impl PreSyscallIoGuard {
         token: &IoLeaseToken,
         requested_bytes: u64,
     ) -> Result<(), PreemptedIoLeaseViolation> {
+        if requested_bytes == 0 {
+            return Err(PreemptedIoLeaseViolation::ZeroRequestedBytes);
+        }
         if requested_bytes > token.bytes_allowed {
             return Err(PreemptedIoLeaseViolation::QuotaExceededPerIo {
                 requested_bytes,
@@ -120,5 +174,37 @@ impl PreSyscallIoGuard {
             });
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_preemptible_io_lease_structural_invariants_red_to_green() {
+        assert_eq!(
+            IoLeaseToken::try_new(0, 1000, 10, 50),
+            Err(PreemptedIoLeaseViolation::ZeroTokenId)
+        );
+
+        assert_eq!(
+            IoLeaseToken::try_new(1, 0, 10, 50),
+            Err(PreemptedIoLeaseViolation::ZeroBytesAllowed)
+        );
+
+        assert_eq!(
+            IoLeaseToken::try_new(1, 1000, 10, 0),
+            Err(PreemptedIoLeaseViolation::ZeroDurationTicks)
+        );
+
+        let token = IoLeaseToken::try_new(1, 1000, 10, 50).unwrap();
+        assert_eq!(
+            PreSyscallIoGuard::verify_quota_safety(&token, 0),
+            Err(PreemptedIoLeaseViolation::ZeroRequestedBytes)
+        );
+
+        let disp = format!("{}", PreemptedIoLeaseViolation::ZeroTokenId);
+        assert!(!disp.is_empty());
     }
 }

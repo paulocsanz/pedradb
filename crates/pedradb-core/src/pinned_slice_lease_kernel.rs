@@ -4,6 +4,24 @@
 //! Automatically transitions zombie reader leases to isolated private copies
 //! (Copy-on-Exceed), freeing global table references and unblocking LSM compaction.
 
+/// Errors occurring during pinned slice lease lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PinnedLeaseError {
+    ZeroBlockId,
+    EmptyPayload,
+}
+
+impl std::fmt::Display for PinnedLeaseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ZeroBlockId => write!(f, "Block ID cannot be 0"),
+            Self::EmptyPayload => write!(f, "Payload cannot be empty"),
+        }
+    }
+}
+
+impl std::error::Error for PinnedLeaseError {}
+
 /// Status of a pinned slice lease.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeaseState {
@@ -37,6 +55,22 @@ pub struct PinnedSliceLease {
 }
 
 impl PinnedSliceLease {
+    /// Creates a new pinned shared lease referencing a block cache entry safely.
+    pub fn try_new_pinned(
+        block_id: u64,
+        payload: Vec<u8>,
+        acquired_tick: u64,
+        max_pin_ticks: u64,
+    ) -> Result<Self, PinnedLeaseError> {
+        if block_id == 0 {
+            return Err(PinnedLeaseError::ZeroBlockId);
+        }
+        if payload.is_empty() {
+            return Err(PinnedLeaseError::EmptyPayload);
+        }
+        Ok(Self::new_pinned(block_id, payload, acquired_tick, max_pin_ticks))
+    }
+
     /// Creates a new pinned shared lease referencing a block cache entry.
     #[must_use]
     pub fn new_pinned(
@@ -141,5 +175,29 @@ impl PinnedSliceLease {
     #[must_use]
     pub fn is_released(&self) -> bool {
         matches!(self.state, LeaseState::Released)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pinned_slice_lease_invariants_red_to_green() {
+        assert_eq!(
+            PinnedSliceLease::try_new_pinned(0, vec![1, 2, 3], 100, 50),
+            Err(PinnedLeaseError::ZeroBlockId)
+        );
+
+        assert_eq!(
+            PinnedSliceLease::try_new_pinned(42, vec![], 100, 50),
+            Err(PinnedLeaseError::EmptyPayload)
+        );
+
+        let lease = PinnedSliceLease::try_new_pinned(42, vec![1, 2, 3], 100, 50);
+        assert!(lease.is_ok());
+
+        let disp = format!("{}", PinnedLeaseError::ZeroBlockId);
+        assert!(!disp.is_empty());
     }
 }

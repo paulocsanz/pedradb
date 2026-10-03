@@ -22,7 +22,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 fn run() -> pedradb_core::Result<()> {
     let dir = scratch("vlog");
-    let mut db = ConcurrentDb::open_with(
+    let db = ConcurrentDb::open_with(
         &dir,
         OpenOptions {
             large_value_threshold: Some(1024),

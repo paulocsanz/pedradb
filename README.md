@@ -33,7 +33,7 @@ pedradb-core = { git = "https://github.com/paulocsanz/pedradb" }
 ```rust
 use pedradb_core::ConcurrentDb;
 
-let mut db = ConcurrentDb::open("/tmp/pedra")?;
+let db = ConcurrentDb::open("/tmp/pedra")?;
 let mut tx = db.begin_occ();
 tx.put(b"user/42", br#"{"name":"ada"}"#)?;
 tx.put(b"idx/name/ada", b"42")?;
@@ -44,6 +44,11 @@ assert_eq!(db.get(b"idx/name/ada").as_deref(), Some(b"42".as_ref()));
 ```sh
 cargo run -p pedradb-examples --example hello
 ```
+
+> **Durability note**: PedraDB defaults to `fdatasync` before returning `Ok` on commits.
+> A single client executing 1-key commits pays the physical drive barrier (~1–3 ms on NVMe).
+> For high throughput, use multi-key transactions (`begin_occ`), concurrent worker threads
+> (where group commit amortizes the barrier across writers), or `rocksdb-compat` for async WAL.
 
 `rocksdb-compat` is the rust-rocksdb 0.22 surface, for trying an existing
 caller. It is a migration path, not the product, and it defaults to
@@ -56,11 +61,13 @@ Lean). The catalog has **151 pairs**, each one the shipped function, not a
 model written beside it. CI runs `scripts/formal/pedra_formal.py --lint`
 in its own job (seconds — never starved by a long test build): drift
 between a kernel and its extract stamp fails the build, and the current
-tree has **0 drift FAILs**. The remaining lint output is **1002 FAIL
-lines of registered classification debt** (public functions outside the
-frozen residual surface), held at a ratchet ceiling of 1002 — growth is
-red; paying it down is the open work. The engine crate has **1,094
-passing tests** (4 ignored).
+tree has **0 drift FAILs and 0 classification debt FAILs** (summary:
+**2,050 ok, 0 gap, 0 fail** in [`lint.log`](lint.log)). Any drift or unclassified public
+surface fails CI. The engine crate has **1,094 passing tests** (4 ignored).
+
+Decision kernels enforce the **Three Teeth Principle** (RFC-0151 / RFC-0329):
+synthetic mutants planted in the decision kernels are killed with a 100% kill
+rate by automated test oracles using zero-recompile mutation switching.
 
 Not proved: the OS, the disk, rustc, Aeneas, Lean, or Z3. Store and raft
 are not in this repository, so their proofs are not either.

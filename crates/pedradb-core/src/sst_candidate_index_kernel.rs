@@ -11,6 +11,9 @@ pub enum SstCandidateIndexError {
     ZeroFileNumber,
     InvertedKeyRange { smallest: Vec<u8>, largest: Vec<u8> },
     DuplicateFileNumber(u64),
+    EmptyUserKey,
+    ZeroSequenceMax,
+    EmptyIntervals,
 }
 
 impl fmt::Display for SstCandidateIndexError {
@@ -26,6 +29,11 @@ impl fmt::Display for SstCandidateIndexError {
             }
             Self::DuplicateFileNumber(file_num) => {
                 write!(f, "Duplicate SST file number registered: {}", file_num)
+            }
+            Self::EmptyUserKey => write!(f, "SST user key cannot be empty"),
+            Self::ZeroSequenceMax => write!(f, "SST sequence max cannot be zero"),
+            Self::EmptyIntervals => {
+                write!(f, "SST interval candidate index cannot be built from empty intervals")
             }
         }
     }
@@ -52,6 +60,12 @@ impl SstIntervalMetadata {
     ) -> Result<Self, SstCandidateIndexError> {
         if file_number == 0 {
             return Err(SstCandidateIndexError::ZeroFileNumber);
+        }
+        if smallest_user_key.is_empty() || largest_user_key.is_empty() {
+            return Err(SstCandidateIndexError::EmptyUserKey);
+        }
+        if seq_max == 0 {
+            return Err(SstCandidateIndexError::ZeroSequenceMax);
         }
         if smallest_user_key > largest_user_key {
             return Err(SstCandidateIndexError::InvertedKeyRange {
@@ -91,7 +105,7 @@ impl SstIntervalMetadata {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SstCandidateIndex {
     /// SST intervals sorted lexicographically by smallest_user_key, then by seq_max descending.
     intervals: Vec<SstIntervalMetadata>,
@@ -106,9 +120,18 @@ impl SstCandidateIndex {
     /// Validates monotonicity, checks for duplicate file numbers, sorts intervals
     /// and precomputes running prefix maximums.
     pub fn try_new(mut intervals: Vec<SstIntervalMetadata>) -> Result<Self, SstCandidateIndexError> {
+        if intervals.is_empty() {
+            return Err(SstCandidateIndexError::EmptyIntervals);
+        }
         for iv in &intervals {
             if iv.file_number == 0 {
                 return Err(SstCandidateIndexError::ZeroFileNumber);
+            }
+            if iv.smallest_user_key.is_empty() || iv.largest_user_key.is_empty() {
+                return Err(SstCandidateIndexError::EmptyUserKey);
+            }
+            if iv.seq_max == 0 {
+                return Err(SstCandidateIndexError::ZeroSequenceMax);
             }
             if iv.smallest_user_key > iv.largest_user_key {
                 return Err(SstCandidateIndexError::InvertedKeyRange {
@@ -262,6 +285,34 @@ impl SstCandidateIndex {
         combined.into_iter().map(|(_, fn_num)| fn_num).collect()
     }
 
+    /// Queries point candidates with input key validation.
+    pub fn try_query_point_candidates(&self, user_key: &[u8]) -> Result<Vec<u64>, SstCandidateIndexError> {
+        if user_key.is_empty() {
+            return Err(SstCandidateIndexError::EmptyUserKey);
+        }
+        Ok(self.query_point_candidates(user_key))
+    }
+
+    /// Queries candidates with tombstones with input key validation.
+    pub fn try_query_candidates_with_tombstones(&self, user_key: &[u8]) -> Result<Vec<u64>, SstCandidateIndexError> {
+        if user_key.is_empty() {
+            return Err(SstCandidateIndexError::EmptyUserKey);
+        }
+        Ok(self.query_candidates_with_tombstones(user_key))
+    }
+
+    /// Verifies candidate retrieval completeness with input key validation.
+    pub fn try_verify_candidate_completeness(
+        &self,
+        user_key: &[u8],
+        expected_overlapping_files: &[u64],
+    ) -> Result<bool, SstCandidateIndexError> {
+        if user_key.is_empty() {
+            return Err(SstCandidateIndexError::EmptyUserKey);
+        }
+        Ok(self.verify_candidate_completeness(user_key, expected_overlapping_files))
+    }
+
     /// Verifies that candidate retrieval satisfies zero false-negatives against exhaustive scan.
     pub fn verify_candidate_completeness(
         &self,
@@ -275,5 +326,48 @@ impl SstCandidateIndex {
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sst_candidate_index_structural_invariants_red_to_green() {
+        let meta1 = SstIntervalMetadata::try_new(1, b"a".to_vec(), b"c".to_vec(), false, 10)
+            .expect("meta1");
+        let meta2 = SstIntervalMetadata::try_new(2, b"b".to_vec(), b"d".to_vec(), true, 20)
+            .expect("meta2");
+
+        // 1. Build index successfully
+        let idx = SstCandidateIndex::try_new(vec![meta1, meta2]).expect("valid index");
+        assert_eq!(idx.total_tables(), 2);
+        assert!(idx.has_range_tombstones());
+        assert_eq!(idx.tombstone_files(), &[2]);
+
+        // 2. Reject empty user key in try_new
+        let err_empty_k = SstIntervalMetadata::try_new(1, vec![], b"c".to_vec(), false, 10);
+        assert_eq!(err_empty_k, Err(SstCandidateIndexError::EmptyUserKey));
+
+        // 3. Reject zero sequence max
+        let err_zero_seq = SstIntervalMetadata::try_new(1, b"a".to_vec(), b"c".to_vec(), false, 0);
+        assert_eq!(err_zero_seq, Err(SstCandidateIndexError::ZeroSequenceMax));
+
+        // 4. Reject empty intervals in index build
+        let err_empty_idx = SstCandidateIndex::try_new(vec![]);
+        assert_eq!(err_empty_idx, Err(SstCandidateIndexError::EmptyIntervals));
+
+        // 5. Query candidate keys
+        let cands = idx.try_query_point_candidates(b"b").expect("query");
+        assert!(cands.contains(&1));
+        assert!(cands.contains(&2));
+
+        let err_query_empty = idx.try_query_point_candidates(b"");
+        assert_eq!(err_query_empty, Err(SstCandidateIndexError::EmptyUserKey));
+
+        // 6. Display & Error implementations
+        let d = format!("{}", SstCandidateIndexError::EmptyIntervals);
+        assert!(d.contains("cannot be built from empty intervals"));
     }
 }

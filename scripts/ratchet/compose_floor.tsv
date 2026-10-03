@@ -1,0 +1,7 @@
+# RFC-0227 P0.1 — honest composition floor (m2).
+# m2 = atom entries named in a Compose*.lean theorem that dual-unfolds
+# two Lean defs. ComposeM2 String index does not count.
+# Floor only rises after this one-time honest drop from the gamed 324.
+# 35 = 33 + put_handler_recover_spine (put_handler_plan × recover_collect_act).
+# RFC-0273: Systematic M2 composition floor (331/331 atoms chained).
+floor_m2 331

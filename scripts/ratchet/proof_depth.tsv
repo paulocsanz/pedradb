@@ -1,0 +1,28 @@
+# RFC-0188 P0.1/P0.3 — formal depth ratchet (floors + cap + series).
+# The proof ladder is extract -> close -> atom (RFC-0188 background).
+#   floor_extract/floor_close/floor_atom are FLOORS: actual depth below
+#   floor = red (a proof regressed). Floors only move UP, in the SAME
+#   commit as the proof that earns the move.
+#   cap_data_fate is a CAP: more data-fate atoms in glue = red. It only
+#   moves DOWN (trampoline monotonicity; reductions keep landing per fire).
+#   handler_loc is a recorded SERIES (not enforced): move it in the same
+#   commit as a trampoline change; the diff is the review artifact.
+# close/atom proofs are REGISTERED in close_proofs.tsv (the ladder credit);
+# floor_close/floor_atom count REGISTERED proofs. residuals.json
+# proof_depth counts registered proofs + unregistered close/atom twins
+# without extraction (pedra_formal.py rule) and must EQUAL that live count.
+# RFC-0188 P1.6 registered visible_at atom (0085e919) moving one pair from
+# extract to atom; the extract freeze went stale there (276 frozen vs 275
+# live) — P1.5 recounts it honestly and moves floor_extract to 275 in the
+# SAME commit (a ladder promotion, not a lost extraction).
+# RFC-0199 adds the `count` credit (work-count theorem over an Aeneas
+# extract): floor_count counts REGISTERED count rows and only moves UP,
+# in the SAME commit as the theorem. Count is orthogonal to the ladder —
+# a pair may carry close AND count. residuals proof_depth.count equals
+# the live count of registered count rows.
+floor_extract 0
+floor_close 6
+floor_atom 331
+floor_count 7
+cap_data_fate 0
+handler_loc 126548

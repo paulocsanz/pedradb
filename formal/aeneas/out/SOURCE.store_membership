@@ -1,0 +1,4 @@
+path=crates/pedradb-store/src/membership_kernel.rs
+sha256=e16a72e5b2b0f920bc9dd492823e3e34c70d9806f4579d34f97c7b77fac6acaa
+aeneas=f5a4c58-dirty
+charon=0.1.232

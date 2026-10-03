@@ -331,9 +331,28 @@ impl<W: EnvFile> WalWriter<W> {
             _ => return Ok(()),
         };
         let len = buf.len() as u64;
-        match self.emit_bytes(&buf, start) {
+        let write_at = crate::mutate_switch!(
+            crate::mutation_switch_kernel::MUTANT_WAL_STAGED_DRAIN_AT_POSITION,
+            start,
+            self.position.saturating_sub(len)
+        );
+        match self.emit_bytes(&buf, write_at) {
             Ok(()) => {
-                self.commit_pwrite(start, len);
+                crate::mutate_switch!(
+                    crate::mutation_switch_kernel::MUTANT_WAL_STAGED_DRAIN_SKIP_COMMIT,
+                    self.commit_pwrite(start, len),
+                    ()
+                );
+                crate::mutate_switch!(
+                    crate::mutation_switch_kernel::MUTANT_WAL_STAGED_DRAIN_AT_POSITION,
+                    (),
+                    {
+                        self.position = self.position.max(write_at + len);
+                        if self.reserved_to < self.position {
+                            self.reserved_to = self.position;
+                        }
+                    }
+                );
                 Ok(())
             }
             Err(e) => {
@@ -574,9 +593,17 @@ impl<W: EnvFile> WalWriter<W> {
             return Ok(());
         }
         let len = buf.len() as u64;
-        let at = self.reserve_pending(len);
+        let at = crate::mutate_switch!(
+            crate::mutation_switch_kernel::MUTANT_WAL_WRITE_AT_POSITION,
+            self.reserve_pending(len),
+            self.position
+        );
         self.emit_bytes(buf, at)?;
-        self.commit_pwrite(at, len);
+        crate::mutate_switch!(
+            crate::mutation_switch_kernel::MUTANT_WAL_STAGED_DRAIN_SKIP_COMMIT,
+            self.commit_pwrite(at, len),
+            ()
+        );
         Ok(())
     }
 
@@ -825,6 +852,31 @@ impl<W: crate::env::EnvFile> WalWriter<W> {
             WalSink::Shared(arc) => {
                 arc.release_wal_map();
                 arc.set_len_shared(pos)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Discard uncommitted in-memory staged/framed data and shrink the physical file to `offset` (RFC-0333).
+    pub(crate) fn discard_uncommitted(&mut self, offset: u64) -> Result<()> {
+        if let Some(st) = &mut self.staged {
+            st.buf.clear();
+            st.start = offset;
+        }
+        self.completed_pwrite_intervals.retain(|&ticket, _| ticket < offset);
+        self.position = offset;
+        self.reserved_to = offset;
+        self.block_offset = (offset as usize) % BLOCK_SIZE;
+        match &mut self.sink {
+            WalSink::Exclusive(w) => {
+                w.release_wal_map();
+                w.set_len(offset)?;
+                use std::io::SeekFrom;
+                let _ = w.seek(SeekFrom::Start(offset));
+            }
+            WalSink::Shared(arc) => {
+                arc.release_wal_map();
+                arc.set_len_shared(offset)?;
             }
         }
         Ok(())
@@ -1587,6 +1639,138 @@ mod tests {
         // Bytes must actually be in the sink!
         let sink = writer.into_inner().into_inner();
         assert_eq!(sink.len() as u64, pos);
+    }
+
+    #[test]
+    fn rfc0331_v14_mutant_1010_skip_commit_truncate_wipes_is_killed() {
+        static RFC0331_V14_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _v14 = RFC0331_V14_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        use crate::mutation_switch_kernel::{
+            MutantGuard, MUTANT_WAL_STAGED_DRAIN_SKIP_COMMIT,
+        };
+        // Baseline: staged bytes drain, position drains, truncate keeps them.
+        let mut base = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        base.enable_staging(64 * 1024);
+        base.write_frame(b"record-one").unwrap();
+        base.write_frame(b"record-two").unwrap();
+        base.truncate_to_logical().unwrap();
+        let base_len = base.into_inner().into_inner().len();
+        assert!(base_len > 0, "baseline: drained staged bytes survive");
+
+        // Mutant 1010: drain writes but never commits the interval — the
+        // truncate then cuts the sink at the stalled watermark and wipes
+        // committed bytes. The kill oracle is the sink length itself.
+        let mut w = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        w.enable_staging(64 * 1024);
+        {
+            let _g = MutantGuard::activate(MUTANT_WAL_STAGED_DRAIN_SKIP_COMMIT);
+            w.write_frame(b"record-one").unwrap();
+            w.write_frame(b"record-two").unwrap();
+            w.truncate_to_logical().unwrap();
+        }
+        let len = w.into_inner().into_inner().len();
+        assert_eq!(
+            len, 0,
+            "mutant 1010 must wipe the segment at the stalled watermark —              surviving bytes mean the kill oracle is vacuous"
+        );
+    }
+
+    #[test]
+    fn rfc0331_v14_mutant_1011_staged_drain_at_position_is_killed() {
+        static RFC0331_V14_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _v14 = RFC0331_V14_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        use crate::env::Env;
+        use crate::mutation_switch_kernel::{
+            MutantGuard, MUTANT_WAL_STAGED_DRAIN_AT_POSITION,
+        };
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("pedra-rfc0331-m1011-{nanos}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wal.log");
+
+        // Baseline on a REAL sink (honors write offsets; the test Cursor
+        // appends at its own position, which masked this mutant): two
+        // staged frames drain at their own reserved spans, back to back.
+        {
+            let f = crate::env::StdEnv.create(&path).unwrap();
+            let mut w = WalWriter::new(f).unwrap();
+            w.enable_staging(1); // flush every append
+            w.write_frame(b"frame-one").unwrap();
+            w.write_frame(b"frame-two").unwrap();
+            w.truncate_to_logical().unwrap(); // shrink the mmap pad
+            drop(w);
+            let sink = std::fs::read(&path).unwrap();
+            assert_eq!(
+                sink.as_slice(),
+                b"frame-oneframe-two".as_slice(),
+                "baseline: drained bytes survive, back to back"
+            );
+        }
+
+        // Mutant 1011: the second drain writes at position-len — on top of
+        // the first frame. The kill oracle is the sink itself.
+        {
+            let f = crate::env::StdEnv.create(&path).unwrap();
+            let mut w = WalWriter::new(f).unwrap();
+            w.enable_staging(1);
+            w.write_frame(b"frame-one").unwrap();
+            {
+                let _g = MutantGuard::activate(MUTANT_WAL_STAGED_DRAIN_AT_POSITION);
+                w.write_frame(b"frame-two").unwrap();
+            }
+            w.truncate_to_logical().unwrap();
+            drop(w);
+            let sink = std::fs::read(&path).unwrap();
+            assert_ne!(
+                sink.as_slice(),
+                b"frame-oneframe-two".as_slice(),
+                "mutant 1011 must be DETECTED on a real sink"
+            );
+            assert!(
+                sink.starts_with(b"frame-two"),
+                "mutant 1011 regression shape: frame-two overwrote frame-one at position-len"
+            );
+            assert!(
+                sink[b"frame-two".len()..].iter().all(|&b| b == 0),
+                "mutant 1011 regression shape: the reserved span tail is unwritten zeros"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rfc0331_v14_mutant_1009_write_at_position_overlap_is_killed() {
+        use crate::mutation_switch_kernel::{
+            MutantGuard, MUTANT_WAL_WRITE_AT_POSITION,
+        };
+        // Baseline: a ticket is reserved off-lock [0, 10), holding frontier=10 while position=0.
+        // A direct write_owned writes at frontier [10, 20).
+        let mut base = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        let ticket = base.reserve_pending(10);
+        assert_eq!(ticket, 0);
+        assert_eq!(base.position(), 0);
+        base.write_owned(b"0123456789").unwrap();
+        assert_eq!(base.reservation_frontier(), 20);
+
+        // Mutant 1009: write_owned writes at position (0) instead of reserve_pending (10).
+        let mut w = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        let ticket = w.reserve_pending(10);
+        assert_eq!(ticket, 0);
+        assert_eq!(w.position(), 0);
+        {
+            let _g = MutantGuard::activate(MUTANT_WAL_WRITE_AT_POSITION);
+            w.write_owned(b"0123456789").unwrap();
+        }
+        assert_ne!(
+            w.reservation_frontier(),
+            20,
+            "mutant 1009 must be DETECTED: written at position 0 without advancing reservation frontier"
+        );
+        assert_eq!(w.reservation_frontier(), 10);
     }
 }
 

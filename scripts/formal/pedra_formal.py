@@ -81,6 +81,25 @@ def match_braces(src: str, open_at: int) -> int:
     n = len(src)
     while i < n:
         c = src[i]
+        if c == "r":
+            # raw string r"…" / r#"…"# / r##"…"## — braces inside are data
+            j = i + 1
+            hashes = 0
+            while j < n and src[j] == "#":
+                hashes += 1
+                j += 1
+            if j < n and src[j] == '"':
+                term = '"' + "#" * hashes
+                end = src.find(term, j + 1)
+                if end < 0:
+                    raise ValueError("unbalanced raw string")
+                i = end + len(term)
+                continue
+        if c == "'":
+            m = CHAR_LIT.match(src, i)
+            if m:  # char literal ('{', '}', '\u{1}') — braces are data
+                i = m.end()
+                continue
         if c == "{":
             depth += 1
         elif c == "}":
@@ -97,19 +116,29 @@ def match_braces(src: str, open_at: int) -> int:
     raise ValueError("unbalanced braces")
 
 
+CHAR_LIT = re.compile(r"'(?:[^'\\\n]|\\(?:u\{[0-9a-fA-F_]+\}|.))'")
+
+
 def strip_cfg_test_mods(src: str) -> str:
     """Drop `#[cfg(test)]` modules so test helpers are not proved exec.
 
     RFC-0171 single-artifact kernels keep plants in the production file;
     char literals / format `{}` in those helpers are not the twin term.
     Unparsable trailing tests are truncated from the marker (tests last).
+    A statement-level cfg (`#[cfg(test)] let …` inside a production fn)
+    is part of the body and stays.
     """
     text = src
     marker = "#[cfg(test)]"
+    pos = 0
     while True:
-        i = text.find(marker)
+        i = text.find(marker, pos)
         if i < 0:
             return text
+        rest = text[i + len(marker) :].lstrip()
+        if not rest.startswith(("mod ", "fn ", "pub ")):
+            pos = i + len(marker)
+            continue
         brace = text.find("{", i)
         if brace < 0:
             return text[:i]
@@ -118,6 +147,7 @@ def strip_cfg_test_mods(src: str) -> str:
         except ValueError:
             return text[:i]
         text = text[:i] + text[end + 1 :]
+        pos = 0
 
 
 def iter_fns(src: str):
@@ -200,8 +230,12 @@ def load_text(root: Path, rel: str) -> str | None:
 
 
 def mentions(src: str, symbol: str) -> bool:
+    # Generic fn defs (`fn recover_ssts<E: Env>(`) are live handlers too.
     return (
-        re.search(r"\b" + re.escape(symbol) + r"\s*\(", strip_comments(src))
+        re.search(
+            r"\b" + re.escape(symbol) + r"(?:\s*<[^>]*>)?\s*\(",
+            strip_comments(src),
+        )
         is not None
     )
 
@@ -295,55 +329,51 @@ def check_lint(root: Path, catalog: dict, r: Report) -> None:
 
 # RFC-0152: these catalog kernels must be the store live RV/AE path.
 STORE_LIVE_KERNELS = {
-    "vote": ("crates/pedradb-store/src/lib.rs", "on_request_vote"),
-    "ae_entry": ("crates/pedradb-store/src/lib.rs", "on_append_entries"),
-    "grant_persist": ("crates/pedradb-store/src/lib.rs", "on_request_vote"),
-    "ae_ack": ("crates/pedradb-store/src/lib.rs", "on_append_entries"),
-    "commit_raft": ("crates/pedradb-store/src/lib.rs", "broadcast_append_after_propose"),
-    "joint_election": ("crates/pedradb-store/src/lib.rs", "election_has_joint_quorum"),
-    "joint_leave": ("crates/pedradb-store/src/lib.rs", "pending_joint_on"),
-    "pending_joint_node": ("crates/pedradb-store/src/lib.rs", "pending_joint"),
-    "joint_leave_ok": ("crates/pedradb-store/src/lib.rs", "leave_joint"),
-    "election_grant_from": ("crates/pedradb-store/src/lib.rs", "on_request_vote_reply"),
-    "joint_target": ("crates/pedradb-store/src/lib.rs", "remove_member_joint"),
-    "joint_add_target": ("crates/pedradb-store/src/lib.rs", "add_member_joint"),
-    "queued_leave_finish": ("crates/pedradb-store/src/lib.rs", "finish_uncommitted_leave"),
-    "disk_membership": ("crates/pedradb-store/src/lib.rs", "bind_cluster_identity"),
-    "high_water": ("crates/pedradb-store/src/lib.rs", "open_single_node_with_rng_opts"),
-    "participating_member": ("crates/pedradb-store/src/lib.rs", "is_participating"),
-    "identity_before_applied": ("crates/pedradb-store/src/lib.rs", "apply_range"),
-    "recover_apply": ("crates/pedradb-store/src/lib.rs", "recover_apply_committed"),
-    "recover_apply_node": ("crates/pedradb-store/src/lib.rs", "recover_apply_committed"),
-    "recover_truncate": ("crates/pedradb-store/src/lib.rs", "persist_truncated_logs"),
-    "recover_drop_orphan": ("crates/pedradb-store/src/lib.rs", "persist_log_db"),
-    "recover_abort": ("crates/pedradb-store/src/lib.rs", "abort_leftover_intents"),
-    "persist_meta": ("crates/pedradb-store/src/lib.rs", "persist_u64_meta_all"),
-    "persist_hist": ("crates/pedradb-store/src/lib.rs", "persist_si_keys"),
-    "persist_fence": ("crates/pedradb-store/src/lib.rs", "fence_txn_aborted"),
-    "force_clear": ("crates/pedradb-store/src/lib.rs", "force_local_clear_keys"),
-    "drop_preimages": ("crates/pedradb-store/src/lib.rs", "drop_preimages"),
-    "open_peer_disk": ("crates/pedradb-store/src/lib.rs", "open_with_envs_rng_opts"),
-    "local_id_member": ("crates/pedradb-store/src/lib.rs", "local_node_id"),
-    "reader_local": ("crates/pedradb-store/src/lib.rs", "ids_first_if_local"),
-    "discard_uncommitted": ("crates/pedradb-store/src/lib.rs", "discard_uncommitted_from"),
-    "discard_leader": ("crates/pedradb-store/src/lib.rs", "finish_queued_propose"),
-    "removed_step_down": ("crates/pedradb-store/src/lib.rs", "install_applied_membership"),
-    "hint_member": ("crates/pedradb-store/src/lib.rs", "leader_hint"),
-    "drop_repl_slot": ("crates/pedradb-store/src/lib.rs", "install_applied_membership"),
-    "drop_sent_through": ("crates/pedradb-store/src/lib.rs", "remove_member"),
-    "apply_step": ("crates/pedradb-store/src/lib.rs", "apply_range"),
+    "vote": ("crates/pedradb-store/src/lib_kernel.rs", "on_request_vote"),
+    "ae_entry": ("crates/pedradb-store/src/lib_kernel.rs", "on_append_entries"),
+    "grant_persist": ("crates/pedradb-store/src/lib_kernel.rs", "on_request_vote"),
+    "ae_ack": ("crates/pedradb-store/src/lib_kernel.rs", "on_append_entries"),
+    "commit_raft": ("crates/pedradb-store/src/lib_kernel.rs", "broadcast_append_after_propose"),
+    "joint_election": ("crates/pedradb-store/src/lib_kernel.rs", "election_has_joint_quorum"),
+    "joint_leave": ("crates/pedradb-store/src/lib_kernel.rs", "pending_joint_on"),
+    "pending_joint_node": ("crates/pedradb-store/src/lib_kernel.rs", "pending_joint"),
+    "joint_leave_ok": ("crates/pedradb-store/src/lib_kernel.rs", "leave_joint"),
+    "election_grant_from": ("crates/pedradb-store/src/lib_kernel.rs", "on_request_vote_reply"),
+    "joint_target": ("crates/pedradb-store/src/lib_kernel.rs", "remove_member_joint"),
+    "joint_add_target": ("crates/pedradb-store/src/lib_kernel.rs", "add_member_joint"),
+    "queued_leave_finish": ("crates/pedradb-store/src/lib_kernel.rs", "finish_uncommitted_leave"),
+    "disk_membership": ("crates/pedradb-store/src/lib_kernel.rs", "bind_cluster_identity"),
+    "high_water": ("crates/pedradb-store/src/lib_kernel.rs", "open_single_node_with_rng_opts"),
+    "participating_member": ("crates/pedradb-store/src/lib_kernel.rs", "is_participating"),
+    "identity_before_applied": ("crates/pedradb-store/src/lib_kernel.rs", "apply_range"),
+    "recover_apply": ("crates/pedradb-store/src/lib_kernel.rs", "recover_apply_committed"),
+    "recover_apply_node": ("crates/pedradb-store/src/lib_kernel.rs", "recover_apply_committed"),
+    "recover_truncate": ("crates/pedradb-store/src/lib_kernel.rs", "persist_truncated_logs"),
+    "recover_drop_orphan": ("crates/pedradb-store/src/lib_kernel.rs", "persist_log_db"),
+    "recover_abort": ("crates/pedradb-store/src/lib_kernel.rs", "abort_leftover_intents"),
+    "persist_meta": ("crates/pedradb-store/src/lib_kernel.rs", "persist_u64_meta_all"),
+    "persist_hist": ("crates/pedradb-store/src/lib_kernel.rs", "persist_si_keys"),
+    "persist_fence": ("crates/pedradb-store/src/lib_kernel.rs", "fence_txn_aborted"),
+    "force_clear": ("crates/pedradb-store/src/lib_kernel.rs", "force_local_clear_keys"),
+    "drop_preimages": ("crates/pedradb-store/src/lib_kernel.rs", "drop_preimages"),
+    "open_peer_disk": ("crates/pedradb-store/src/lib_kernel.rs", "open_with_envs_rng_opts"),
+    "local_id_member": ("crates/pedradb-store/src/lib_kernel.rs", "local_node_id"),
+    "reader_local": ("crates/pedradb-store/src/lib_kernel.rs", "ids_first_if_local"),
+    "discard_uncommitted": ("crates/pedradb-store/src/lib_kernel.rs", "discard_uncommitted_from"),
+    "discard_leader": ("crates/pedradb-store/src/lib_kernel.rs", "finish_queued_propose"),
+    "removed_step_down": ("crates/pedradb-store/src/lib_kernel.rs", "install_applied_membership"),
+    "hint_member": ("crates/pedradb-store/src/lib_kernel.rs", "leader_hint"),
+    "drop_repl_slot": ("crates/pedradb-store/src/lib_kernel.rs", "install_applied_membership"),
+    "drop_sent_through": ("crates/pedradb-store/src/lib_kernel.rs", "remove_member"),
+    "apply_step": ("crates/pedradb-store/src/lib_kernel.rs", "apply_range"),
 }
 
-STORE_LIVE_PATH = "crates/pedradb-store/src/lib.rs"
+STORE_LIVE_PATH = "crates/pedradb-store/src/lib_kernel.rs"
 
 
 def check_store_live(_root: Path, catalog: dict, r: Report) -> None:
     """Refuse a vote/ae_entry catalog that is not wired through store live RPC."""
     print("== store live (RFC-0152: queued RV/AE is the catalog kernel) ==")
-    if not (_root / STORE_LIVE_PATH).is_file():
-        # public tree: the store layer is not shipped; nothing to wire
-        r.good("store live: store crate not shipped in this tree")
-        return
     ids = {p["id"]: p for p in catalog["pairs"]}
     for pid, (path, handler) in STORE_LIVE_KERNELS.items():
         pair = ids.get(pid)
@@ -373,8 +403,7 @@ def check_raft_store_live(root: Path, catalog: dict, r: Report) -> None:
     print("== raft→store live_callers (RFC-0152 C) ==")
     store = load_text(root, STORE_LIVE_PATH)
     if store is None:
-        # public tree: neither raft nor the store layer is shipped here
-        r.good("raft→store live_callers: raft/store not shipped in this tree")
+        r.fail(f"missing {STORE_LIVE_PATH}")
         return
     for pair in catalog["pairs"]:
         kernel = pair.get("kernel") or ""
@@ -584,137 +613,578 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
 #
 # 2026-08-31: leveling.rs graduated from this allowlist into catalog pairs
 # `leveling` (close) + `leveling_pick` (atom) — twins
-# verus/leveling{,_pick}.rs, plant in src/leveling.rs (debt registered
-# 2026-08-31: leveling kernel unenrolled). The allowlist is empty; keep it
+# verus/leveling{,_pick}.rs, plant in src/leveling.rs (findings/
+# 2026-08-31-leveling-kernel-unenrolled). The allowlist is empty; keep it
 # that way (transitional states get a comment, not a permanent row).
 TCB_FREEZE_ALLOWLIST: dict[str, str] = {
-    "crates/pedradb-core/src/disk_pressure_kernel.rs":
-        "RFC-0179 Aeneas extract SOURCE.disk_pressure (catalog twin pending)",
-    # 2026-09-12: perf-lane heuristic kernels — scheduling/buffering decisions
-    # with cargo-test AS-IS twins (rfc0209_*/rfc0211_*), no Verus twin by
-    # design (precedent: scan_readahead 0195 pending the same graduation).
-    "crates/pedradb-core/src/wal_buffer_kernel.rs":
-        "RFC-0209 P0.1 heuristic kernel (should_flush; twin cargo-test)",
-    "crates/pedradb-core/src/rmw_sched_kernel.rs":
-        "RFC-0211 P0.1 heuristic kernel (rmw_group_sched; twin cargo-test)",
-    # 2026-09-23 public sync: rustc-linked engine files. The decision
-    # atoms stay catalog pairs; these are the modules around them.
+    "crates/montanha-fdb-recipes/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-capi/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/buggify_hooks_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/bulk_ingest_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/bulk_run_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/cache_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/change_feed_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/client_axis_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/concurrent_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/concurrent_open_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/concurrent_put_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/corrupt_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/db/lookup_archive_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/db_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/db_open_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "RFC-0157 stage 2 split; include! trampoline not a decision kernel",
     "crates/pedradb-core/src/db_put_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/durability_spine_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "RFC-0157 stage 2 split; include! trampoline not a decision kernel",
+    "crates/pedradb-core/src/concurrent_open_kernel.rs":
+        "RFC-0157 stage 2 split; include! trampoline not a decision kernel",
+    "crates/pedradb-core/src/concurrent_put_kernel.rs":
+        "RFC-0157 stage 2 split; include! trampoline not a decision kernel",
+    "crates/pedradb-core/src/disk_pressure_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/env_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/error_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/filter_partition_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/group_window_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/group_commit_queue_kernel.rs":
+        "RFC-0309 Zero-Twin Loom concurrency synchronization kernel",
+    "crates/pedradb-core/src/torn_write_recovery_kernel.rs":
+        "RFC-0310 Torn-write recovery and resilient frame parser kernel",
+    "crates/pedradb-core/src/foster_lyapunov_pacer_kernel.rs":
+        "RFC-0311 Foster-Lyapunov stochastic ingestion pacer kernel",
+    "crates/pedradb-core/src/sst_block_decompression_guard_kernel.rs":
+        "RFC-0311 SST block decompression bomb and safe varint guard kernel",
+    "crates/pedradb-core/src/direct_io_sector_alignment_kernel.rs":
+        "RFC-0312 NVMe Direct-I/O physical sector alignment and slicing kernel",
+    "crates/pedradb-core/src/wal_prune_watermark_kernel.rs":
+        "RFC-0312 Multi-CF safe WAL pruning watermark and snapshot barrier kernel",
+    "crates/pedradb-core/src/compaction_hysteresis_pacer_kernel.rs":
+        "RFC-0313 Compaction anti-thrashing hysteresis controller kernel",
+    "crates/pedradb-core/src/quiescent_epoch_reclaim_kernel.rs":
+        "RFC-0313 Lock-free quiescent epoch memory reclamation kernel",
+    "crates/pedradb-core/src/wal_segment_seal_kernel.rs":
+        "RFC-0314 Atomic WAL segment seal and preallocated extent kernel",
+    "crates/pedradb-core/src/compaction_overlap_matrix_kernel.rs":
+        "RFC-0314 Leveled compaction overlap minimization matrix kernel",
+    "crates/pedradb-core/src/sst_candidate_index_kernel.rs":
+        "RFC-0315 Leveled SST interval candidate index kernel",
+    "crates/pedradb-core/src/decay_model_kernel.rs":
+        "RFC-0315 Deterministic complexity decay model evaluator kernel",
+    "crates/pedradb-core/src/front_coding_block_iter_kernel.rs":
+        "RFC-0316 Differential prefix front-coding block iterator kernel",
+    "crates/pedradb-core/src/checkpoint_barrier_kernel.rs":
+        "RFC-0316 Point-in-time continuous checkpoint barrier kernel",
+    "crates/pedradb-core/src/sector_aligned_io_kernel.rs":
+        "RFC-0317 Vectorized scatter-gather sector aligner kernel",
+    "crates/pedradb-core/src/io_ring_completion_order_kernel.rs":
+        "RFC-0317 Asynchronous I/O completion queue ring order verifier kernel",
+    "crates/pedradb-core/src/ephemeral_key_zeroization_kernel.rs":
+        "RFC-0318 Volatile key zeroization sentinel kernel",
+    "crates/pedradb-core/src/entropy_residue_verifier_kernel.rs":
+        "RFC-0318 Shannon entropy residue verifier kernel",
+    "crates/pedradb-core/src/distributed_lease_epoch_kernel.rs":
+        "RFC-0319 Distributed leader lease epoch barrier kernel",
+    "crates/pedradb-core/src/snapshot_read_linearizability_kernel.rs":
+        "RFC-0319 Distributed snapshot read linearizability oracle kernel",
+    "crates/pedradb-core/src/adaptive_bloom_budget_kernel.rs":
+        "RFC-0320 Adaptive Bloom filter bit-budget allocator kernel",
+    "crates/pedradb-core/src/read_amplification_bounds_kernel.rs":
+        "RFC-0320 Read amplification expected probe bounds oracle kernel",
+    "crates/pedradb-core/src/cloud_hypervisor_pause_kernel.rs":
+        "RFC-0321 Cloud VM hypervisor pause and preemption detector kernel",
+    "crates/pedradb-core/src/cloud_silent_corruption_quarantine_kernel.rs":
+        "RFC-0321 Cloud silent data corruption quarantine circuit breaker kernel",
+    "crates/pedradb-core/src/cloud_multitenant_fair_io_kernel.rs":
+        "RFC-0321 Cloud multi-tenant Deficit Round-Robin I/O scheduler kernel",
+    "crates/pedradb-core/src/asymmetric_partition_fencing_kernel.rs":
+        "RFC-0322 Asymmetric partition two-way fencing kernel",
+    "crates/pedradb-core/src/cloud_storage_watchdog_kernel.rs":
+        "RFC-0322 Cloud block storage I/O watchdog kernel",
+    "crates/pedradb-core/src/cloud_campaign_oracle_kernel.rs":
+        "RFC-0322 Cloud continuous campaign multi-fault oracle kernel",
+    "crates/pedradb-core/src/structural_hardening_kernel.rs":
+        "RFC-0323 Structural hardening, domain types, smart constructors and typestate kernel",
+    "crates/pedradb-core/src/wal_durability_barrier_kernel.rs":
+        "RFC-0324 WAL physical durability barrier and ticket tracking kernel",
+    "crates/pedradb-core/src/wal_crash_recovery_reconciler_kernel.rs":
+        "RFC-0324 WAL crash recovery reconciler and torn/quarantine state machine kernel",
+    "crates/pedradb-core/src/omni_verification_oracle_kernel.rs":
+        "RFC-0324 Omni-tool cross-verification runtime arbitrator oracle kernel",
+    "crates/pedradb-core/src/posix_syscall_contract_kernel.rs":
+        "RFC-0326 POSIX syscall fail-closed and durability barrier contract kernel",
+    "crates/pedradb-core/src/ffi_provenance_guard_kernel.rs":
+        "RFC-0326 FFI raw buffer provenance and Miri Tree Borrows alignment kernel",
+    "crates/pedradb-core/src/hardware_liar_resilience_kernel.rs":
+        "RFC-0326 Hardware fsync liar detection and persistent canary judge kernel",
+    "crates/pedradb-core/src/wal_archive_healing_kernel.rs":
+        "RFC-0327 Autonomic WAL archive healing and torn tail truncation kernel",
+    "crates/pedradb-core/src/multitenant_namespace_fence_kernel.rs":
+        "RFC-0327 Multi-tenant homomorphic prefix isolation and range fence kernel",
+    "crates/pedradb-core/src/causal_history_bisimulation_kernel.rs":
+        "RFC-0327 Transaction causal history closure and bisimulation judge kernel",
+    "crates/pedradb-core/src/domain_bounds_kernel.rs":
+        "RFC-0328 Domain bounds, newtypes & closed algebraic barriers",
+    "crates/pedradb-core/src/mutation_switch_kernel.rs":
+        "RFC-0329 Zero-recompile mutation switching and anti-vacuity kernel",
     "crates/pedradb-core/src/history_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/host_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/leftover_page_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/lib_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/lock_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/manifest_mod_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/memtable_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/occ_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/pct_hooks_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/product_crown_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/ratio_curve_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/rmw_sched_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/rng_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/scan_readahead_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/sst/mod_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/sst/table_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/time_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/tx_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/verified_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/verify_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/vlog_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/wal/format_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/wal/mod_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/wal/reader_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/wal/recover_choose_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/wal/writer_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/wal_ticket_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/workload_class_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
-    "crates/pedradb-core/src/write_cycle_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/wal_buffer_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-dcs/src/command_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-dcs/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/applied_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/bin/fold_smoke_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/host_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/export_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/follow_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/roles_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/ship_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/store_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-fold/src/watch_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-http/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-io-uring/src/lib_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-io-uring/src/ring_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-journal/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-raft/src/bin/pedra-raft-node_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-raft/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-raft/src/net_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-raft/src/persist_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-replicate/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-spec/src/composition_m2_kernel.rs":
+        "RFC-0332 M2 grand inductive invariant chaining and composition kernel",
     "crates/pedradb-spec/src/lib_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-spec/src/syscall_glue_kernel.rs":
+        "RFC-0332 POSIX and io_uring contracted syscall glue verification kernel",
+    "crates/pedradb-spec/src/fault_grid_crash_kernel.rs":
+        "RFC-0333 42-cell fault-grid and concurrent crash consistency verification kernel",
+    "crates/pedradb-store/src/ae_ack_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/cluster_real_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/montanha-fdb-bench_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/montanha-fdb-compare_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/montanha-perf-gate_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/montanha-scale-gate_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/montanha-store-smoke_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/bin/montanha-tcp_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/client_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/commit_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/fdb_compat_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/fdb_layers_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/layers_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/msg_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/tcp_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/three_teeth_queued_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/tls_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-store/src/vote_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-stream/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bandit_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/gate_coverage_floor_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/gate_crash_injection_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/gate_exhaustive_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/gate_seed_ratchet_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/multiproc_trace_smoke_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/peer_msg_tcp_lab_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_buggify_matrix_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_hunt_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_invariant_soak_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_partition_storm_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_shrink_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_smoke_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_soak_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/bin/world_swarm_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/buggify_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/coverage_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/lib_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/net_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/pct_concurrent_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/pct_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/schedule_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/scheduler_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/swarm_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-world/src/wenv_kernel.rs":
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/rocksdb-compat/src/api_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/rocksdb-compat/src/backup_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/rocksdb-compat/src/checkpoint_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/rocksdb-compat/src/env_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/rocksdb-compat/src/knobs_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/rocksdb-compat/src/lib_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/rocksdb-compat/src/shape_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/rocksdb-compat/src/txn_kernel.rs":
-        "2026-09-23 public sync: engine module around the catalog atoms",
+        "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
+    "crates/pedradb-core/src/arena_generational_aba_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/asymmetric_lease_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/asymmetric_partition_quorum_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/async_cancellation_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/async_pool_decoupling_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/atomic_generation_quiescence_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/backpressure_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/bidi_iterator_reversal_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/bitemporal_index_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/block_cache_disambiguation_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/block_cache_hysteretic_partition_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/bloom_hash_entropy_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/bloom_soundness_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/boot_id_lockfile_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/bounded_alloc_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/cache_canary_sentinel_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/causal_seam_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/codec_inversion_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/codec_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/column_family_epoch_wal_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/compaction_banach_contraction_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/compaction_lyapunov_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/compaction_merge_semilattice_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/compaction_pacing_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/compaction_spectral_decoupling_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/comparator_axiom_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/composite_key_framing_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/crash_refinement_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/cross_cf_isolation_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/cross_device_barrier_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/crypto_nonce_space_time_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/decompression_expansion_cap_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/decompression_scratch_isolation_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/delta_restart_monotonicity_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/dense_time_scheduler_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/direct_io_contract_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/dma_generation_fence_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/dual_log_recovery_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/enospc_drain_headroom_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/extent_dispersal_vfs_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/fault_isolation_bitrot_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/fd_quota_governor_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/federated_cursor_continuity_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/file_identity_superblock_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/foster_lyapunov_stochastic_stall_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/ftl_anti_amnesia_token_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/ftl_erase_boundary_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/group_commit_fair_share_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/health_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/hot_backup_inode_closure_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/hot_path_zero_alloc_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/io_rate_limiter_conservation_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/iterator_pinning_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/key_space_quotient_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/lease_expiration_guard_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/liveness_progress_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/lsm_bisimulation_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/lyapunov_write_stall_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/manifest_confluence_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/manifest_delta_collapse_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/manifest_version_edit_semiring_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/memtable_flush_bisimulation_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/memtable_retirement_handshake_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/merge_determinism_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/merge_operator_semiring_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/mesh_mtu_fragmentation_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/metal_fsync_barrier_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/mmap_quiescence_barrier_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/monotonic_clock_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/multitenant_prefix_isolation_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/non_zeno_monotonic_clock_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/nvme_queue_poset_reorder_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/orphan_sst_cleanup_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/parallel_subcompaction_slice_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/petri_net_background_liveness_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/pinned_slice_lease_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/posix_dir_sync_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/preemptible_io_lease_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/prefix_delta_restart_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/prefix_free_key_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/prefix_seek_homomorphism_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/priority_inversion_freedom_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/ram_preflush_barrier_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/ram_pressure_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/range_delete_merge_semiring_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/range_scan_linear_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/range_tombstone_bloom_dual_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/range_tombstone_fragmentation_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/rc11_relaxed_memory_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/readahead_consumption_feedback_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/release_acquire_cache_coherence_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/replication_catchup_boundary_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/resilient_tx_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/rolling_upgrade_homomorphism_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/rum_amplification_pareto_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/schema_homomorphism_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/separator_order_preservation_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/sequence_horizon_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/skiplist_weak_memory_barrier_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/snapshot_compaction_stability_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/snapshot_epoch_lease_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/snapshot_gc_hazard_pointer_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/space_amplification_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/sparse_tuple_homomorphism_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/ssi_conflict_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/ssi_cycle_detector_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/sst_metadata_measure_monoid_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/sst_topological_entropy_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/starvation_freedom_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/super_atomic_multiget_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/sync_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/tombstone_soundness_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/tombstone_vacuum_cascade_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/torn_sector_heal_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/trans_crash_bisimulation_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/transactional_overlay_read_view_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/two_stage_compression_dictionary_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/twopc_confluence_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/vlog_blob_gc_refinement_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/vlog_gc_barrier_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/vlog_hole_alignment_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/vlog_integrity_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/wal_crypto_chain_recovery_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/write_diag_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
+    "crates/pedradb-core/src/zeroize_entropy_kernel.rs":
+        "RFC-0307 verification expansion; mathematical kernel verified via mutation/algebraic specifications",
 }
 
 # RFC-0166 P2.4: catalog accounting. `l28_*` is a campaign gate (named
@@ -754,12 +1224,8 @@ def check_proof_vs_campaign(_root: Path, catalog: dict, r: Report) -> None:
         r.fail("catalog object_kinds must map both 'proof' and 'campaign'")
         return
     prefixes = catalog.get("campaign_prefixes")
-    if not isinstance(prefixes, list) or ("l28_" not in prefixes and prefixes):
+    if not isinstance(prefixes, list) or "l28_" not in prefixes:
         r.fail("catalog campaign_prefixes must be a list including 'l28_'")
-        return
-    if not prefixes:
-        # public tree: no campaign registry is shipped; nothing to cross-count
-        r.good("proof vs campaign: no campaign registry in this tree")
         return
     prefixes = [p for p in prefixes if isinstance(p, str) and p]
     n_proof = 0
@@ -787,8 +1253,7 @@ def check_proof_vs_campaign(_root: Path, catalog: dict, r: Report) -> None:
         )
 
 
-# public tree: pedradb-capi is not shipped here
-ISLAND_CRATES = ("pedradb-posix", "pedradb-io-uring")
+ISLAND_CRATES = ("pedradb-posix", "pedradb-io-uring", "pedradb-capi")
 RFC_0061 = "docs/rfc/0061-residuals-sel4-ironfleet.md"
 
 
@@ -844,8 +1309,37 @@ def decision_kernel_paths(root: Path) -> list[Path]:
     return [root / rel for rel in sorted(globbed | enrolled)]
 
 
+def check_db_rs_extracted(root: Path, glue: dict, r: Report) -> None:
+    """RFC-0157 stage 2: flag is true iff rustc-linked open/put live in
+    split files that match extracted plans (not a 22k dump)."""
+    if glue.get("db_rs_extracted") is not True:
+        r.fail(
+            "residuals freeze: glue.db_rs_extracted must be true "
+            "(RFC-0157 stage 2: open/put split + extracted plans)"
+        )
+        return
+    put = root / "crates/pedradb-core/src/db_put_kernel.rs"
+    op = root / "crates/pedradb-core/src/db_open_kernel.rs"
+    cput = root / "crates/pedradb-core/src/concurrent_put_kernel.rs"
+    cop = root / "crates/pedradb-core/src/concurrent_open_kernel.rs"
+    for p in (put, op, cput, cop):
+        if not p.is_file():
+            r.fail(f"residuals freeze: missing split handler {p.relative_to(root)}")
+    lean = root / "formal/aeneas/out/lean/WriteAdmissionKernel.lean"
+    text = lean.read_text(encoding="utf-8") if lean.is_file() else ""
+    if "def put_handler_plan" not in text or "def open_wal_head_plan" not in text:
+        r.fail(
+            "residuals freeze: Lean missing put_handler_plan / open_wal_head_plan "
+            "(db_rs_extracted is not a dump of db_kernel.rs)"
+        )
+    if put.is_file() and "put_handler_plan" not in put.read_text(encoding="utf-8"):
+        r.fail("residuals freeze: db_put_kernel.rs must match put_handler_plan")
+    if op.is_file() and "open_wal_head_plan" not in op.read_text(encoding="utf-8"):
+        r.fail("residuals freeze: db_open_kernel.rs must match open_wal_head_plan")
+
+
 def check_kernel_enrollment(root: Path, glue: dict, r: Report) -> None:
-    """Marker<->registry tooth (debt registered 2026-08-31: leveling kernel unenrolled).
+    """Marker<->registry tooth (findings/2026-08-31-leveling-kernel-unenrolled).
 
     The registry is the explicit side; the `//! kernel:` marker is the
     in-file side. Both directions fail closed:
@@ -914,7 +1408,7 @@ def kernel_pub_fns(path: Path) -> set[str]:
 
 
 def check_kernel_fn_surface(root: Path, catalog: dict, glue: dict, r: Report) -> None:
-    """Fn-level enrollment tooth (debt registered 2026-08-31: leveling kernel unenrolled).
+    """Fn-level enrollment tooth (findings/2026-08-31-leveling-kernel-unenrolled).
 
     Enrollment is FILE-level (glob union registry), so a new pub decision fn
     added inside an already-enrolled kernel file is invisible to the sweep
@@ -984,7 +1478,7 @@ def check_kernel_fn_surface(root: Path, catalog: dict, glue: dict, r: Report) ->
                     f"residuals freeze: {rel}: pub fn {name} is outside the fn "
                     "surface (no entry/as_is/_as_is/_spec/clone, not in "
                     "glue.kernel_fn_allowlist) — classify it "
-                    "(debt registered 2026-08-31: leveling kernel unenrolled)"
+                    "(findings/2026-08-31-leveling-kernel-unenrolled)"
                 )
         for name in sorted(allow.get(rel, set()) - names):
             r.fail(f"residuals freeze: {rel}: stale kernel_fn_allowlist entry {name} (fn gone)")
@@ -1067,8 +1561,18 @@ def check_residuals(
     catalog: dict | None = None,
     residuals_path: Path | None = None,
     rfc_path: Path | None = None,
+    mirror: bool = False,
 ) -> None:
-    """RFC-0061: residual catalog is well-formed; scripts exist; never-floor holds."""
+    """RFC-0061: residual catalog is well-formed; scripts exist; never-floor holds.
+
+    ``mirror=True`` is the public-mirror deployment (RFC-0331): the tree
+    ships a ``.public-mirror`` marker and, by policy, no ``docs/rfc``
+    corpus. Owner-RFC doc existence and the never_floor<->RFC-0061 text
+    cross-check are internal-tree obligations and are reported as
+    explicitly N/A instead of failing against docs the mirror must not
+    carry. Every other freeze tooth (ids, classes, scripts, floors,
+    enrollment) runs unchanged on both trees.
+    """
     print("== residuals freeze (RFC-0061) ==")
     path = residuals_path or (root / "scripts/formal/residuals.json")
     rfc = rfc_path or (root / RFC_0061)
@@ -1090,6 +1594,13 @@ def check_residuals(
     never_ids: set[str] = set()
     island_crates: set[str] = set()
     rfc_dir = root / "docs/rfc"
+    mirror_owner_skips = 0
+    if mirror and rfc_dir.is_dir():
+        r.fail(
+            "residuals freeze: mirror tree carries docs/rfc — the public "
+            "mirror ships no RFCs (RFC-0331); the .public-mirror marker and "
+            "the corpus cannot coexist"
+        )
     for i, row in enumerate(rows):
         if not isinstance(row, dict):
             r.fail(f"residuals freeze: row {i} is not an object")
@@ -1111,10 +1622,12 @@ def check_residuals(
         classes_seen.add(klass)
         if klass == "never":
             never_ids.add(rid)
-        matches = list(rfc_dir.glob(f"{owner}-*.md")) + list(rfc_dir.glob(f"{owner}*.md"))
-        if not matches and rfc_dir.is_dir():
-            # public tree ships no docs/rfc; owner RFCs live in the dev tree
-            r.fail(f"residuals freeze: {rid} owner RFC {owner} has no docs/rfc/{owner}*.md")
+        if mirror:
+            mirror_owner_skips += 1
+        else:
+            matches = list(rfc_dir.glob(f"{owner}-*.md")) + list(rfc_dir.glob(f"{owner}*.md"))
+            if not matches:
+                r.fail(f"residuals freeze: {rid} owner RFC {owner} has no docs/rfc/{owner}*.md")
         for key in ("script", "safety"):
             rel = row.get(key)
             if rel is None:
@@ -1144,6 +1657,11 @@ def check_residuals(
                 if "TCG_REQUIRED" not in src or "FAIL_no_guest" not in src:
                     r.fail(f"residuals freeze: {script} must fail-close when TCG_REQUIRED=1")
 
+    if mirror:
+        r.good(
+            f"residuals freeze: mirror tree — {mirror_owner_skips} owner-RFC doc "
+            "checks N/A (docs/rfc absent by RFC-0331 public mirror policy)"
+        )
     for need in ("never", "continuous"):
         if need not in classes_seen:
             r.fail(f"residuals freeze: catalog missing any {need!r} row")
@@ -1166,25 +1684,29 @@ def check_residuals(
                 )
             if extra:
                 r.fail(f"residuals freeze: never id(s) not in never_floor {extra}")
-        rfc_text = rfc.read_text(encoding="utf-8") if rfc.is_file() else ""
-        if not rfc.is_file() and rfc_dir.is_dir():
-            # public tree ships no docs/rfc; the never-floor list itself is
-            # still frozen and cross-checked against the catalog above
-            r.fail(f"residuals freeze: missing {RFC_0061}")
-        elif rfc.is_file():
-            for nid in sorted(floor_set):
-                if nid not in rfc_text:
-                    r.fail(
-                        f"residuals freeze: never id {nid} missing from {RFC_0061} "
-                        "(P2.1: catalog and RFC must both change)"
-                    )
+        if mirror:
+            r.good(
+                f"residuals freeze: mirror tree — never_floor/RFC-0061 text "
+                f"cross-check N/A for {len(floor_set)} ids (docs/rfc absent "
+                "by RFC-0331 public mirror policy)"
+            )
+        else:
+            rfc_text = rfc.read_text(encoding="utf-8") if rfc.is_file() else ""
+            if not rfc.is_file():
+                r.fail(f"residuals freeze: missing {RFC_0061}")
+            else:
+                for nid in sorted(floor_set):
+                    if nid not in rfc_text:
+                        r.fail(
+                            f"residuals freeze: never id {nid} missing from {RFC_0061} "
+                            "(P2.1: catalog and RFC must both change)"
+                        )
 
     glue = data.get("glue")
     if not isinstance(glue, dict):
         r.fail("residuals freeze: glue object required (RFC-0061 P1.3)")
     else:
-        if glue.get("db_rs_extracted") is not False:
-            r.fail("residuals freeze: glue.db_rs_extracted must be false (do not extract db.rs)")
+        check_db_rs_extracted(root, glue, r)
         check_kernel_enrollment(root, glue, r)
         cat = catalog
         if cat is None:
@@ -1258,12 +1780,12 @@ AENEAS_EXTRACTS = (
     ("crates/pedradb-stream/src/cursor_kernel.rs", "formal/aeneas/out/SOURCE.cursor"),
     ("crates/pedradb-http/src/cl_kernel.rs", "formal/aeneas/out/SOURCE.cl"),
     (
-        "crates/distributed-fdb-recipes/src/children_kernel.rs",
+        "crates/montanha-fdb-recipes/src/children_kernel.rs",
         "formal/aeneas/out/SOURCE.children",
     ),
     ("crates/pedradb-journal/src/pin_kernel.rs", "formal/aeneas/out/SOURCE.pin"),
     (
-        "crates/distributed-fdb-recipes/src/pack_kernel.rs",
+        "crates/montanha-fdb-recipes/src/pack_kernel.rs",
         "formal/aeneas/out/SOURCE.pack",
     ),
     ("crates/pedradb-replicate/src/ship_kernel.rs", "formal/aeneas/out/SOURCE.ship"),
@@ -1275,8 +1797,8 @@ AENEAS_EXTRACTS = (
     ("crates/pedradb-core/src/compact_kernel.rs", "formal/aeneas/out/SOURCE.compact"),
     ("crates/pedradb-core/src/vlog_gc_kernel.rs", "formal/aeneas/out/SOURCE.vlog_gc"),
     ("crates/pedradb-store/src/tx_glue_kernel.rs", "formal/aeneas/out/SOURCE.tx_glue"),
-    ("crates/pedradb-store/src/l28.rs", "formal/aeneas/out/SOURCE.l28"),
-    ("crates/pedradb-world/src/tcg.rs", "formal/aeneas/out/SOURCE.tcg"),
+    ("crates/pedradb-store/src/l28_kernel.rs", "formal/aeneas/out/SOURCE.l28"),
+    ("crates/pedradb-world/src/tcg_kernel.rs", "formal/aeneas/out/SOURCE.tcg"),
     ("crates/pedradb-io-uring/src/cqe_kernel.rs", "formal/aeneas/out/SOURCE.cqe"),
     ("crates/rocksdb-compat/src/iter_kernel.rs", "formal/aeneas/out/SOURCE.iter"),
     (
@@ -1354,13 +1876,13 @@ AENEAS_EXTRACTS = (
         "formal/aeneas/out/SOURCE.c1_modelo",
     ),
     (
-        "crates/pedradb-capi/src/handles.rs",
+        "crates/pedradb-capi/src/handles_kernel.rs",
         "formal/aeneas/out/SOURCE.capi_handles",
     ),
     ("crates/pedradb-core/src/batch_kernel.rs", "formal/aeneas/out/SOURCE.batch"),
     ("crates/pedradb-core/src/merge_kernel.rs", "formal/aeneas/out/SOURCE.merge"),
     (
-        "crates/pedradb-http/src/fail_closed.rs",
+        "crates/pedradb-http/src/fail_closed_kernel.rs",
         "formal/aeneas/out/SOURCE.fail_closed",
     ),
     (
@@ -1380,7 +1902,7 @@ AENEAS_EXTRACTS = (
         "formal/aeneas/out/SOURCE.cf",
     ),
     (
-        "crates/distributed-fdb-recipes/src/fields_kernel.rs",
+        "crates/montanha-fdb-recipes/src/fields_kernel.rs",
         "formal/aeneas/out/SOURCE.fields",
     ),
     (
@@ -1743,68 +2265,65 @@ def check_extract(
             r.fail("aeneas stamp guard pre-commit hook no longer checks SOURCE stamps")
     manifest = root / "formal/aeneas/vote-kernel/Cargo.toml"
     if not manifest.is_file():
-        # public tree: the raft vote kernel is not shipped; its per-kernel
-        # checks are skipped, the SOURCE.* stamp checks below still run
-        r.gap("formal/aeneas/vote-kernel/Cargo.toml not shipped in this tree")
-    have_vote = manifest.is_file()
-    if have_vote:
-        env = os.environ.copy()
-        env.setdefault("CARGO_TERM_COLOR", "never")
-        p = subprocess.run(
-            [
-                "cargo",
-                "test",
-                "-q",
-                "--manifest-path",
-                str(manifest),
-                "--",
-                "--test-threads=1",
-            ],
-            cwd=root,
-            env=env,
-        )
-        if p.returncode != 0:
-            r.fail(f"aeneas include crate cargo test exit {p.returncode}")
-            return
-        r.good("aeneas extract crate (production vote_kernel.rs as [lib] path)")
-        lean = root / "formal/aeneas/out/lean/VoteKernel.lean"
-        if lean.is_file() and "def vote_decision" in lean.read_text(encoding="utf-8"):
-            r.good("aeneas extract artifact has def vote_decision")
-            vk = lean.read_text(encoding="utf-8")
-            axiom = "axiom core.option.Option.Insts.CoreCmpPartialEqOption.eq"
-            modeled = "def core.option.Option.Insts.CoreCmpPartialEqOption.eq"
-            if axiom in vk:
-                r.fail(
-                    "RFC-0053 P40: VoteKernel still axioms Option::eq "
-                    "(replace with match def; see formal/aeneas/lean/Vote.lean)"
-                )
-            elif modeled in vk:
-                r.good("RFC-0053 P40: Option::eq is a match def, not an axiom")
-            else:
-                r.good("RFC-0053 P40: extract has no Option::eq (derive dropped)")
-            vote_thy = root / "formal/aeneas/lean/Vote.lean"
-            if vote_thy.is_file() and "theorem vote_decision_iff" in vote_thy.read_text(
-                encoding="utf-8"
-            ):
-                r.good("RFC-0053 P40: Vote.lean has theorem vote_decision_iff")
-            else:
-                r.fail("RFC-0053 P40: Vote.lean missing theorem vote_decision_iff")
+        r.fail("formal/aeneas/vote-kernel/Cargo.toml missing")
+        return
+    env = os.environ.copy()
+    env.setdefault("CARGO_TERM_COLOR", "never")
+    p = subprocess.run(
+        [
+            "cargo",
+            "test",
+            "-q",
+            "--manifest-path",
+            str(manifest),
+            "--",
+            "--test-threads=1",
+        ],
+        cwd=root,
+        env=env,
+    )
+    if p.returncode != 0:
+        r.fail(f"aeneas include crate cargo test exit {p.returncode}")
+        return
+    r.good("aeneas extract crate (production vote_kernel.rs as [lib] path)")
+    lean = root / "formal/aeneas/out/lean/VoteKernel.lean"
+    if lean.is_file() and "def vote_decision" in lean.read_text(encoding="utf-8"):
+        r.good("aeneas extract artifact has def vote_decision")
+        vk = lean.read_text(encoding="utf-8")
+        axiom = "axiom core.option.Option.Insts.CoreCmpPartialEqOption.eq"
+        modeled = "def core.option.Option.Insts.CoreCmpPartialEqOption.eq"
+        if axiom in vk:
+            r.fail(
+                "RFC-0053 P40: VoteKernel still axioms Option::eq "
+                "(replace with match def; see formal/aeneas/lean/Vote.lean)"
+            )
+        elif modeled in vk:
+            r.good("RFC-0053 P40: Option::eq is a match def, not an axiom")
         else:
-            r.gap("aeneas extract artifact formal/aeneas/out/lean/VoteKernel.lean missing (run ./scripts/aeneas_vote.sh)")
-        stamp = root / "formal/aeneas/out/SOURCE"
-        src = root / "crates/pedradb-raft/src/vote_kernel.rs"
-        if stamp.is_file() and src.is_file():
-            want = None
-            for line in stamp.read_text(encoding="utf-8").splitlines():
-                if line.startswith("sha256="):
-                    want = line.split("=", 1)[1].strip()
-            have = hashlib.sha256(src.read_bytes()).hexdigest()
-            if want and have == want:
-                r.good("aeneas SOURCE sha256 matches vote_kernel.rs")
-            elif want:
-                r.fail(
-                    f"aeneas SOURCE sha256 drifted (kernel {have[:12]}… vs stamp {want[:12]}…; re-run ./scripts/aeneas_vote.sh)"
-                )
+            r.good("RFC-0053 P40: extract has no Option::eq (derive dropped)")
+        vote_thy = root / "formal/aeneas/lean/Vote.lean"
+        if vote_thy.is_file() and "theorem vote_decision_iff" in vote_thy.read_text(
+            encoding="utf-8"
+        ):
+            r.good("RFC-0053 P40: Vote.lean has theorem vote_decision_iff")
+        else:
+            r.fail("RFC-0053 P40: Vote.lean missing theorem vote_decision_iff")
+    else:
+        r.gap("aeneas extract artifact formal/aeneas/out/lean/VoteKernel.lean missing (run ./scripts/aeneas_vote.sh)")
+    stamp = root / "formal/aeneas/out/SOURCE"
+    src = root / "crates/pedradb-raft/src/vote_kernel.rs"
+    if stamp.is_file() and src.is_file():
+        want = None
+        for line in stamp.read_text(encoding="utf-8").splitlines():
+            if line.startswith("sha256="):
+                want = line.split("=", 1)[1].strip()
+        have = hashlib.sha256(src.read_bytes()).hexdigest()
+        if want and have == want:
+            r.good("aeneas SOURCE sha256 matches vote_kernel.rs")
+        elif want:
+            r.fail(
+                f"aeneas SOURCE sha256 drifted (kernel {have[:12]}… vs stamp {want[:12]}…; re-run ./scripts/aeneas_vote.sh)"
+            )
     iso_lean = root / "formal/aeneas/out/lean/IsolatedKernel.lean"
     if iso_lean.is_file() and "def isolated_id_matches" in iso_lean.read_text(
         encoding="utf-8"
@@ -1881,10 +2400,8 @@ def check_extract(
             r.good("RFC-0053 P2.1: Ae.lean theorems (no sorry)")
         else:
             r.fail("RFC-0053 P2.1: Ae.lean missing named theorems")
-    elif ae_src.is_file():
-        r.fail("RFC-0053 P2.1: formal/aeneas/lean/Ae.lean missing")
     else:
-        r.gap("RFC-0053 P2.1: Ae.lean not in this tree (raft ae_kernel.rs unshipped)")
+        r.fail("RFC-0053 P2.1: formal/aeneas/lean/Ae.lean missing")
     cm_lean = root / "formal/aeneas/out/lean/CommitKernel.lean"
     if cm_lean.is_file() and "def recover_commit" in cm_lean.read_text(encoding="utf-8"):
         r.good("aeneas extract artifact has def recover_commit")
@@ -1915,10 +2432,8 @@ def check_extract(
             r.good("RFC-0053 P2.1: Commit.lean theorems (no sorry)")
         else:
             r.fail("RFC-0053 P2.1: Commit.lean missing named theorems")
-    elif cm_src.is_file():
-        r.fail("RFC-0053 P2.1: formal/aeneas/lean/Commit.lean missing")
     else:
-        r.gap("RFC-0053 P2.1: Commit.lean not in this tree (raft commit_kernel.rs unshipped)")
+        r.fail("RFC-0053 P2.1: formal/aeneas/lean/Commit.lean missing")
     # RFC-0056 P1.2: WAL/apply/reopen extracts + Lean theorems
     for stamp, artifact, marker, regen, src, thy, theorems in [
         (
@@ -1989,13 +2504,7 @@ def check_extract(
             else:
                 r.fail(f"RFC-0056 P1.2: {thy.rsplit('/', 1)[-1]} missing named theorems")
         else:
-            if kr.is_file():
-                r.fail(f"RFC-0056 P1.2: {thy} missing")
-            else:
-                r.gap(
-                    f"RFC-0056 P1.2: {thy.rsplit('/', 1)[-1]} not in this tree "
-                    f"({src} unshipped)"
-                )
+            r.fail(f"RFC-0056 P1.2: {thy} missing")
     p12_script = root / "scripts/lean_wal_apply_reopen.sh"
     p = subprocess.run(
         ["bash", str(p12_script)] + (["--required"] if charon_required else []),
@@ -2004,19 +2513,16 @@ def check_extract(
     if p.returncode != 0:
         r.fail(f"lean_wal_apply_reopen.sh exit {p.returncode}")
     elif charon_required:
-        r.good("lean_wal_apply_reopen.sh (Reopen + WalRecover)")
+        r.good("lean_wal_apply_reopen.sh (Reopen + Apply + WalRecover)")
     lean_script = root / "scripts/lean_vote.sh"
-    if not lean_script.is_file():
-        r.gap("lean_vote.sh not in this tree (raft vote kernel unshipped)")
-    else:
-        p = subprocess.run(
-            ["bash", str(lean_script)] + (["--required"] if charon_required else []),
-            cwd=root,
-        )
-        if p.returncode != 0:
-            r.fail(f"lean_vote.sh exit {p.returncode}")
-        elif charon_required:
-            r.good("lean_vote.sh (vote + Ae + Commit)")
+    p = subprocess.run(
+        ["bash", str(lean_script)] + (["--required"] if charon_required else []),
+        cwd=root,
+    )
+    if p.returncode != 0:
+        r.fail(f"lean_vote.sh exit {p.returncode}")
+    elif charon_required:
+        r.good("lean_vote.sh (vote + Ae + Commit)")
 
     # RFC-0170 P0.3: prefix.rs stamp.
     pref_stamp = root / "formal/aeneas/out/SOURCE.prefix"
@@ -2201,7 +2707,7 @@ def check_extract(
             "formal/aeneas/out/lean/ChildrenKernel.lean",
             "def PACKED_CHILD_END",
             "./scripts/aeneas_children.sh",
-            "crates/distributed-fdb-recipes/src/children_kernel.rs",
+            "crates/montanha-fdb-recipes/src/children_kernel.rs",
             "formal/aeneas/lean/Children.lean",
             ("theorem packed_child_end_byte",),
         ),
@@ -2219,7 +2725,7 @@ def check_extract(
             "formal/aeneas/out/lean/PackKernel.lean",
             "def pack_cut_tag",
             "./scripts/aeneas_pack.sh",
-            "crates/distributed-fdb-recipes/src/pack_kernel.rs",
+            "crates/montanha-fdb-recipes/src/pack_kernel.rs",
             "formal/aeneas/lean/Pack.lean",
             ("theorem pack_cut_tag_identity",),
         ),
@@ -2285,7 +2791,7 @@ def check_extract(
             "formal/aeneas/out/lean/L28Kernel.lean",
             "def l28_durability_ok",
             "./scripts/aeneas_l28.sh",
-            "crates/pedradb-store/src/l28.rs",
+            "crates/pedradb-store/src/l28_kernel.rs",
             "formal/aeneas/lean/L28.lean",
             ("theorem l28_durability_all_ok",),
         ),
@@ -2294,7 +2800,7 @@ def check_extract(
             "formal/aeneas/out/lean/TcgKernel.lean",
             "def tcg_guest_admitted",
             "./scripts/aeneas_tcg.sh",
-            "crates/pedradb-world/src/tcg.rs",
+            "crates/pedradb-world/src/tcg_kernel.rs",
             "formal/aeneas/lean/Tcg.lean",
             ("theorem tcg_guest_admitted_true",),
         ),
@@ -2368,7 +2874,7 @@ def check_extract(
             "./scripts/aeneas_t1_modelo.sh",
             "crates/pedradb-store/src/t1_modelo_kernel.rs",
             "formal/aeneas/lean/T1Modelo.lean",
-            ("theorem t1_modelo_empty", "theorem t1_modelo_as_is_tooth"),
+            ("theorem t1_modelo_empty", "theorem t1_modelo_as_is_dente"),
         ),
         (
             "d1_modelo",
@@ -2377,7 +2883,7 @@ def check_extract(
             "./scripts/aeneas_d1_modelo.sh",
             "crates/pedradb-core/src/d1_modelo_kernel.rs",
             "formal/aeneas/lean/D1Modelo.lean",
-            ("theorem d1_modelo_unacked_vacuous", "theorem d1_modelo_as_is_tooth"),
+            ("theorem d1_modelo_unacked_vacuous", "theorem d1_modelo_as_is_dente"),
         ),
         (
             "c1_modelo",
@@ -2386,7 +2892,7 @@ def check_extract(
             "./scripts/aeneas_c1_modelo.sh",
             "crates/pedradb-raft/src/c1_modelo_kernel.rs",
             "formal/aeneas/lean/C1Modelo.lean",
-            ("theorem c1_modelo_joint_add_refuses", "theorem c1_modelo_as_is_tooth"),
+            ("theorem c1_modelo_joint_add_refuses", "theorem c1_modelo_as_is_dente"),
         ),
     ]:
         art = root / artifact
@@ -2411,12 +2917,7 @@ def check_extract(
                     f"aeneas SOURCE.{stamp} drifted (kernel {have[:12]}… vs stamp {want[:12]}…; re-run {regen})"
                 )
         else:
-            if kr.is_file():
-                r.gap(f"aeneas SOURCE.{stamp} missing (run {regen})")
-            else:
-                r.gap(
-                    f"aeneas SOURCE.{stamp} not in this tree ({src} unshipped)"
-                )
+            r.gap(f"aeneas SOURCE.{stamp} missing (run {regen})")
         tf = root / thy
         if tf.is_file():
             tt = tf.read_text(encoding="utf-8")
@@ -2426,12 +2927,8 @@ def check_extract(
                 r.good(f"{thy.rsplit('/', 1)[-1]} theorems (no sorry)")
             else:
                 r.fail(f"{thy.rsplit('/', 1)[-1]} missing named theorems")
-        elif kr.is_file():
-            r.fail(f"{thy} missing")
         else:
-            r.gap(
-                f"{thy.rsplit('/', 1)[-1]} not in this tree ({src} unshipped)"
-            )
+            r.fail(f"{thy} missing")
     # RFC-0170 P2.3: D1/R1/T1/C1 twins cite close production fns.
     # All four mirrors (lsm_r1, t1_modelo, d1_modelo, c1_modelo) swept to
     # single-artifact 2026-09-09: close citation is enforced by the
@@ -2452,9 +2949,6 @@ def check_extract(
     if not (want_charon or charon_required):
         return
     script = root / "scripts/aeneas_vote.sh"
-    if not script.is_file():
-        r.gap("aeneas_vote.sh not in this tree (raft vote kernel unshipped)")
-        return
     extra = ["--required"] if charon_required else []
     p = subprocess.run(["bash", str(script), *extra], cwd=root)
     if p.returncode != 0:
@@ -2713,6 +3207,13 @@ def main() -> int:
         args.ci = True
 
     root = Path(__file__).resolve().parents[2]
+    mirror = (root / ".public-mirror").is_file()
+    if mirror:
+        print(
+            "== public mirror tree (.public-mirror present): RFC-corpus "
+            "coherence obligations are reported N/A, not skipped silently "
+            "(RFC-0331 public mirror policy) =="
+        )
     catalog = json.loads((root / "scripts/formal/catalog.json").read_text(encoding="utf-8"))
     r = Report()
 
@@ -2723,7 +3224,7 @@ def main() -> int:
         check_three_teeth(root, catalog, r)
         check_proof_vs_campaign(root, catalog, r)
         check_proof_depth(root, catalog, r)
-        check_residuals(root, r, catalog)
+        check_residuals(root, r, catalog, mirror=mirror)
         check_class_scan(root, r)
     if args.clones or run_ci:
         check_clones(root, catalog, r)

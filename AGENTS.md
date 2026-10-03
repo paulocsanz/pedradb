@@ -45,3 +45,22 @@ Never claim verification or testing completion (EG2/EG3 "100%") while any of the
 4. **Uncontracted Glue:** Handlers in `pedradb-posix` and `pedradb-io-uring` must be guarded by contracts in `pedradb-spec`.
 5. **Combinatorial Loom Overclaiming:** Never claim Loom verified the full database. Loom is strictly for isolated atomic primitives (<= 3 threads). Full engine concurrency must be proven via PCT (Probabilistic Concurrency Testing).
 
+## Public Mirror Policy (RFC-0331 V3.5 — registered 2026-10-03)
+
+The public repo (`upstream` = `paulocsanz/pedradb`) is a CURATED MIRROR, not a second home:
+
+1. **Internal first**: new code lands on internal `main` before any mirror
+   push. The mirror never receives code the internal gates have not run on.
+2. **Clean surface only**: the mirror carries product docs and proof
+   reproduction assets — no RFCs, findings, `.agents/`, `.grok/`, audits, or
+   internal research. `scripts/check_public_hygiene.py` enforces this in CI
+   (job `hygiene`, every push).
+3. **Live gates**: the public CI runs the formal lint in its OWN job with
+   its own budget (the "dead ratchet" failure — test step eating the whole
+   job timeout while the lint never executes — is a registered scar,
+   2026-10-01..03). Debt ceiling changes require a commit message naming
+   the number and its provenance; the ceiling may never rise silently.
+4. **Name the tree**: every claim (internal or public) names the tree it
+   was measured on. Divergence between the two trees is registered debt,
+   not a fact of life; known bugs in public code get public issues the
+   same day they are proven.

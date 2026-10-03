@@ -1,0 +1,9 @@
+[workspace]
+[package]
+name = "pedra-aeneas-fields-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+[lib]
+path = "../../../crates/montanha-fdb-recipes/src/fields_kernel.rs"

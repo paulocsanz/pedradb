@@ -12,6 +12,7 @@ path = "src/lib_kernel.rs"
 [dependencies]
 pedradb-core.workspace = true
 pedradb-posix.workspace = true
+pedradb-spec.workspace = true
 parking_lot.workspace = true
 libc = "0.2"
 

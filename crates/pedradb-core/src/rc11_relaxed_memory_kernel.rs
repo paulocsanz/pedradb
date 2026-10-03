@@ -52,6 +52,40 @@ pub enum MemoryEvent {
     },
 }
 
+/// Errors when mutating the RC11 execution graph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rc11GraphError {
+    IndexOutOfBounds { index: usize, total: usize },
+    ExpectedWriteEvent { index: usize },
+    ExpectedReadEvent { index: usize },
+    AddressMismatch { write_addr: usize, read_addr: usize },
+    SelfReadsFrom { index: usize },
+}
+
+impl std::fmt::Display for Rc11GraphError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IndexOutOfBounds { index, total } => {
+                write!(f, "Index {index} is out of bounds (total events: {total})")
+            }
+            Self::ExpectedWriteEvent { index } => {
+                write!(f, "Event at index {index} is not a Write event")
+            }
+            Self::ExpectedReadEvent { index } => {
+                write!(f, "Event at index {index} is not a Read event")
+            }
+            Self::AddressMismatch { write_addr, read_addr } => {
+                write!(f, "Cannot link write addr 0x{write_addr:x} to read addr 0x{read_addr:x}")
+            }
+            Self::SelfReadsFrom { index } => {
+                write!(f, "Event at index {index} cannot read from itself")
+            }
+        }
+    }
+}
+
+impl std::error::Error for Rc11GraphError {}
+
 /// Violations of RC11 axiomatic consistency.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Rc11ConsistencyViolation {
@@ -81,7 +115,52 @@ pub enum Rc11ConsistencyViolation {
         /// Memory address accessed.
         addr: usize,
     },
+    /// Reads-from links mismatched memory addresses.
+    MismatchedAddressReadsFrom {
+        write_idx: usize,
+        read_idx: usize,
+        write_addr: usize,
+        read_addr: usize,
+    },
+    /// Invalid event reference in reads-from relation.
+    InvalidEventReference {
+        idx: usize,
+        total_events: usize,
+    },
+    /// Graph contains no events.
+    EmptyExecutionGraph,
 }
+
+impl std::fmt::Display for Rc11ConsistencyViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CoherenceViolation { addr, event_chain } => {
+                write!(f, "Coherence violation at address 0x{addr:x}, event chain: {event_chain:?}")
+            }
+            Self::HappensBeforeCycleDetected { cycle_node } => {
+                write!(f, "Happens-before cycle detected involving event {cycle_node}")
+            }
+            Self::DataRaceDetected { write_event, conflicting_event } => {
+                write!(f, "Data race between write event {write_event} and event {conflicting_event}")
+            }
+            Self::UnsynchronizedRead { reader_idx, addr } => {
+                write!(f, "Unsynchronized read at event {reader_idx} for address 0x{addr:x}")
+            }
+            Self::MismatchedAddressReadsFrom { write_idx, read_idx, write_addr, read_addr } => {
+                write!(
+                    f,
+                    "Reads-from links mismatched addresses: write[{write_idx}] addr 0x{write_addr:x} != read[{read_idx}] addr 0x{read_addr:x}"
+                )
+            }
+            Self::InvalidEventReference { idx, total_events } => {
+                write!(f, "Event index {idx} out of bounds (total events: {total_events})")
+            }
+            Self::EmptyExecutionGraph => write!(f, "Execution graph is empty"),
+        }
+    }
+}
+
+impl std::error::Error for Rc11ConsistencyViolation {}
 
 /// Execution graph representation for axiomatic verification of memory interactions.
 #[derive(Clone, Debug, Default)]
@@ -119,6 +198,33 @@ impl Rc11ExecutionGraph {
         idx
     }
 
+    /// Links a write event to a read event via Reads-From (rf) with strict structural validation.
+    pub fn try_add_reads_from(&mut self, write_idx: usize, read_idx: usize) -> Result<(), Rc11GraphError> {
+        let total = self.events.len();
+        if write_idx >= total {
+            return Err(Rc11GraphError::IndexOutOfBounds { index: write_idx, total });
+        }
+        if read_idx >= total {
+            return Err(Rc11GraphError::IndexOutOfBounds { index: read_idx, total });
+        }
+        if write_idx == read_idx {
+            return Err(Rc11GraphError::SelfReadsFrom { index: write_idx });
+        }
+        let w_addr = match self.events[write_idx] {
+            MemoryEvent::Write { addr, .. } => addr,
+            _ => return Err(Rc11GraphError::ExpectedWriteEvent { index: write_idx }),
+        };
+        let r_addr = match self.events[read_idx] {
+            MemoryEvent::Read { addr, .. } => addr,
+            _ => return Err(Rc11GraphError::ExpectedReadEvent { index: read_idx }),
+        };
+        if w_addr != r_addr {
+            return Err(Rc11GraphError::AddressMismatch { write_addr: w_addr, read_addr: r_addr });
+        }
+        self.rf.insert(read_idx, write_idx);
+        Ok(())
+    }
+
     /// Links a write event to a read event via Reads-From (rf).
     pub fn add_reads_from(&mut self, write_idx: usize, read_idx: usize) {
         self.rf.insert(read_idx, write_idx);
@@ -129,7 +235,11 @@ impl Rc11ExecutionGraph {
     #[must_use]
     pub fn compute_synchronizes_with(&self) -> BTreeSet<(usize, usize)> {
         let mut sw = BTreeSet::new();
+        let total = self.events.len();
         for (&read_idx, &write_idx) in &self.rf {
+            if write_idx >= total || read_idx >= total {
+                continue;
+            }
             let w_order = match &self.events[write_idx] {
                 MemoryEvent::Write { order, .. } => *order,
                 _ => continue,
@@ -208,10 +318,15 @@ impl Rc11ExecutionGraph {
     /// # Errors
     /// Returns `Rc11ConsistencyViolation` if any memory axiom is broken.
     pub fn verify_rc11_consistency(&self) -> Result<(), Rc11ConsistencyViolation> {
+        if self.events.is_empty() {
+            return Err(Rc11ConsistencyViolation::EmptyExecutionGraph);
+        }
+
         let hb = self.compute_happens_before();
+        let total = self.events.len();
 
         // 1. Irreflexivity of hb: ∀ i: ¬(i hb i)
-        for i in 0..self.events.len() {
+        for i in 0..total {
             if hb.contains(&(i, i)) {
                 return Err(Rc11ConsistencyViolation::HappensBeforeCycleDetected { cycle_node: i });
             }
@@ -219,6 +334,19 @@ impl Rc11ExecutionGraph {
 
         // 2. Synchronized data reads
         for (&read_idx, &write_idx) in &self.rf {
+            if read_idx >= total {
+                return Err(Rc11ConsistencyViolation::InvalidEventReference {
+                    idx: read_idx,
+                    total_events: total,
+                });
+            }
+            if write_idx >= total {
+                return Err(Rc11ConsistencyViolation::InvalidEventReference {
+                    idx: write_idx,
+                    total_events: total,
+                });
+            }
+
             let r_event = &self.events[read_idx];
             let w_event = &self.events[write_idx];
 
@@ -231,7 +359,14 @@ impl Rc11ExecutionGraph {
                 _ => continue,
             };
 
-            assert_eq!(r_addr, w_addr, "Reads-from must link identical addresses");
+            if r_addr != w_addr {
+                return Err(Rc11ConsistencyViolation::MismatchedAddressReadsFrom {
+                    write_idx,
+                    read_idx,
+                    write_addr: w_addr,
+                    read_addr: r_addr,
+                });
+            }
 
             // If reading from another thread without hb or synchronization:
             let r_thread = match r_event {
@@ -254,3 +389,111 @@ impl Rc11ExecutionGraph {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rc11_relaxed_memory_structural_invariants_red_to_green() {
+        let mut graph = Rc11ExecutionGraph::default();
+
+        // Red test 1: Empty graph rejected
+        assert_eq!(
+            graph.verify_rc11_consistency(),
+            Err(Rc11ConsistencyViolation::EmptyExecutionGraph)
+        );
+
+        // Add events
+        let w_idx = graph.add_event(MemoryEvent::Write {
+            thread: 0,
+            addr: 0x1000,
+            val: 42,
+            order: MemoryOrder::Relaxed,
+        });
+        let r_mismatch_addr = graph.add_event(MemoryEvent::Read {
+            thread: 1,
+            addr: 0x2000,
+            val: 42,
+            order: MemoryOrder::Relaxed,
+        });
+
+        // Red test 2: try_add_reads_from rejects out of bounds
+        assert_eq!(
+            graph.try_add_reads_from(999, r_mismatch_addr),
+            Err(Rc11GraphError::IndexOutOfBounds { index: 999, total: 2 })
+        );
+        assert_eq!(
+            graph.try_add_reads_from(w_idx, 999),
+            Err(Rc11GraphError::IndexOutOfBounds { index: 999, total: 2 })
+        );
+
+        // Red test 3: try_add_reads_from rejects self reads-from
+        assert_eq!(
+            graph.try_add_reads_from(w_idx, w_idx),
+            Err(Rc11GraphError::SelfReadsFrom { index: w_idx })
+        );
+
+        // Red test 4: try_add_reads_from rejects address mismatch
+        assert_eq!(
+            graph.try_add_reads_from(w_idx, r_mismatch_addr),
+            Err(Rc11GraphError::AddressMismatch { write_addr: 0x1000, read_addr: 0x2000 })
+        );
+
+        // Red test 5: verify_rc11_consistency handles mismatched address without panic
+        let mut bad_graph = Rc11ExecutionGraph::default();
+        let bw = bad_graph.add_event(MemoryEvent::Write {
+            thread: 0,
+            addr: 0x1000,
+            val: 1,
+            order: MemoryOrder::Relaxed,
+        });
+        let br = bad_graph.add_event(MemoryEvent::Read {
+            thread: 1,
+            addr: 0x2000,
+            val: 1,
+            order: MemoryOrder::Relaxed,
+        });
+        bad_graph.add_reads_from(bw, br);
+        assert_eq!(
+            bad_graph.verify_rc11_consistency(),
+            Err(Rc11ConsistencyViolation::MismatchedAddressReadsFrom {
+                write_idx: bw,
+                read_idx: br,
+                write_addr: 0x1000,
+                read_addr: 0x2000,
+            })
+        );
+
+        // Green test: Correct Release-Acquire pattern passes
+        let mut ok_graph = Rc11ExecutionGraph::default();
+        let ow_data = ok_graph.add_event(MemoryEvent::Write {
+            thread: 0,
+            addr: 0x1000,
+            val: 10,
+            order: MemoryOrder::Relaxed,
+        });
+        let ow_flag = ok_graph.add_event(MemoryEvent::Write {
+            thread: 0,
+            addr: 0x2000,
+            val: 1,
+            order: MemoryOrder::Release,
+        });
+        let or_flag = ok_graph.add_event(MemoryEvent::Read {
+            thread: 1,
+            addr: 0x2000,
+            val: 1,
+            order: MemoryOrder::Acquire,
+        });
+        let or_data = ok_graph.add_event(MemoryEvent::Read {
+            thread: 1,
+            addr: 0x1000,
+            val: 10,
+            order: MemoryOrder::Relaxed,
+        });
+        assert!(ok_graph.try_add_reads_from(ow_flag, or_flag).is_ok());
+        assert!(ok_graph.try_add_reads_from(ow_data, or_data).is_ok());
+        assert!(ok_graph.verify_rc11_consistency().is_ok());
+    }
+}
+
