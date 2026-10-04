@@ -98,67 +98,74 @@ PedraDB provides zero-lock-contention health diagnostics and internal metrics di
 ## Status (alpha)
 
 - Status is alpha: the on-disk format and API surface can still evolve before 1.0.
-- Open benchmark cells: read-modify-write is currently 0.70×, and 100M prefix scans on a memory-bounded guest (4 GiB RAM, 256 MiB cache) run at 0.70× vs RocksDB's block cache.
+- Open benchmark cells are named, not hidden: [Named losses](#named-losses).
 
 ## Benchmarks
 
-Linux, 4 vCPU on a Threadripper PRO 3975WX. Peers: RocksDB default
-(`WriteOptions.sync=false`) and fjall. Bold is a win. Plain is a tie or
-parity. A dash is not measured on the current engine, or the peer was
-outside its own band.
-
-**Same durability as production Rocks** (Pedra WAL `write()`, no fsync
-per operation). September 2026.
-
-| Workload | Median | Min | Rounds |
-|---|---:|---:|---|
-| Overwrite, 25M keys, 4 clients | **1.32×** | 1.06× | 2 of 3 |
-| Batched writes, 4 clients | **1.23×** | 1.19× | 3/3 |
-| Read-heavy mix, 4 clients (95% reads) | **1.13×** | 1.00× | 3/3 |
-| Lookup of a missing key, 100M keys | **17.6×** | 14.4× | 2 of 3 |
-| Read-modify-write, 4 clients | 0.70× | 0.67× | open |
-
-Read-modify-write is the open loss. A 100M prefix scan on a 4 GiB guest
-with a bounded cache is a separate open cell at **0.70×**. An earlier
-same-class battery (25 Aug 2026, 17 shapes, every minimum above 1.0×,
-tightest 1.014× on a replicated-log append) is in
+Linux, single guest (4 vCPU on a Threadripper PRO 3975WX host, NVMe).
+Ratio = Pedra ÷ peer; above 1 means Pedra is faster. **Bold** is a win;
+plain is a tie or parity; `—` is unpublished — not measured, or the peer
+sat outside its own historical band and the cell was refused. Protocol,
+per-run values behind every median, and the full loss registry:
 [`docs/benchmarks.md`](docs/benchmarks.md).
 
-The default build still fsyncs before `Ok`, which is a stronger barrier
-than this peer. Reads on that column stay ahead (about 1.1–2.0×). A
-single client paying one fsync per write is slower than Rocks with no
-barrier; that is the price of the default, not a win. Under concurrency
-the same batched-write shape on that stronger column was **2.79×**.
+### Scale ladder — sorted ingest, vs RocksDB default
 
-**Sorted ingest.** Clustered keys, 200-byte values, 256 MiB cache, one
-process per engine. 1M and 10M are one official run (2 Sep). 25M load is
-three runs (3 Sep); its reads are one run. 100M is three runs (5 Sep).
+Clustered keys, 200 B values, 256 MiB cache, one backend per process.
+1M and 10M are one official run (2 Sep 2026); 25M load is three runs and
+its reads one run (3 Sep); 100M is three runs (5 Sep).
 
-| | 1M | 10M | 25M | 100M |
+| op | 1M | 10M | 25M | 100M |
 |---|---:|---:|---:|---:|
 | Load | **1.82×** | **1.03×** | 1.02× | **1.27×** |
 | Settle | **2.50×** | **7.67×** | **27×** | **81×** |
 | Point read | **1.44×** | tie | **1.14×** | **1.07×** |
 | Prefix scan | **1.64×** | **1.31×** | **1.34×** | **1.05×** |
-| 100-key read | **1.36×** | **1.07×** | — | **1.14×** |
+| 100-key read | **1.36×** | **1.07×** | — ¹ | **1.14×** |
 | Multi-get | **1.08×** | **1.02×** | **1.27×** | **1.15×** |
-| Absent-key probe (p50) | — | — | — | **2.71×** |
+| Absent-key probe (p50) | — ² | — ² | — ² | **2.71×** |
 
-25M load is parity inside host noise. 10M point read is a tie (the
-intervals overlap). 25M 100-key read has no ratio: Rocks sat outside its
-own band on every attempt. Absent-key probes at 1M and 10M were measured
-on an older engine — 10M was **0.39×**, a loss — and have not been
-re-run; 25M was not measured. At 100M on the current engine the probe is
-211 ns versus 571 ns. Absolute times and the loss list are in
+25M load is parity inside ±3 s of host noise. 10M point read: the
+intervals overlap. At 100M the absent-key probe is 211 ns vs 571 ns
+(p99: 231–311 ns vs 842 ns–2.4 µs).
+
+¹ Refused: Rocks measured outside its own band on every attempt.
+² The 2 Sep values predate the per-column-family envelope fix — 10M was
+a **0.39×** loss on that engine — and 25M was never measured.
+Re-measuring on the current engine.
+
+### Client mixes — 4 concurrent clients
+
+Same durability class: Pedra async WAL against Rocks default
+(`WriteOptions.sync=false`), September 2026. The fjall rows are a second
+peer (same binary, both sides buffering the measured window, 21 Sep).
+
+| shape | peer | median | min | rounds |
+|---|---|---:|---:|---|
+| Overwrite, 25M keys | Rocks | **1.32×** | 1.06× | 2 of 3 ³ |
+| Batched writes | Rocks | **1.23×** | 1.19× | 3/3 |
+| Read-heavy mix, 95% reads | Rocks | **1.13×** | 1.00× | 3/3 |
+| Missing-key lookup, 100M keys | Rocks | **17.6×** | 14.4× | 2 of 3 ³ |
+| Random read/write, 1M keys | fjall | **1.03×** | 1.02× | 3/3 |
+| Scan, 1,024 keys | fjall | **1.09×** | 0.996× | 3/3 |
+
+³ One round discarded: the Rocks canary sat under that wave's floor.
+
+### Named losses
+
+- **Read-modify-write, 4 clients: 0.70×** (min 0.67×) — open.
+- **Prefix scan, 100M keys, memory-bounded guest** (4 GiB RAM, 256 MiB
+  cache): **0.70×** vs RocksDB's block cache — open. A different cell
+  from the cache-warm 1.05× ladder row above.
+- **Single-client write-per-op: below 1× by construction.** The default
+  build `fdatasync`s before `Ok` — one physical barrier per operation
+  against the peer's zero. Under 4-client concurrency the same
+  batched-write shape is **2.79×** (group commit amortizes the barrier),
+  and reads on the default build stay 1.1–2.0× ahead.
+
+An earlier same-class battery (25 Aug 2026, 17 shapes, every minimum
+above 1.0×, tightest 1.014× on a replicated-log append) is in
 [`docs/benchmarks.md`](docs/benchmarks.md).
-
-**fjall**, same binary, 21 September 2026. Not a different durability
-class: both sides buffer the measured window.
-
-| Workload | Median | Min | Rounds |
-|---|---:|---:|---|
-| Random read/write, 1M keys | **1.03×** | 1.02× | 3/3 |
-| Scan, 1,024 keys | **1.09×** | 0.996× | 3/3 |
 
 ## Crates
 

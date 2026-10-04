@@ -93,6 +93,8 @@ PUBLIC_SCRIPT_FILES = {
     "mutation_fuzzer.py",
     "reproduce_lean_proofs.sh",
     "reproduce-scale.sh",
+    # named by docs/benchmarks.md Reproducing — official scale-ladder driver
+    "scale-ladder-campaign.sh",
     # run by reproduce_lean_proofs.sh
     "check_lean_sorries_and_axioms.py",
     "sel4_gap.py",

@@ -283,6 +283,17 @@ official-Pedra baseline supersedes it.
 
 ## Reproducing
 
+One command for the full official ladder — smoke legs, every rung
+(1M–500M) × both backends × 3 runs, one backend per process, manifest
+naming tree and hardware, and a tarball to hand back:
+
+```sh
+scripts/scale-ladder-campaign.sh
+# scoped: SIZES="250000000 500000000" scripts/scale-ladder-campaign.sh
+```
+
+Or leg-by-leg:
+
 ```sh
 # Official harness, one backend per process
 cd crates/snapshot-bench

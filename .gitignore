@@ -37,3 +37,6 @@ formal/aeneas/repro/dyn-iterator/out/
 # DST campaign ephemeral progress files
 progress-*.jsonl
 **/progress-*.jsonl
+
+# scale-ladder campaign output (tarballed and handed back, never committed)
+bench-results/
