@@ -123,7 +123,10 @@ mkdir -p "$OUT"
 # ---------------------------------------------------------------- legs
 # One leg = one backend, one run, one size: fresh process, fresh tree.
 # Official order: Pedra leg first, then the Rocks leg of the same run.
-run_leg() { # $1 backend  $2 runno  $3 entries
+run_leg() {
+    # LEG_ORDER=sorted|shuffle (RFC-0337 round-8: the empty quadrant).
+    # shuffle = deterministic random ingest order (seed in the bench),
+    # forcing the leveled pipeline instead of the ascending bulk latch. # $1 backend  $2 runno  $3 entries
     local b="$1" r="$2" entries="$3"
     local dir="$OUT/$entries/$b"
     local log="$dir/run$r.log"
@@ -138,6 +141,7 @@ run_leg() { # $1 backend  $2 runno  $3 entries
     (
         cd "$SB" || exit 1
         SLIPSTREAM_BENCH_BACKENDS="$b" \
+        SLIPSTREAM_BENCH_SHUFFLE="${LEG_ORDER:-sorted}" \
         SLIPSTREAM_BENCH_ENTRIES="$entries" \
         SLIPSTREAM_BENCH_VALUE_BYTES=200 \
         SLIPSTREAM_BENCH_CACHE_BYTES=268435456 \

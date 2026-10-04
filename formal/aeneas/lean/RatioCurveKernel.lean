@@ -1,1 +1,0 @@
-../out/lean/RatioCurveKernel.lean

@@ -1,1 +1,0 @@
-../out/lean/WalTicketKernel.lean

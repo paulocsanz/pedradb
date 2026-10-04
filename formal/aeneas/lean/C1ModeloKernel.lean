@@ -1,1 +1,0 @@
-../out/lean/C1ModeloKernel.lean

@@ -76,7 +76,13 @@ This repository ships the embedded engine and its operational surface
 blocks under development (store, raft, sql, http, replication) live in
 the development tree and are not claimed here.
 
-Not proved: the OS, the disk, rustc, Aeneas, Lean, or Z3.
+What the proofs cover are the **decision kernels**; the concurrency glue
+(group commit, WAL writer, caches) is covered by differential oracles, DST,
+and PCT — *tested* armor that caught two real bugs in its first week, which
+is what tested armor is for. Within the shipped Lean tree there are
+**31 registered `sorry`s and 199 axioms** — named, ratcheted debt (the CI
+Lean gate fails on any new one; removals update the ceiling file in the
+same commit). Not proved: the OS, the disk, rustc, Aeneas, Lean, or Z3.
 
 The catalog map, what each check refuses, and how to run it:
 [`docs/verification.md`](docs/verification.md).
@@ -125,7 +131,13 @@ symmetrically — LSM costs live here), and **memtable-window** tables
 further down (256 MiB write buffers on both engines so no timed suite
 flushes — those cells measure memtable and cache throughput). Harness
 defaults equal product `OpenOptions` defaults; any profile delta is cited
-per-table. Protocol, per-run values behind every median, and the full loss
+per-table. **Regime coverage (RFC-0337):** random writes are published at
+≤25M in the flush-free window and sorted ingest at 1M–500M settled — the
+random-ingest-at-scale quadrant (`SLIPSTREAM_BENCH_SHUFFLE=1`) is wired
+into the campaign and its first cells ship with the next battery,
+whichever way they land. Each battery also carries a **held-out leg**
+(seed published in the campaign manifest *after* the engine build it
+measures — not tuned against). Protocol, per-run values behind every median, and the full loss
 registry: [`docs/benchmarks.md`](docs/benchmarks.md).
 
 ### Scale ladder — sorted ingest, vs RocksDB default

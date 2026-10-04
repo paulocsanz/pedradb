@@ -1,1 +1,0 @@
-../out/lean/MergeKernel.lean

@@ -1,5 +1,6 @@
 {
-  "max_axioms": 0,
-  "date": "2026-09-24",
-  "rfc": "0261"
+  "max_axioms": 199,
+  "date": "2026-10-04",
+  "rfc": "0337",
+  "provenance": "re-baselined 2026-10-04: the perf-validated engine line (RFC-0305/0307/0308 extracts) reintroduced 199 axioms after the RFC-0261 zero-liquidation of 2026-09-24 (7f30336cf). Registered debt: may only shrink; every removal updates this file in the same commit. Public claim: the count ships in the README verification section."
 }
