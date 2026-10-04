@@ -1,7 +1,11 @@
 # snapshot-bench
 
-The `snapshot_backends` comparative benchmark harness — the sorted-ingest
-route-fold workload behind the published Pedra vs RocksDB vs fjall tables:
+The `snapshot_backends` comparative benchmark harness — the shuffled-ingest
+route-fold workload behind the Pedra vs RocksDB vs fjall tables (ingest is
+a deterministic random key order — the fixed-seed Fisher-Yates permutation
+of the same key/value set — so the leveled pipeline, not the ascending bulk
+latch, is what every cell measures; historical tables before 2026-10-04
+were measured on sorted ingest and are not comparable):
 clustered `route.svc-NNNNNN.NNNNNNNN` keys, 200 B values, 1024-entry batched
 applies, point gets (hit and miss), per-service prefix scans, 100-key lookup
 batches.

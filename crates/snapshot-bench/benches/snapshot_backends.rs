@@ -149,6 +149,20 @@ fn value_for(pool: &[u8], i: usize, len: usize) -> &[u8] {
 /// a watch-driven consumer would during hydration.
 fn hydrate<S: SnapshotStore>(store: &mut S, n: usize, pool: &[u8], vlen: usize) {
     let mut batch = Vec::with_capacity(APPLY_BATCH);
+    // Shuffled ingest, always. Deterministic Fisher-Yates over the SAME
+    // key/value/version set (fixed seed — every run inserts the identical
+    // permutation, and the settled store is byte-identical to the old
+    // sorted shape, so read cells stay comparable). Sorted ingest rides
+    // the ascending bulk latch and never exercises the leveled pipeline
+    // (memtable -> L0 -> compaction) — not the shape a real writer
+    // produces, and a settle cell that measures "nothing to compact" is
+    // not a compaction benchmark.
+    let mut order: Vec<u64> = (0..n as u64).collect();
+    let mut rng = 0x5EED_CAFE_F00D_0001u64;
+    for cut in (1..order.len()).rev() {
+        order.swap(cut, (next_rand(&mut rng) as usize) % (cut + 1));
+    }
+    eprintln!("  hydrate order: shuffled (fixed seed 0x5EED_CAFE_F00D_0001)");
     let mut i = 0usize;
     let progress_every = if n >= 10_000_000 {
         10_000_000
@@ -160,10 +174,11 @@ fn hydrate<S: SnapshotStore>(store: &mut S, n: usize, pool: &[u8], vlen: usize) 
         batch.clear();
         let end = (i + APPLY_BATCH).min(n);
         for j in i..end {
+            let src = order[j] as usize;
             batch.push(KvUpdate::Put(KvEntry {
-                key: key(j),
-                value: value_for(pool, j, vlen).to_vec(),
-                version: VersionToken::from_u64(j as u64 + 1),
+                key: key(src),
+                value: value_for(pool, src, vlen).to_vec(),
+                version: VersionToken::from_u64(src as u64 + 1),
             }));
         }
         store
