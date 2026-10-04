@@ -4686,6 +4686,53 @@ impl<E: Env> ConcurrentDb<E> {
     /// Lock-free variant for idle polling (RFC-0305): host workers tick at
     /// ~1 kHz and must not fight the hydrate writer for the Db RwLock.
     #[must_use]
+    /// Rocks-shaped write stall: block (bounded) instead of failing when
+    /// the write-admission watermarks (RFC-0274) would reject the batch.
+    /// Evaluated OFF the Db write lock — the in-lock admission check stays
+    /// the fail-closed authority; this pre-check keeps sustained shuffled
+    /// ingest alive while background compaction drains the debt it just
+    /// created. Assists the drain between waits. Returns false on deadline.
+    pub fn await_write_admission(&self, max_wait: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + max_wait;
+        loop {
+            let would_stall = {
+                let g = self.inner.read();
+                let debt = g.pending_compaction_bytes();
+                let cfg = g.backpressure_config();
+                let stall_debt = matches!(
+                    crate::backpressure_kernel::evaluate_compaction_debt(
+                        debt,
+                        cfg.pending_compaction_soft_bytes,
+                        cfg.pending_compaction_hard_bytes,
+                    ),
+                    crate::backpressure_kernel::CompactionDebtVerdict::StallCompaction { .. }
+                );
+                let stall_limit = g.write_stall_l0();
+                let stall_l0 = matches!(
+                    crate::write_admission_kernel::write_admit(
+                        0,
+                        false,
+                        0,
+                        g.level_file_count(0) as u64,
+                        stall_limit.is_some(),
+                        stall_limit.unwrap_or(0) as u64,
+                    ),
+                    crate::write_admission_kernel::WriteAdmit::StallL0
+                );
+                stall_debt || stall_l0
+            };
+            if !would_stall {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            let _ = self.materialize_bulk_once();
+            let _ = self.materialize_parked_once();
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
+
     pub fn has_parked_bulk_fast(&self) -> bool {
         self.parked_bulk_count.load(std::sync::atomic::Ordering::Acquire) != 0
     }
@@ -5208,8 +5255,20 @@ impl<E: Env> ConcurrentDb<E> {
             // RFC-0151 P1.3: publish gate, measured — fsync must succeed and
             // leave no unsynced debt, else the compact install is undone.
             // RFC-0219 P2.2 drain: the paired publish plan (pull 14).
-            let sst_durable = g.fsync_unsynced_ssts().is_ok()
-                && crate::write_admission_kernel::batch_is_empty(g.unsynced_sst_count() as u64);
+            // Bounded re-drain: a memtable flush landing mid-fsync
+            // re-populates the unsynced list and used to fail this gate on
+            // the first try — under sustained (shuffled) ingest that undid
+            // every compact install and piled L0 into the debt stall.
+            let mut sst_durable = false;
+            for _ in 0..3 {
+                if g.fsync_unsynced_ssts().is_err() {
+                    break;
+                }
+                if crate::write_admission_kernel::batch_is_empty(g.unsynced_sst_count() as u64) {
+                    sst_durable = true;
+                    break;
+                }
+            }
             match crate::flush_kernel::manifest_publish_plan(sst_durable) {
                 crate::flush_kernel::ManifestPublishPlan::PublishManifest => {}
                 crate::flush_kernel::ManifestPublishPlan::HoldUnsyncedFailClosed => {

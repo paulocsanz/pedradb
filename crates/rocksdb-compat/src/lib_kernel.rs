@@ -4814,6 +4814,10 @@ impl<E: PedraEnv> DB<E> {
 
     /// rust-rocksdb `write_opt`.
     pub fn write_opt(&self, batch: &WriteBatch, wo: &WriteOptions) -> Result<()> {
+        // Rocks-shaped write stall: bounded block with drain assist before
+        // admission can refuse (the shuffled-ingest debt cliff).
+        self.inner
+            .await_write_admission(std::time::Duration::from_secs(30));
         if !wo.sync && self.try_write_latched(batch)? {
             return Ok(());
         }
@@ -4829,6 +4833,8 @@ impl<E: PedraEnv> DB<E> {
 
     /// rust-rocksdb `write_opt_owned` — consumes `batch` to avoid cloning `Bytes`.
     pub fn write_opt_owned(&self, mut batch: WriteBatch, wo: &WriteOptions) -> Result<()> {
+        self.inner
+            .await_write_admission(std::time::Duration::from_secs(30));
         if !wo.sync && self.try_write_latched_mut(&mut batch)? {
             return Ok(());
         }
