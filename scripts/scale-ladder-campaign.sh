@@ -72,13 +72,21 @@ done
 [ -z "$TOO_SMALL" ] || die "not enough free space under $TMP for:$TOO_SMALL
 Scope down (SIZES=\"...\") or point PEDRA_BENCH_TMPDIR at a bigger NVMe mount."
 
-# Protocol sysctls, best effort (sudo may prompt/fail on unattended VMs).
-if sudo -n sysctl -w vm.dirty_ratio=5 vm.dirty_background_ratio=1 >/dev/null 2>&1; then
-    note "sysctls set: vm.dirty_ratio=5 vm.dirty_background_ratio=1"
+# Protocol sysctls. These are measurement-environment control, NOT a
+# product requirement — Pedra runs on any default kernel; nobody tunes
+# these outside a benchmark lab. The script applies them itself (one
+# sudo prompt at start; transient, gone on reboot) so reproducing the
+# published ladder stays one command. KERNEL_DEFAULTS=1 skips them
+# entirely and measures out-of-the-box kernel behavior instead — a
+# deliberate protocol deviation vs the September cells, recorded in the
+# manifest (expect more run-to-run variance on write-heavy legs).
+if [ "${KERNEL_DEFAULTS:-0}" = "1" ]; then
+    note "KERNEL_DEFAULTS=1: kernel untouched — measuring default writeback behavior (protocol deviation, recorded in manifest)"
+elif sudo sysctl -w vm.dirty_ratio=5 vm.dirty_background_ratio=1 >/dev/null 2>&1; then
+    note "sysctls set (measurement control only): vm.dirty_ratio=5 vm.dirty_background_ratio=1"
 else
-    echo "== WARNING: could not set vm.dirty_ratio=5 / vm.dirty_background_ratio=1 (needs sudo)."
-    echo "   Official legs use them; to match the protocol run:"
-    echo "     sudo sysctl -w vm.dirty_ratio=5 vm.dirty_background_ratio=1"
+    echo "== WARNING: could not set vm.dirty_ratio=5 / vm.dirty_background_ratio=1 (no sudo?)."
+    echo "   Continuing with the kernel as-is; the manifest records the live values."
 fi
 
 RAM_KB="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
@@ -106,6 +114,7 @@ mkdir -p "$OUT"
     echo "rustc:       $(rustc --version 2>/dev/null)"
     echo "cargo:       $(cargo --version 2>/dev/null)"
     echo "sizes:       $SIZES"
+    echo "kernel_defaults: ${KERNEL_DEFAULTS:-0} (0 = protocol sysctls vm.dirty_ratio=5 vm.dirty_background_ratio=1 applied)"
     echo "runs:        $RUNS"
     echo "backends:    $BACKENDS"
     echo "filter:      $FILTER"
