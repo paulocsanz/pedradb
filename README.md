@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/status-alpha-yellow.svg" alt="status: alpha">
 </p>
 
-You link it into your process. Keys and values are bytes, stored sorted on
+Keys and values are bytes, stored sorted on
 local disk. A commit writes the row and its index as one WAL record and
 fsyncs before `Ok`. The engine is `#![forbid(unsafe_code)]`. Status is
 alpha: the format and the API can still break.

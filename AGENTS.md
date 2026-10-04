@@ -60,7 +60,11 @@ The public repo (`upstream` = `paulocsanz/pedradb`) is a CURATED MIRROR, not a s
    job timeout while the lint never executes — is a registered scar,
    2026-10-01..03). Debt ceiling changes require a commit message naming
    the number and its provenance; the ceiling may never rise silently.
-4. **Name the tree**: every claim (internal or public) names the tree it
+4. **Branch protection is part of the gate**: public `main` requires the
+   `hygiene`, `formal-lint`, and `tests` checks (strict, no force-push).
+   Lifting or bypassing protection is an owner decision made explicitly,
+   never a side effect of a release merge.
+5. **Name the tree**: every claim (internal or public) names the tree it
    was measured on. Divergence between the two trees is registered debt,
    not a fact of life; known bugs in public code get public issues the
    same day they are proven.
