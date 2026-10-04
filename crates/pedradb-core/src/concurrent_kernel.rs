@@ -4035,6 +4035,20 @@ impl<E: Env> ConcurrentDb<E> {
     /// not stage on the Ok path.
     #[must_use]
     pub fn try_stage_if_full(&self) -> bool {
+        // Read-guard precheck: the idle compact tick calls this every 5 ms;
+        // taking the Db write lock just to learn "not full" queues a writer
+        // behind in-flight readers and fails every reader's `try_read` in
+        // that window (published-SV fallback churn). The write-guard
+        // re-check below stays authoritative.
+        {
+            let g = self.inner.read();
+            let Some(limit) = g.auto_flush_threshold() else {
+                return false;
+            };
+            if g.active_mem_usage() < limit {
+                return false;
+            }
+        }
         let mut g = self.inner.write();
         let Some(limit) = g.auto_flush_threshold() else {
             return false;
@@ -5029,6 +5043,25 @@ impl<E: Env> ConcurrentDb<E> {
         if !self.writes_idle_for(Duration::ZERO) {
             return Ok(());
         }
+        // Read-guard precheck: the idle drain calls this every tick. Both
+        // early-outs of the write-lock path (pin-state decision AND segment
+        // emptiness, the latter under the WAL mutex — WAL holders never take
+        // Db locks, so no cycle) run under a read guard; taking the write
+        // lock just to learn "nothing to rotate" queues a writer and fails
+        // every reader's `try_read` for the drain window (the measured
+        // read-only-phase published-SV fallback). The write-lock path
+        // re-evaluates everything as before.
+        {
+            let g = self.inner.read();
+            match crate::flush_kernel::wal_rotate_decision(g.wal_pin_state()) {
+                crate::flush_kernel::WalRotateAction::KeepWal => return Ok(()),
+                crate::flush_kernel::WalRotateAction::RotateWal => {
+                    if g.wal_segment_empty() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
         self.inner.write().try_rotate_wal_if_idle()
     }
 
@@ -5056,6 +5089,13 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// SST / MANIFEST I/O.
     pub fn persist_unsynced_l0s_off_lock(&self) -> Result<()> {
+        // Read-guard precheck: skip the write lock when nothing is unsynced
+        // (the settled steady state).
+        if crate::write_admission_kernel::batch_is_empty(
+            self.inner.read().unsynced_sst_count() as u64,
+        ) {
+            return Ok(());
+        }
         let prepared = {
             let mut g = self.inner.write();
             if crate::write_admission_kernel::batch_is_empty(g.unsynced_sst_count() as u64) {

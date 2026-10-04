@@ -1474,6 +1474,12 @@ fn arena_val(src: &[u8]) -> bytes::Bytes {
 pub struct ProbeCounters {
     pub blocks_decoded: usize,
     pub block_crc_skipped: usize,
+    /// Point gets that missed `try_read` and fell to `lookup_published`.
+    pub published_sv: u64,
+    /// Durability pay-point executions — must stay flat at idle steady state.
+    pub durable_pays: u64,
+    /// MANIFEST rewrites.
+    pub manifest_stores: u64,
 }
 
 /// Snapshot of the calling thread's point-path counters.
@@ -1482,6 +1488,9 @@ pub fn probe_counters() -> ProbeCounters {
     ProbeCounters {
         blocks_decoded: pedradb_core::sst::sst_blocks_decoded(),
         block_crc_skipped: pedradb_core::sst::sst_block_crc_skipped(),
+        published_sv: pedradb_core::concurrent::get_used_published_sv_count(),
+        durable_pays: pedradb_core::db::durable_pays_count(),
+        manifest_stores: pedradb_core::manifest::manifest_stores_count(),
     }
 }
 
@@ -5260,7 +5269,10 @@ where
                                 let _ = inner.persist_unsynced_l0s_off_lock();
                                 let _ = inner.rotate_wal_if_writers_idle();
                             }
-                            if !disable_auto_compactions {
+                            // Read-side gate: compact_once takes the Db write
+                            // lock just to ask "any work?" — at the settled
+                            // steady state that queued a writer every 5 ms.
+                            if !disable_auto_compactions && (drain_l0 || l0 > 0 || tombstone_due) {
                                 while compat_compact_once(&inner, &gate) {}
                             }
                             wait = poll;
