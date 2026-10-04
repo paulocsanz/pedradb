@@ -1,8 +1,39 @@
 /target
 **/target/
-formal/aeneas/lean/.lake/
-findings/
---engine/
-rank-harness.json
+# Vendored crates.io deps for the offline sub-surreal Linux gate (bench12sub+):
+# regenerate with bench/sub-surreal/vendor.sh — too big for git.
+/vendor
+**/*.rs.bk
+*.log
+/tmp
+
+# Research PDFs stay local; fichas / txt / catalog go in git.
+/research/pdfs/**
+!/research/pdfs/README.md
+/research/fontes/**
+!/research/fontes/README.md
+!/research/fontes/**/*.txt
+!/research/fontes/**/*.md
+
+# Bench leftover engines. Keep JSON/MD/TXT reports; never commit DBs.
+# GitHub rejects files over 100MB; SST dumps from parity runs are hundreds of MB.
+**/*.sst
+**/db-compat/
+**/db-rocksdb/
+
 __pycache__/
 *.pyc
+
+# Stray CLI-arg dirs (e.g. a quoted `--help`): never commit.
+/--help/
+
+# Formal verification build artifacts (llbc / Lean extracts): outputs, not sources.
+/formal/out/
+
+# Cross-compiled build cache: never commit.
+/target-linux-arm64/
+formal/aeneas/repro/dyn-iterator/out/
+
+# DST campaign ephemeral progress files
+progress-*.jsonl
+**/progress-*.jsonl

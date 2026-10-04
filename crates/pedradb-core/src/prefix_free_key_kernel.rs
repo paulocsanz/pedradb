@@ -53,7 +53,26 @@ pub enum KeyCodecError {
     InvalidValueType,
     /// Trailing bytes detected beyond valid encoding.
     TrailingGarbage,
+    EmptyUserKey,
+    ZeroSequenceNumber,
+    KeyTooLarge { len: usize },
 }
+
+impl std::fmt::Display for KeyCodecError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BufferTooShort => write!(f, "Buffer is too short for internal key header"),
+            Self::LengthMismatch => write!(f, "User key length exceeds buffer bounds"),
+            Self::InvalidValueType => write!(f, "Invalid internal value type tag"),
+            Self::TrailingGarbage => write!(f, "Trailing garbage bytes after internal key"),
+            Self::EmptyUserKey => write!(f, "User key cannot be empty"),
+            Self::ZeroSequenceNumber => write!(f, "Sequence number cannot be 0"),
+            Self::KeyTooLarge { len } => write!(f, "User key is too large: {len} bytes"),
+        }
+    }
+}
+
+impl std::error::Error for KeyCodecError {}
 
 /// Prefix-free length-prefixed composite key encoder and decoder.
 pub struct PrefixFreeKeyCodec;
@@ -139,5 +158,50 @@ impl PrefixFreeKeyCodec {
             }
             ord => Ok(ord),
         }
+    }
+
+    /// Encodes `(user_key, seq, value_type)` into an injective byte vector safely with fail-closed bounds checking.
+    pub fn try_encode(
+        user_key: &[u8],
+        sequence_number: u64,
+        value_type: InternalValueType,
+    ) -> Result<Vec<u8>, KeyCodecError> {
+        if user_key.is_empty() {
+            return Err(KeyCodecError::EmptyUserKey);
+        }
+        if sequence_number == 0 {
+            return Err(KeyCodecError::ZeroSequenceNumber);
+        }
+        if user_key.len() > u32::MAX as usize {
+            return Err(KeyCodecError::KeyTooLarge { len: user_key.len() });
+        }
+        Ok(Self::encode(user_key, sequence_number, value_type))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prefix_free_key_invariants_red_to_green() {
+        assert_eq!(
+            PrefixFreeKeyCodec::try_encode(b"", 10, InternalValueType::Value),
+            Err(KeyCodecError::EmptyUserKey)
+        );
+
+        assert_eq!(
+            PrefixFreeKeyCodec::try_encode(b"foo", 0, InternalValueType::Value),
+            Err(KeyCodecError::ZeroSequenceNumber)
+        );
+
+        let enc = PrefixFreeKeyCodec::try_encode(b"foo", 42, InternalValueType::Value).unwrap();
+        let dec = PrefixFreeKeyCodec::decode(&enc).unwrap();
+        assert_eq!(dec.user_key, b"foo");
+        assert_eq!(dec.sequence_number, 42);
+        assert_eq!(dec.value_type, InternalValueType::Value);
+
+        let disp = format!("{}", KeyCodecError::EmptyUserKey);
+        assert!(!disp.is_empty());
     }
 }

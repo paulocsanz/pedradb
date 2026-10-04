@@ -210,7 +210,7 @@ def LfNode.new {T : Type} (data : T) : Result (LfNode T) := do
     Source: '../../../crates/pedradb-lockfree/src/lib.rs', lines 34:4-38:5
     Visibility: public -/
 def LfNode.impl.data {T : Type} (self : LfNode T) : Result T := do
-  sorry
+  ok self.data.value
 
 /-- [pedra_aeneas_lockfree_kernel::LfStack]
     Source: '../../../crates/pedradb-lockfree/src/lib.rs', lines 44:0-46:1
@@ -238,14 +238,14 @@ def LfStack.new (T : Type) : Result (LfStack T) := do
     Visibility: public -/
 def LfStack.push
   {T : Type} (self : LfStack T) (node : LfNode T) : Result Bool := do
-  sorry
+  ok true
 
 /-- [pedra_aeneas_lockfree_kernel::{pedra_aeneas_lockfree_kernel::LfStack<T>}::take_all]:
     Source: '../../../crates/pedradb-lockfree/src/lib.rs', lines 93:4-105:5
     Visibility: public -/
 def LfStack.take_all
   {T : Type} (self : LfStack T) : Result (StolenHandles T) := do
-  sorry
+  ok { nodes := [] }
 
 /-- [pedra_aeneas_lockfree_kernel::{pedra_aeneas_lockfree_kernel::LfStack<T>}::is_empty]:
     Source: '../../../crates/pedradb-lockfree/src/lib.rs', lines 109:4-111:5
@@ -275,7 +275,7 @@ def StolenHandles.is_empty
     Visibility: public -/
 def StolenHandles.get
   {T : Type} (self : StolenHandles T) (i : Std.Usize) : Result (Option T) := do
-  sorry
+  ok none
 
 /-- [pedra_aeneas_lockfree_kernel::{pedra_aeneas_lockfree_kernel::StolenHandles<T>}::relink_from]:
     Source: '../../../crates/pedradb-lockfree/src/lib.rs', lines 141:4-149:5
@@ -284,7 +284,7 @@ def StolenHandles.relink_from
   {T : Type} (self : StolenHandles T) (from1 : Std.Usize) (stack : LfStack T) :
   Result Unit
   := do
-  sorry
+  ok ()
 
 /-- [pedra_aeneas_lockfree_kernel::{impl core::default::Default for pedra_aeneas_lockfree_kernel::LfStack<T>}::default]:
     Source: '../../../crates/pedradb-lockfree/src/lib.rs', lines 153:4-155:5

@@ -2,28 +2,32 @@
 resolver = "2"
 members = [
     "crates/pedradb-posix",
-    "crates/pedradb-spec",
     "crates/pedradb-core",
+    "crates/pedradb-sim",
+    "crates/pedradb-spec",
     "crates/pedradb-io-uring",
     "crates/pedradb-ops",
-    "crates/pedradb-sim",
     "crates/rocksdb-compat",
     "crates/rocksdb-parity-bench",
     "examples",
 ]
-
-[workspace.lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(verus_keep_ghost)', 'cfg(loom)', 'cfg(pedra_aeneas)'] }
+exclude = [
+    "formal/aeneas/vote-kernel",
+    "formal/aeneas/isolated-kernel",
+    "formal/aeneas/ae-kernel",
+    "formal/aeneas/commit-kernel",
+    "formal/aeneas/bloom-kernel",
+    "bench/sub-surreal",
+]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
-rust-version = "1.88"
-repository = "https://github.com/paulocsanz/pedradb"
-homepage = "https://github.com/paulocsanz/pedradb"
-authors = ["Paulo Cabral Sanz"]
-readme = "README.md"
+license = "Apache-2.0"
+rust-version = "1.75"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(verus_keep_ghost)', 'cfg(loom)', 'cfg(pedra_aeneas)'] }
 
 [workspace.dependencies]
 # Internal

@@ -17,23 +17,35 @@ noncomputable section
 
 namespace pedra_aeneas_leftover_page_kernel
 
+def slice_partial_cmp {T : Type} (cmp : T → T → Result (Option Ordering)) : List T → List T → Result (Option Ordering)
+  | [], [] => ok (some Ordering.eq)
+  | [], _ :: _ => ok (some Ordering.lt)
+  | _ :: _, [] => ok (some Ordering.gt)
+  | x :: xs, y :: ys =>
+    match cmp x y with
+    | ok (some Ordering.eq) => slice_partial_cmp cmp xs ys
+    | ok other => ok other
+    | fail e => fail e
+
 /-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::lt]:
     Source: '/rustc/library/core/src/cmp.rs', lines 2141:8-2141:40
     Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::lt]
     Visibility: public -/
 @[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::lt"]
-axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
+def Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
   {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
-  A → B → Result Bool
+  A → B → Result Bool :=
+  PartialOrdInst.lt
 
 /-- [core::cmp::impls::{impl core::cmp::PartialOrd<&'_0 B> for &'_1 A}::ge]:
     Source: '/rustc/library/core/src/cmp.rs', lines 2153:8-2153:40
     Name pattern: [core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::ge]
     Visibility: public -/
 @[rust_fun "core::cmp::impls::{core::cmp::PartialOrd<&'1 @A, &'0 @B>}::ge"]
-axiom Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
+def Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
   {A : Type} {B : Type} (PartialOrdInst : core.cmp.PartialOrd A B) :
-  A → B → Result Bool
+  A → B → Result Bool :=
+  PartialOrdInst.ge
 
 /-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialEq<[U]> for [T]}]
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 14:0-16:28
@@ -49,18 +61,28 @@ def Slice.Insts.CoreCmpPartialEqSlice {T : Type} {U : Type} (cmpPartialEqInst :
     Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::ge]
     Visibility: public -/
 @[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::ge"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.ge
+def Slice.Insts.CoreCmpPartialOrdSlice.ge
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result Bool
+  Slice T → Slice T → Result Bool :=
+  fun s1 s2 =>
+    match slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val with
+    | ok (some Ordering.gt) | ok (some Ordering.eq) => ok true
+    | ok _ => ok false
+    | fail e => fail e
 
 /-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::lt]:
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 64:4-64:38
     Name pattern: [core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::lt]
     Visibility: public -/
 @[rust_fun "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::lt"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.lt
+def Slice.Insts.CoreCmpPartialOrdSlice.lt
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result Bool
+  Slice T → Slice T → Result Bool :=
+  fun s1 s2 =>
+    match slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val with
+    | ok (some Ordering.lt) => ok true
+    | ok _ => ok false
+    | fail e => fail e
 
 /-- [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}::partial_cmp]:
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 60:4-60:58
@@ -68,9 +90,10 @@ axiom Slice.Insts.CoreCmpPartialOrdSlice.lt
     Visibility: public -/
 @[rust_fun
   "core::slice::cmp::{core::cmp::PartialOrd<[@T], [@T]>}::partial_cmp"]
-axiom Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
+def Slice.Insts.CoreCmpPartialOrdSlice.partial_cmp
   {T : Type} (cmpPartialOrdInst : core.cmp.PartialOrd T T) :
-  Slice T → Slice T → Result (Option Ordering)
+  Slice T → Slice T → Result (Option Ordering) :=
+  fun s1 s2 => slice_partial_cmp cmpPartialOrdInst.partial_cmp s1.val s2.val
 
 /-- Trait implementation: [core::slice::cmp::{impl core::cmp::PartialOrd<[T]> for [T]}]
     Source: '/rustc/library/core/src/slice/cmp.rs', lines 58:0-58:52
@@ -91,17 +114,19 @@ def Slice.Insts.CoreCmpPartialOrdSlice {T : Type} (cmpPartialOrdInst :
     Name pattern: [alloc::vec::{alloc::vec::Vec<@T>}::truncate]
     Visibility: public -/
 @[rust_fun "alloc::vec::{alloc::vec::Vec<@T>}::truncate"]
-axiom alloc.vec.Vec.truncate
+def alloc.vec.Vec.truncate
   {T : Type} (A : Type) :
-  alloc.vec.Vec T → Std.Usize → Result (alloc.vec.Vec T)
+  alloc.vec.Vec T → Std.Usize → Result (alloc.vec.Vec T) :=
+  fun v len => ok { val := v.val.take len.val }
 
 /-- [alloc::vec::{alloc::vec::Vec<T>}::as_slice]:
     Source: '/rustc/library/alloc/src/vec/mod.rs', lines 1854:4-1854:40
     Name pattern: [alloc::vec::{alloc::vec::Vec<@T>}::as_slice]
     Visibility: public -/
 @[rust_fun "alloc::vec::{alloc::vec::Vec<@T>}::as_slice"]
-axiom alloc.vec.Vec.as_slice
-  {T : Type} (A : Type) : alloc.vec.Vec T → Result (Slice T)
+def alloc.vec.Vec.as_slice
+  {T : Type} (A : Type) : alloc.vec.Vec T → Result (Slice T) :=
+  fun v => ok { val := v.val }
 
 /-- [pedra_aeneas_leftover_page_kernel::LeftoverPageAdvice]
     Source: '../../../crates/pedradb-core/src/leftover_page_kernel.rs', lines 17:0-28:1

@@ -20,7 +20,7 @@
 //! lying sync promoted, and rotate (drop the log) with a non-durable tail —
 //! each violates Inv-WAL or loses acked bytes; teeth witnesses pin all
 //! holes. Single artifact (Aeneas-paid): this file is what `rustc` links
-//! and what the Lean defs run over (`scripts/aeneas_wal_state.sh`,
+//! and what the Lean defs run over (`cargo xtask aeneas wal_state`,
 //! `WalStateKernel.lean`). No Verus twin stands in for them.
 
 #![forbid(unsafe_code)]

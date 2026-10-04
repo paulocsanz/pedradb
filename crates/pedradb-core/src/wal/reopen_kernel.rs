@@ -2,10 +2,10 @@
 //! reopen path).
 //!
 //! **Term:** this file is what `rustc` links. Aeneas extracts that body
-//! (`scripts/aeneas_reopen.sh`). A Verus stand-in of ReopenDamage billed as
+//! (`cargo xtask aeneas reopen`). A Verus stand-in of ReopenDamage billed as
 //! last-wins of a cfg-split file is a model twin (deleted).
 //!
-//!   ./scripts/aeneas_reopen.sh --required
+//!   cargo xtask aeneas reopen --required
 //!
 //! Production [`crate::Db::open_with_env`] calls this kernel in every WAL
 //! damage arm: the outcome of a reopen under damage is decided **here**

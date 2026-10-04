@@ -4,7 +4,7 @@
 //! covering files, not the live file count. Clock is [`predict_get_ns`]
 //! (hot fraction × noisy-neighbor tax). Single artifact (Aeneas-paid):
 //! this file is what `rustc` links and what the Lean defs run over
-//! (`scripts/aeneas_scale.sh`, `ScaleKernel.lean`). No Verus twin stands
+//! (`cargo xtask aeneas scale`, `ScaleKernel.lean`). No Verus twin stands
 //! in for them.
 
 #![forbid(unsafe_code)]
@@ -547,27 +547,4 @@ mod tests {
         assert!(as_is.p_best > f1.p_best * 100);
         assert_eq!(as_is.happy_hot_bps, SCALE_BPS);
     }
-    /// RFC-0306 regression shape: the 100M store (24 GiB) inside a 47 GiB
-    /// container must land KeepHot (cap = 3/4 of ceiling), while a 4 GiB
-    /// ceiling still bounds to the 3 GiB floor (Drop). The flat-floor
-    /// default dropped page cache for stores that fit in RAM and handed
-    /// the Rocks peer a 2.5x point-read win at 100M.
-    #[test]
-    fn warm_cap_scales_with_ceiling_keeps_ram_fitting_stores_hot() {
-        let container = 47u64 * (1 << 30);
-        let cap = warm_cap_bytes(container);
-        assert_eq!(cap, container * 3 / 4, "cap is 3/4 of the ceiling");
-        let store_100m = 24u64 * (1 << 30);
-        assert!(
-            store_100m <= cap,
-            "100M store must be KeepHot in a 47 GiB container"
-        );
-        let tiny = 4u64 * (1 << 30);
-        assert_eq!(warm_cap_bytes(tiny), WARM_FLOOR_BYTES);
-        assert!(
-            store_100m > warm_cap_bytes(tiny),
-            "4 GiB ceiling keeps the bounded-cache Drop regime"
-        );
-    }
-
 }

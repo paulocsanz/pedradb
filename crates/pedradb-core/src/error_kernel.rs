@@ -201,6 +201,13 @@ pub enum CoreError {
         /// Configured maximum concurrent writers limit.
         limit: usize,
     },
+
+    /// Database entered irreversible fail-closed poison state after cascading rollback/IO failure (RFC-0335).
+    #[error("database poisoned after cascading failure: {reason}")]
+    DbPoisoned {
+        /// Categorized failure reason.
+        reason: String,
+    },
 }
 
 /// Convenience `Result` alias used throughout the crate.

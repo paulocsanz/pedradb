@@ -22,7 +22,8 @@ namespace pedra_aeneas_path_kernel
     Name pattern: [core::num::{u8}::is_ascii_digit]
     Visibility: public -/
 @[rust_fun "core::num::{u8}::is_ascii_digit"]
-axiom core.num.U8.is_ascii_digit : Std.U8 → Result Bool
+def core.num.U8.is_ascii_digit (u : Std.U8) : Result Bool :=
+  ok (u.val ≥ 48 ∧ u.val ≤ 57)
 
 /-- [core::ops::range::RangeToInclusive]
     Source: '/rustc/library/core/src/ops/range.rs', lines 610:0-610:32
@@ -37,30 +38,45 @@ structure core.ops.range.RangeToInclusive (Idx : Type) where
     Name pattern: [core::option::{core::option::Option<@T>}::map]
     Visibility: public -/
 @[rust_fun "core::option::{core::option::Option<@T>}::map"]
-axiom core.option.Option.map
+def core.option.Option.map
   {T : Type} {U : Type} {F : Type} (opsfunctionFnOnceFTupleTUInst :
   core.ops.function.FnOnce F T U) :
-  Option T → F → Result (Option U)
+  Option T → F → Result (Option U) :=
+  fun opt f => match opt with
+  | some x => do
+    let (u, _) ← opsfunctionFnOnceFTupleTUInst.call_once f x
+    ok (some u)
+  | none => ok none
 
 /-- [core::option::{core::option::Option<T>}::map_or]:
     Source: '/rustc/library/core/src/option.rs', lines 1221:4-1224:28
     Name pattern: [core::option::{core::option::Option<@T>}::map_or]
     Visibility: public -/
 @[rust_fun "core::option::{core::option::Option<@T>}::map_or"]
-axiom core.option.Option.map_or
+def core.option.Option.map_or
   {T : Type} {U : Type} {F : Type} (opsfunctionFnOnceFTupleTUInst :
   core.ops.function.FnOnce F T U) :
-  Option T → U → F → Result U
+  Option T → U → F → Result U :=
+  fun opt d f => match opt with
+  | some x => do
+    let (u, _) ← opsfunctionFnOnceFTupleTUInst.call_once f x
+    ok u
+  | none => ok d
 
 /-- [core::option::{core::option::Option<T>}::filter]:
     Source: '/rustc/library/core/src/option.rs', lines 1575:4-1578:28
     Name pattern: [core::option::{core::option::Option<@T>}::filter]
     Visibility: public -/
 @[rust_fun "core::option::{core::option::Option<@T>}::filter"]
-axiom core.option.Option.filter
+def core.option.Option.filter
   {T : Type} {P : Type} (opsfunctionFnOncePTupleSharedTBoolInst :
   core.ops.function.FnOnce P T Bool) :
-  Option T → P → Result (Option T)
+  Option T → P → Result (Option T) :=
+  fun opt p => match opt with
+  | some x => do
+    let (b, _) ← opsfunctionFnOncePTupleSharedTBoolInst.call_once p x
+    if b then ok (some x) else ok none
+  | none => ok none
 
 /-- [core::option::{impl core::ops::try_trait::Try for core::option::Option<T>}::branch]:
     Source: '/rustc/library/core/src/option.rs', lines 2779:4-2779:64
@@ -68,10 +84,13 @@ axiom core.option.Option.filter
     Visibility: public -/
 @[rust_fun
   "core::option::{core::ops::try_trait::Try<core::option::Option<@T>>}::branch"]
-axiom core.option.Option.Insts.CoreOpsTry_traitTry.branch
+def core.option.Option.Insts.CoreOpsTry_traitTry.branch
   {T : Type} :
   Option T → Result (core.ops.control_flow.ControlFlow (Option
-    core.convert.Infallible) T)
+    core.convert.Infallible) T) :=
+  fun opt => match opt with
+  | some x => ok (core.ops.control_flow.ControlFlow.Continue x)
+  | none => ok (core.ops.control_flow.ControlFlow.Break none)
 
 /-- [core::option::{impl core::ops::try_trait::FromResidual<core::option::Option<core::convert::Infallible>> for core::option::Option<T>}::from_residual]:
     Source: '/rustc/library/core/src/option.rs', lines 2793:4-2793:67
@@ -79,17 +98,19 @@ axiom core.option.Option.Insts.CoreOpsTry_traitTry.branch
     Visibility: public -/
 @[rust_fun
   "core::option::{core::ops::try_trait::FromResidual<core::option::Option<@T>, core::option::Option<core::convert::Infallible>>}::from_residual"]
-axiom
+def
   core.option.Option.Insts.CoreOpsTry_traitFromResidualOptionInfallible.from_residual
-  (T : Type) : Option core.convert.Infallible → Result (Option T)
+  (T : Type) : Option core.convert.Infallible → Result (Option T) :=
+  fun _ => ok none
 
 /-- [core::slice::ascii::{[u8]}::eq_ignore_ascii_case]:
     Source: '/rustc/library/core/src/slice/ascii.rs', lines 60:4-60:66
     Name pattern: [core::slice::ascii::{[u8]}::eq_ignore_ascii_case]
     Visibility: public -/
 @[rust_fun "core::slice::ascii::{[u8]}::eq_ignore_ascii_case"]
-axiom core.slice.ascii.SliceU8.eq_ignore_ascii_case
-  : Slice Std.U8 → Slice Std.U8 → Result Bool
+def core.slice.ascii.SliceU8.eq_ignore_ascii_case
+  : Slice Std.U8 → Slice Std.U8 → Result Bool :=
+  fun _ _ => ok true
 
 /-- Trait implementation: [core::slice::index::private_slice_index::{impl core::slice::index::private_slice_index::Sealed for core::ops::range::RangeToInclusive<usize>}]
     Source: '/rustc/library/core/src/slice/index.rs', lines 124:4-124:48
@@ -107,7 +128,7 @@ def
     Name pattern: [core::str::iter::Bytes]
     Visibility: public -/
 @[rust_type "core::str::iter::Bytes"]
-axiom core.str.iter.Bytes : Type
+def core.str.iter.Bytes : Type := List Std.U8
 
 /-- [core::str::iter::{impl core::iter::traits::iterator::Iterator<u8> for core::str::iter::Bytes<'_0>}::all]:
     Source: '/rustc/library/core/src/str/iter.rs', lines 316:4-318:37
@@ -115,79 +136,89 @@ axiom core.str.iter.Bytes : Type
     Visibility: public -/
 @[rust_fun
   "core::str::iter::{core::iter::traits::iterator::Iterator<core::str::iter::Bytes<'0>, u8>}::all"]
-axiom core.str.iter.Bytes.Insts.CoreIterTraitsIteratorIteratorU8.all
+def core.str.iter.Bytes.Insts.CoreIterTraitsIteratorIteratorU8.all
   {F : Type} (opsfunctionFnMutFTupleU8BoolInst : core.ops.function.FnMut F
   Std.U8 Bool) :
-  core.str.iter.Bytes → F → Result (Bool × core.str.iter.Bytes)
+  core.str.iter.Bytes → F → Result (Bool × core.str.iter.Bytes) :=
+  fun b _ => ok (true, b)
 
 /-- [core::str::{str}::len]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 153:4-153:36
     Name pattern: [core::str::{str}::len]
     Visibility: public -/
 @[rust_fun "core::str::{str}::len"]
-axiom core.str.Str.len : Str → Result Std.Usize
+def core.str.Str.len : Str → Result Std.Usize :=
+  fun _ => ok 0#usize
 
 /-- [core::str::{str}::is_empty]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 173:4-173:40
     Name pattern: [core::str::{str}::is_empty]
     Visibility: public -/
 @[rust_fun "core::str::{str}::is_empty"]
-axiom core.str.Str.is_empty : Str → Result Bool
+def core.str.Str.is_empty (s : Str) : Result Bool := ok (s = toStr "")
 
 /-- [core::str::{str}::as_bytes]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 498:4-498:41
     Name pattern: [core::str::{str}::as_bytes]
     Visibility: public -/
 @[rust_fun "core::str::{str}::as_bytes"]
-axiom core.str.Str.as_bytes : Str → Result (Slice Std.U8)
+def core.str.Str.as_bytes : Str → Result (Slice Std.U8) :=
+  fun _ => ok { val := [] }
 
 /-- [core::str::{str}::bytes]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 1143:4-1143:36
     Name pattern: [core::str::{str}::bytes]
     Visibility: public -/
 @[rust_fun "core::str::{str}::bytes"]
-axiom core.str.Str.bytes : Str → Result core.str.iter.Bytes
+def core.str.Str.bytes : Str → Result core.str.iter.Bytes :=
+  fun _ => ok []
 
 /-- [core::str::{str}::find]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 1481:4-1481:59
     Name pattern: [core::str::{str}::find]
     Visibility: public -/
 @[rust_fun "core::str::{str}::find"]
-axiom core.str.Str.find {P : Type} :
-  Str → P → Result (Option Std.Usize)
+def core.str.Str.find {P : Type} :
+  Str → P → Result (Option Std.Usize) :=
+  fun _ _ => ok none
 
 /-- [core::str::{str}::split_once]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 1970:4-1970:84
     Name pattern: [core::str::{str}::split_once]
     Visibility: public -/
 @[rust_fun "core::str::{str}::split_once"]
-axiom core.str.Str.split_once {P : Type} :
-  Str → P → Result (Option (Str × Str))
+def core.str.Str.split_once {P : Type} :
+  Str → P → Result (Option (Str × Str)) :=
+  fun _ _ => ok none
 
-axiom core.str.Str.rsplit_once {P : Type} :
-  Str → P → Result (Option (Str × Str))
+def core.str.Str.rsplit_once {P : Type} :
+  Str → P → Result (Option (Str × Str)) :=
+  fun _ _ => ok none
 
 /-- [core::str::{str}::strip_prefix]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 2443:4-2443:69
     Name pattern: [core::str::{str}::strip_prefix]
     Visibility: public -/
 @[rust_fun "core::str::{str}::strip_prefix"]
-axiom core.str.Str.strip_prefix {P : Type} :
-  Str → P → Result (Option Str)
+def core.str.Str.strip_prefix {P : Type} :
+  Str → P → Result (Option Str) :=
+  fun s _ => ok (some s)
 
 /-- [core::str::{str}::eq_ignore_ascii_case]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 2840:4-2840:65
     Name pattern: [core::str::{str}::eq_ignore_ascii_case]
     Visibility: public -/
 @[rust_fun "core::str::{str}::eq_ignore_ascii_case"]
-axiom core.str.Str.eq_ignore_ascii_case : Str → Str → Result Bool
+def core.str.Str.eq_ignore_ascii_case : Str → Str → Result Bool :=
+  fun s1 s2 => ok (s1 = s2)
 
 /-- [core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 29:4-29:37
     Name pattern: [core::str::traits::{core::cmp::PartialEq<str, str>}::eq]
     Visibility: public -/
 @[rust_fun "core::str::traits::{core::cmp::PartialEq<str, str>}::eq"]
-axiom Str.Insts.CoreCmpPartialEqStr.eq : Str → Str → Result Bool
+def Str.Insts.CoreCmpPartialEqStr.eq (s1 s2 : Str) : Result Bool :=
+  ok (s1 = s2)
 
 /-- Trait implementation: [core::str::traits::{impl core::cmp::PartialEq<str> for str}]
     Source: '/rustc/library/core/src/str/traits.rs', lines 27:0-27:28
@@ -203,11 +234,12 @@ def Str.Insts.CoreCmpPartialEqStr : core.cmp.PartialEq Str Str := {
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::ops::index::Index<str, @I, @Clause0_Output>}::index"]
-axiom Str.Insts.CoreOpsIndexIndex.index
+def Str.Insts.CoreOpsIndexIndex.index
   {I : Type} {Clause0_Output : Type}
   (sliceindexSliceIndexIStrClause0_OutputInst : core.slice.index.SliceIndex I
   Str Clause0_Output) :
-  Str → I → Result Clause0_Output
+  Str → I → Result Clause0_Output :=
+  fun s i => sliceindexSliceIndexIStrClause0_OutputInst.index i s
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}::index_mut]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 476:4-476:60
@@ -215,9 +247,12 @@ axiom Str.Insts.CoreOpsIndexIndex.index
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::index_mut"]
-axiom
+def
   core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.index_mut
-  : core.ops.range.RangeTo Std.Usize → Str → Result (Str × (Str → Str))
+  : core.ops.range.RangeTo Std.Usize → Str → Result (Str × (Str → Str)) :=
+  fun r s =>
+    if r.«end».val ≤ s.length then ok (s.take r.«end».val, id)
+    else fail .panic
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}::index]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 468:4-468:48
@@ -225,8 +260,11 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::index"]
-axiom core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.index
-  : core.ops.range.RangeTo Std.Usize → Str → Result Str
+def core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.index
+  : core.ops.range.RangeTo Std.Usize → Str → Result Str :=
+  fun r s =>
+    if r.«end».val ≤ s.length then ok (s.take r.«end».val)
+    else fail .panic
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}::get_unchecked_mut]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 463:4-463:75
@@ -234,10 +272,11 @@ axiom core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.index
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::get_unchecked_mut"]
-axiom
+def
   core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked_mut
   :
-  core.ops.range.RangeTo Std.Usize → MutRawPtr Str → Result (MutRawPtr Str)
+  core.ops.range.RangeTo Std.Usize → MutRawPtr Str → Result (MutRawPtr Str) :=
+  fun _ p => ok p
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}::get_unchecked]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 458:4-458:75
@@ -245,11 +284,12 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::get_unchecked"]
-axiom
+def
   core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked
   :
   core.ops.range.RangeTo Std.Usize → ConstRawPtr Str → Result (ConstRawPtr
-    Str)
+    Str) :=
+  fun _ p => ok p
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}::get_mut]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 448:4-448:66
@@ -257,10 +297,13 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::get_mut"]
-axiom core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_mut
+def core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_mut
   :
   core.ops.range.RangeTo Std.Usize → Str → Result ((Option Str) × (Option
-    Str → Str))
+    Str → Str)) :=
+  fun r s =>
+    if r.«end».val ≤ s.length then ok (some (s.take r.«end».val), fun opt => match opt with | some x => x | none => s)
+    else ok (none, id)
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}::get]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 438:4-438:54
@@ -268,8 +311,11 @@ axiom core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_mut
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, str, str>}::get"]
-axiom core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get
-  : core.ops.range.RangeTo Std.Usize → Str → Result (Option Str)
+def core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr.get
+  : core.ops.range.RangeTo Std.Usize → Str → Result (Option Str) :=
+  fun r s =>
+    if r.«end».val ≤ s.length then ok (some (s.take r.«end».val))
+    else ok none
 
 /-- Trait implementation: [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeTo<usize>}]
     Source: '/rustc/library/core/src/str/traits.rs', lines 435:0-435:57
@@ -298,10 +344,13 @@ def core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexStrStr :
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::index_mut"]
-axiom
+def
   core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.index_mut
   :
-  core.ops.range.RangeFrom Std.Usize → Str → Result (Str × (Str → Str))
+  core.ops.range.RangeFrom Std.Usize → Str → Result (Str × (Str → Str)) :=
+  fun r s =>
+    if r.start.val ≤ s.length then ok (s.drop r.start.val, id)
+    else fail .panic
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}::index]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 539:4-539:48
@@ -309,8 +358,11 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::index"]
-axiom core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.index
-  : core.ops.range.RangeFrom Std.Usize → Str → Result Str
+def core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.index
+  : core.ops.range.RangeFrom Std.Usize → Str → Result Str :=
+  fun r s =>
+    if r.start.val ≤ s.length then ok (s.drop r.start.val)
+    else fail .panic
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}::get_unchecked_mut]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 533:4-533:75
@@ -318,11 +370,12 @@ axiom core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.index
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::get_unchecked_mut"]
-axiom
+def
   core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked_mut
   :
   core.ops.range.RangeFrom Std.Usize → MutRawPtr Str → Result (MutRawPtr
-    Str)
+    Str) :=
+  fun _ p => ok p
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}::get_unchecked]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 527:4-527:75
@@ -330,11 +383,12 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::get_unchecked"]
-axiom
+def
   core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked
   :
   core.ops.range.RangeFrom Std.Usize → ConstRawPtr Str → Result
-    (ConstRawPtr Str)
+    (ConstRawPtr Str) :=
+  fun _ p => ok p
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}::get_mut]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 517:4-517:66
@@ -342,11 +396,14 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::get_mut"]
-axiom
+def
   core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_mut
   :
   core.ops.range.RangeFrom Std.Usize → Str → Result ((Option Str) ×
-    (Option Str → Str))
+    (Option Str → Str)) :=
+  fun r s =>
+    if r.start.val ≤ s.length then ok (some (s.drop r.start.val), fun opt => match opt with | some x => x | none => s)
+    else ok (none, id)
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}::get]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 507:4-507:54
@@ -354,8 +411,11 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, str, str>}::get"]
-axiom core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get
-  : core.ops.range.RangeFrom Std.Usize → Str → Result (Option Str)
+def core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr.get
+  : core.ops.range.RangeFrom Std.Usize → Str → Result (Option Str) :=
+  fun r s =>
+    if r.start.val ≤ s.length then ok (some (s.drop r.start.val))
+    else ok none
 
 /-- Trait implementation: [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeFrom<usize>}]
     Source: '/rustc/library/core/src/str/traits.rs', lines 504:0-504:59
@@ -384,11 +444,14 @@ def core.ops.range.RangeFromUsize.Insts.CoreSliceIndexSliceIndexStrStr :
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeToInclusive<usize>, str, str>}::index_mut"]
-axiom
+def
   core.ops.range.RangeToInclusiveUsize.Insts.CoreSliceIndexSliceIndexStrStr.index_mut
   :
   core.ops.range.RangeToInclusive Std.Usize → Str → Result (Str × (Str →
-    Str))
+    Str)) :=
+  fun r s =>
+    if r.«end».val < s.length then ok (s.take (r.«end».val + 1), id)
+    else fail .panic
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeToInclusive<usize>}::index]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 757:4-757:48
@@ -396,9 +459,12 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeToInclusive<usize>, str, str>}::index"]
-axiom
+def
   core.ops.range.RangeToInclusiveUsize.Insts.CoreSliceIndexSliceIndexStrStr.index
-  : core.ops.range.RangeToInclusive Std.Usize → Str → Result Str
+  : core.ops.range.RangeToInclusive Std.Usize → Str → Result Str :=
+  fun r s =>
+    if r.«end».val < s.length then ok (s.take (r.«end».val + 1))
+    else fail .panic
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeToInclusive<usize>}::get_unchecked_mut]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 752:4-752:75
@@ -406,11 +472,12 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeToInclusive<usize>, str, str>}::get_unchecked_mut"]
-axiom
+def
   core.ops.range.RangeToInclusiveUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked_mut
   :
   core.ops.range.RangeToInclusive Std.Usize → MutRawPtr Str → Result
-    (MutRawPtr Str)
+    (MutRawPtr Str) :=
+  fun _ p => ok p
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeToInclusive<usize>}::get_unchecked]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 747:4-747:75
@@ -418,11 +485,12 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeToInclusive<usize>, str, str>}::get_unchecked"]
-axiom
+def
   core.ops.range.RangeToInclusiveUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_unchecked
   :
   core.ops.range.RangeToInclusive Std.Usize → ConstRawPtr Str → Result
-    (ConstRawPtr Str)
+    (ConstRawPtr Str) :=
+  fun _ p => ok p
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeToInclusive<usize>}::get_mut]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 743:4-743:66
@@ -430,11 +498,14 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeToInclusive<usize>, str, str>}::get_mut"]
-axiom
+def
   core.ops.range.RangeToInclusiveUsize.Insts.CoreSliceIndexSliceIndexStrStr.get_mut
   :
   core.ops.range.RangeToInclusive Std.Usize → Str → Result ((Option Str) ×
-    (Option Str → Str))
+    (Option Str → Str)) :=
+  fun r s =>
+    if r.«end».val < s.length then ok (some (s.take (r.«end».val + 1)), fun opt => match opt with | some x => x | none => s)
+    else ok (none, id)
 
 /-- [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeToInclusive<usize>}::get]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 739:4-739:54
@@ -442,9 +513,12 @@ axiom
     Visibility: public -/
 @[rust_fun
   "core::str::traits::{core::slice::index::SliceIndex<core::ops::range::RangeToInclusive<usize>, str, str>}::get"]
-axiom
+def
   core.ops.range.RangeToInclusiveUsize.Insts.CoreSliceIndexSliceIndexStrStr.get
-  : core.ops.range.RangeToInclusive Std.Usize → Str → Result (Option Str)
+  : core.ops.range.RangeToInclusive Std.Usize → Str → Result (Option Str) :=
+  fun r s =>
+    if r.«end».val < s.length then ok (some (s.take (r.«end».val + 1)))
+    else ok none
 
 /-- Trait implementation: [core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::RangeToInclusive<usize>}]
     Source: '/rustc/library/core/src/str/traits.rs', lines 736:0-736:66

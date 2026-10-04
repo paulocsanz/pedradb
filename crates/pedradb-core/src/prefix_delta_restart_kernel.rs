@@ -37,7 +37,54 @@ pub enum PrefixDeltaViolation {
     OrderInversionDetected,
     /// Block trailer does not contain valid restart array count.
     CorruptTrailer,
+    /// Restart interval must be at least 1.
+    InvalidRestartInterval,
+    /// Declared restart points count does not match the actual number of restart points.
+    RestartCountMismatch {
+        /// Expected restart count computed from entry positions.
+        expected: usize,
+        /// Found restart count declared in block trailer.
+        found: usize,
+    },
+    /// Restart point offsets are not strictly monotonically increasing.
+    NonMonotonicRestartOffsets {
+        /// Preceding offset.
+        prev: usize,
+        /// Current non-strictly-greater offset.
+        current: usize,
+    },
+    EmptyKey,
+    EmptyEntries,
 }
+
+impl std::fmt::Display for PrefixDeltaViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SharedLenExceedsPreviousKey { shared_len, prev_len } => {
+                write!(f, "Shared len {shared_len} exceeds previous key len {prev_len}")
+            }
+            Self::NonZeroSharedAtRestartPoint { shared_len } => {
+                write!(f, "Non-zero shared len {shared_len} at restart point")
+            }
+            Self::InvalidRestartOffset { offset, block_len } => {
+                write!(f, "Invalid restart offset {offset} for block len {block_len}")
+            }
+            Self::OrderInversionDetected => write!(f, "Keys order inversion detected"),
+            Self::CorruptTrailer => write!(f, "Corrupt block trailer"),
+            Self::InvalidRestartInterval => write!(f, "Restart interval must be at least 1"),
+            Self::RestartCountMismatch { expected, found } => {
+                write!(f, "Restart count mismatch: expected {expected}, found {found}")
+            }
+            Self::NonMonotonicRestartOffsets { prev, current } => {
+                write!(f, "Non-monotonic restart offsets: prev {prev}, current {current}")
+            }
+            Self::EmptyKey => write!(f, "Block entry key cannot be empty"),
+            Self::EmptyEntries => write!(f, "Entries to encode cannot be empty"),
+        }
+    }
+}
+
+impl std::error::Error for PrefixDeltaViolation {}
 
 /// A key-value record stored inside an SST data block.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,13 +95,42 @@ pub struct BlockKvEntry {
     pub val: Vec<u8>,
 }
 
+impl BlockKvEntry {
+    pub fn try_new(key: Vec<u8>, val: Vec<u8>) -> Result<Self, PrefixDeltaViolation> {
+        if key.is_empty() {
+            return Err(PrefixDeltaViolation::EmptyKey);
+        }
+        Ok(Self { key, val })
+    }
+}
+
 /// Encoder and decoder for prefix delta-compressed data blocks with restart points.
 pub struct PrefixDeltaBlock;
 
 impl PrefixDeltaBlock {
+    /// Encodes a list of strictly sorted KV entries into a delta-compressed block with validation.
+    pub fn try_encode_block(entries: &[BlockKvEntry], restart_interval: usize) -> Result<Vec<u8>, PrefixDeltaViolation> {
+        if restart_interval == 0 {
+            return Err(PrefixDeltaViolation::InvalidRestartInterval);
+        }
+        if entries.is_empty() {
+            return Err(PrefixDeltaViolation::EmptyEntries);
+        }
+        for (i, entry) in entries.iter().enumerate() {
+            if entry.key.is_empty() {
+                return Err(PrefixDeltaViolation::EmptyKey);
+            }
+            if i > 0 && entries[i - 1].key >= entry.key {
+                return Err(PrefixDeltaViolation::OrderInversionDetected);
+            }
+        }
+        Ok(Self::encode_block(entries, restart_interval))
+    }
+
     /// Encodes a list of strictly sorted KV entries into a delta-compressed block.
     #[must_use]
     pub fn encode_block(entries: &[BlockKvEntry], restart_interval: usize) -> Vec<u8> {
+        let restart_interval = restart_interval.max(1);
         let mut out = Vec::new();
         let mut restart_offsets = Vec::new();
         let mut prev_key: Vec<u8> = Vec::new();
@@ -106,6 +182,9 @@ impl PrefixDeltaBlock {
         block: &[u8],
         restart_interval: usize,
     ) -> Result<Vec<BlockKvEntry>, PrefixDeltaViolation> {
+        if restart_interval == 0 {
+            return Err(PrefixDeltaViolation::InvalidRestartInterval);
+        }
         if block.len() < 4 {
             return Err(PrefixDeltaViolation::CorruptTrailer);
         }
@@ -123,6 +202,7 @@ impl PrefixDeltaBlock {
 
         let restart_start = block.len() - 4 - restart_array_bytes;
         let mut restarts = Vec::with_capacity(num_restarts.min(block.len() / 4));
+        let mut prev_offset: Option<usize> = None;
         for i in 0..num_restarts {
             let offset_start = restart_start
                 .checked_add(i.checked_mul(4).ok_or(PrefixDeltaViolation::CorruptTrailer)?)
@@ -143,6 +223,15 @@ impl PrefixDeltaBlock {
                     block_len: block.len(),
                 });
             }
+            if let Some(prev) = prev_offset {
+                if offset <= prev {
+                    return Err(PrefixDeltaViolation::NonMonotonicRestartOffsets {
+                        prev,
+                        current: offset,
+                    });
+                }
+            }
+            prev_offset = Some(offset);
             restarts.push(offset);
         }
 
@@ -151,18 +240,20 @@ impl PrefixDeltaBlock {
         let mut cur = crate::codec::SafeCursor::new(&block[..restart_start]);
         let mut prev_key: Vec<u8> = Vec::new();
         let mut entry_idx = 0;
+        let mut validated_restarts = 0;
 
         while !cur.is_empty() {
             let pos = cur.position();
             let is_restart = entry_idx % restart_interval == 0;
             if is_restart {
                 let restart_idx = entry_idx / restart_interval;
-                if restart_idx < restarts.len() && restarts[restart_idx] != pos {
+                if restart_idx >= restarts.len() || restarts[restart_idx] != pos {
                     return Err(PrefixDeltaViolation::InvalidRestartOffset {
                         offset: pos,
                         block_len: block.len(),
                     });
                 }
+                validated_restarts += 1;
             }
 
             let shared_len = cur
@@ -210,6 +301,56 @@ impl PrefixDeltaBlock {
             entry_idx += 1;
         }
 
+        if validated_restarts != restarts.len() {
+            return Err(PrefixDeltaViolation::RestartCountMismatch {
+                expected: validated_restarts,
+                found: restarts.len(),
+            });
+        }
+
         Ok(entries)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prefix_delta_structural_invariants_red_to_green() {
+        assert_eq!(
+            BlockKvEntry::try_new(vec![], vec![1, 2, 3]),
+            Err(PrefixDeltaViolation::EmptyKey)
+        );
+
+        let kvs = vec![
+            BlockKvEntry::try_new(b"a".to_vec(), b"1".to_vec()).unwrap(),
+            BlockKvEntry::try_new(b"b".to_vec(), b"2".to_vec()).unwrap(),
+        ];
+        assert_eq!(
+            PrefixDeltaBlock::try_encode_block(&kvs, 0),
+            Err(PrefixDeltaViolation::InvalidRestartInterval)
+        );
+
+        assert_eq!(
+            PrefixDeltaBlock::try_encode_block(&[], 2),
+            Err(PrefixDeltaViolation::EmptyEntries)
+        );
+
+        let unsorted_kvs = vec![
+            BlockKvEntry::try_new(b"b".to_vec(), b"2".to_vec()).unwrap(),
+            BlockKvEntry::try_new(b"a".to_vec(), b"1".to_vec()).unwrap(),
+        ];
+        assert_eq!(
+            PrefixDeltaBlock::try_encode_block(&unsorted_kvs, 2),
+            Err(PrefixDeltaViolation::OrderInversionDetected)
+        );
+
+        let encoded = PrefixDeltaBlock::try_encode_block(&kvs, 2).unwrap();
+        let decoded = PrefixDeltaBlock::decode_and_verify(&encoded, 2).unwrap();
+        assert_eq!(decoded, kvs);
+
+        let disp = format!("{}", PrefixDeltaViolation::EmptyKey);
+        assert!(!disp.is_empty());
     }
 }

@@ -4,6 +4,31 @@
 //! virtual sofre suspensão (VM freeze) ou quando o runtime assíncrono (Tokio)
 //! sofre de inanição profunda de workers.
 
+/// Erros de configuração e validação de lease.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeaseConfigError {
+    /// Duração do lease não pode ser zero.
+    ZeroDuration,
+    /// Margem de segurança (slack + 2*drift) excede ou iguala a duração nominal.
+    SafetyMarginExceedsDuration { safety_margin_ns: u64, duration_ns: u64 },
+    /// Timestamp de concessão não pode ser zero.
+    ZeroGrantedAt,
+}
+
+impl std::fmt::Display for LeaseConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ZeroDuration => write!(f, "lease duration cannot be zero"),
+            Self::SafetyMarginExceedsDuration { safety_margin_ns, duration_ns } => {
+                write!(f, "safety margin {safety_margin_ns}ns >= duration {duration_ns}ns")
+            }
+            Self::ZeroGrantedAt => write!(f, "granted_at timestamp cannot be zero"),
+        }
+    }
+}
+
+impl std::error::Error for LeaseConfigError {}
+
 /// Parâmetros de segurança para avaliação de lease.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LeaseConfig {
@@ -13,6 +38,27 @@ pub struct LeaseConfig {
     pub slack_ns: u64,
     /// Tolerância máxima estimada para deriva de relógio (drift, em nanossegundos).
     pub max_drift_ns: u64,
+}
+
+impl LeaseConfig {
+    /// Cria uma configuração de lease validando invariantes temporais.
+    pub fn try_new(duration_ns: u64, slack_ns: u64, max_drift_ns: u64) -> Result<Self, LeaseConfigError> {
+        if duration_ns == 0 {
+            return Err(LeaseConfigError::ZeroDuration);
+        }
+        let safety_margin = slack_ns.saturating_add(max_drift_ns.saturating_mul(2));
+        if safety_margin >= duration_ns {
+            return Err(LeaseConfigError::SafetyMarginExceedsDuration {
+                safety_margin_ns: safety_margin,
+                duration_ns,
+            });
+        }
+        Ok(Self {
+            duration_ns,
+            slack_ns,
+            max_drift_ns,
+        })
+    }
 }
 
 impl Default for LeaseConfig {
@@ -32,6 +78,26 @@ pub struct LeaseGrant {
     pub granted_at_ns: u64,
     /// Configuração do lease.
     pub config: LeaseConfig,
+}
+
+impl LeaseGrant {
+    /// Cria uma concessão validando timestamp e margem de segurança.
+    pub fn try_new(granted_at_ns: u64, config: LeaseConfig) -> Result<Self, LeaseConfigError> {
+        if granted_at_ns == 0 {
+            return Err(LeaseConfigError::ZeroGrantedAt);
+        }
+        let safety_margin = config.slack_ns.saturating_add(config.max_drift_ns.saturating_mul(2));
+        if safety_margin >= config.duration_ns {
+            return Err(LeaseConfigError::SafetyMarginExceedsDuration {
+                safety_margin_ns: safety_margin,
+                duration_ns: config.duration_ns,
+            });
+        }
+        Ok(Self {
+            granted_at_ns,
+            config,
+        })
+    }
 }
 
 /// Decisão de admissão sob lease.
@@ -88,3 +154,59 @@ pub fn check_lease_validity_as_is(grant: &LeaseGrant, current_time_ns: u64) -> L
         LeaseVerdict::Expired
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lease_config_bounds() {
+        assert_eq!(
+            LeaseConfig::try_new(0, 10, 5),
+            Err(LeaseConfigError::ZeroDuration)
+        );
+
+        assert_eq!(
+            LeaseConfig::try_new(100, 80, 15), // safety_margin = 80 + 30 = 110 >= 100
+            Err(LeaseConfigError::SafetyMarginExceedsDuration {
+                safety_margin_ns: 110,
+                duration_ns: 100,
+            })
+        );
+
+        let config = LeaseConfig::try_new(1000, 100, 50).expect("valid config");
+        assert_eq!(
+            LeaseGrant::try_new(0, config),
+            Err(LeaseConfigError::ZeroGrantedAt)
+        );
+
+        let grant = LeaseGrant::try_new(100, config).expect("valid grant");
+        assert_eq!(grant.granted_at_ns, 100);
+
+        // Check lease validity
+        assert!(matches!(
+            check_lease_validity(&grant, 200),
+            LeaseVerdict::Valid { .. }
+        ));
+        assert_eq!(
+            check_lease_validity(&grant, 50),
+            LeaseVerdict::TimeInversionDetected
+        );
+    }
+
+    #[test]
+    fn test_lease_error_display() {
+        let err = LeaseConfigError::ZeroDuration;
+        assert_eq!(format!("{err}"), "lease duration cannot be zero");
+
+        let err2 = LeaseConfigError::ZeroGrantedAt;
+        assert_eq!(format!("{err2}"), "granted_at timestamp cannot be zero");
+
+        let err3 = LeaseConfigError::SafetyMarginExceedsDuration {
+            safety_margin_ns: 200,
+            duration_ns: 100,
+        };
+        assert_eq!(format!("{err3}"), "safety margin 200ns >= duration 100ns");
+    }
+}
+

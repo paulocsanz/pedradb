@@ -4,11 +4,11 @@
 //! 2026-08-31-leveling-kernel-unenrolled).
 //!
 //! **Term:** this file is what `rustc` links. Aeneas extracts that body
-//! (`scripts/aeneas_leveling.sh`). A Verus u64-key stand-in of rustc
+//! (`cargo xtask aeneas leveling`). A Verus u64-key stand-in of rustc
 //! `LevelFile { lo: Vec<u8>, hi: Vec<u8> }` is a model twin — not last-wins
 //! (deleted).
 //!
-//!   ./scripts/aeneas_leveling.sh --required
+//!   cargo xtask aeneas leveling --required
 //!
 //! Policy: L0→L1 jobs absorb the L1 slice that overlaps the selected L0s, and
 //! each level `n ≥ 1` is capped at [`level_target_bytes`]. When a level is over

@@ -119,6 +119,8 @@ impl MergeOperatorSemiringEvaluator {
                     } else {
                         compacted.push(LsmRecordMutation::Put(base.clone()));
                     }
+                    // Put é um aniquilador definitivo à esquerda: aniquila mutações mais antigas
+                    break;
                 }
                 LsmRecordMutation::Delete => {
                     if let Some(merged_op) = accumulated_merge.take() {
@@ -127,6 +129,8 @@ impl MergeOperatorSemiringEvaluator {
                     } else {
                         compacted.push(LsmRecordMutation::Delete);
                     }
+                    // Delete é um aniquilador nulo à esquerda: descarta mutações mais antigas
+                    break;
                 }
             }
         }

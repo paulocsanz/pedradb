@@ -2,7 +2,7 @@
 //!
 //! **Single artifact (Aeneas-paid):** this file is what `rustc` links and
 //! what the Lean defs run over — Charon+Aeneas extract of these exact
-//! bodies (`scripts/aeneas_env_crash.sh`, `EnvCrashKernel.lean`).
+//! bodies (`cargo xtask aeneas env_crash`, `EnvCrashKernel.lean`).
 //! `crash_legal` is the term. Honest-sync / lying-sync stay rustc
 //! (group-commit caller). No Verus twin stands in for them.
 

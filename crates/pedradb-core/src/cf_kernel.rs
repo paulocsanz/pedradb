@@ -1,10 +1,10 @@
 //! Pure column-family membership / encode (RFC-0150 P0).
 //!
 //! **Term:** this file is what `rustc` links. Aeneas extracts that body
-//! (`scripts/aeneas_cf.sh`). A Verus u64-nul-pos stand-in of `&[u8]`
+//! (`cargo xtask aeneas cf`). A Verus u64-nul-pos stand-in of `&[u8]`
 //! `key_in_cf_family` is a model twin — not last-wins (deleted).
 //!
-//!   ./scripts/aeneas_cf.sh --required
+//!   cargo xtask aeneas cf --required
 //!
 //! Compat stores `cf\\0user`. Kernel keys without a NUL share the `default`
 //! family. A scan or compact of `default` that treats `lock\\0…` as in-family

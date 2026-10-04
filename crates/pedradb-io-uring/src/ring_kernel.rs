@@ -45,6 +45,8 @@ impl UringState {
         if pedradb_core::write_admission_kernel::batch_is_empty(buf.len() as u64) {
             return Ok(0);
         }
+        pedradb_spec::syscall_glue_kernel::verify_pwrite_pre(file.as_raw_fd(), buf.len(), offset)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
         let fd = io_uring::types::Fd(file.as_raw_fd());
         let entry = io_uring::opcode::Write::new(fd, buf.as_ptr(), buf.len() as u32)
             .offset(offset)
@@ -52,6 +54,8 @@ impl UringState {
         // SAFETY: `buf` and `file` are borrowed until this returns. `&mut self`
         // is exclusive ring access (caller holds the env mutex).
         let res = unsafe { submit_sqe(self, entry)? };
+        pedradb_spec::syscall_glue_kernel::verify_cqe_harvest(res, self.next_tag, self.next_tag, false)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
         if !cqe_res_ok(res) {
             return Err(io::Error::from_raw_os_error(-res));
         }
@@ -60,6 +64,8 @@ impl UringState {
 
     /// `fsync` / `fdatasync` on `file` (also valid for a directory fd).
     pub(crate) fn fsync(&mut self, file: &File, datasync: bool) -> io::Result<()> {
+        pedradb_spec::syscall_glue_kernel::verify_fdatasync_pre(file.as_raw_fd())
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
         let fd = io_uring::types::Fd(file.as_raw_fd());
         let mut op = io_uring::opcode::Fsync::new(fd);
         if datasync {
@@ -69,6 +75,8 @@ impl UringState {
         // SAFETY: no user buffer. `file` is open until harvest returns.
         // `&mut self` is exclusive ring access.
         let res = unsafe { submit_sqe(self, entry)? };
+        pedradb_spec::syscall_glue_kernel::verify_cqe_harvest(res, self.next_tag, self.next_tag, false)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
         if !cqe_res_ok(res) {
             return Err(io::Error::from_raw_os_error(-res));
         }

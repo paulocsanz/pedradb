@@ -1,0 +1,96 @@
+{
+  "auth": [
+    "$OUT/lean/AuthKernel.lean"
+  ],
+  "c1_modelo": [
+    "$OUT/lean/C1ModeloKernel.lean"
+  ],
+  "cf": [
+    "$OUT/lean/CfKernel.lean"
+  ],
+  "client_axis": [
+    "$OUT/lean/ClientAxisKernel.lean"
+  ],
+  "cqe": [
+    "$OUT/lean/CqeKernel.lean"
+  ],
+  "durability_spine": [
+    "$OUT/lean/DurabilitySpineKernel.lean"
+  ],
+  "fail_closed": [
+    "$OUT/lean/FailClosedKernel.lean"
+  ],
+  "fields": [
+    "$OUT/lean/FieldsKernel.lean"
+  ],
+  "form": [
+    "$OUT/lean/FormKernel.lean"
+  ],
+  "group_window": [
+    "$OUT/lean/GroupWindowKernel.lean"
+  ],
+  "key": [
+    "$OUT/lean/KeyKernel.lean"
+  ],
+  "lease": [
+    "$OUT/lean/LeaseKernel.lean"
+  ],
+  "leftover_page": [
+    "$OUT/lean/LeftoverPageKernel.lean"
+  ],
+  "leveling": [
+    "$OUT/lean/LevelingKernel.lean"
+  ],
+  "lsm_r1": [
+    "$OUT/lean/LsmR1Kernel.lean"
+  ],
+  "membership": [
+    "$OUT/lean/MembershipKernel.lean"
+  ],
+  "merge": [
+    "$OUT/lean/MergeKernel.lean"
+  ],
+  "path": [
+    "$OUT/lean/PathKernel.lean"
+  ],
+  "probe_order": [
+    "$OUT/lean/ProbeOrderKernel.lean"
+  ],
+  "ratio_curve": [
+    "$OUT/lean/RatioCurveKernel.lean"
+  ],
+  "scan": [
+    "$OUT/lean/ScanKernel.lean"
+  ],
+  "scan_readahead": [
+    "$OUT/lean/ScanReadaheadKernel.lean"
+  ],
+  "store_membership": [
+    "$OUT/lean/StoreMembershipKernel.lean"
+  ],
+  "store_txn": [
+    "$OUT/lean/StoreTxnKernel.lean"
+  ],
+  "store_vote": [
+    "$OUT/lean/StoreVoteKernel.lean"
+  ],
+  "t1_modelo": [
+    "$OUT/lean/T1ModeloKernel.lean"
+  ],
+  "txn": [
+    "$OUT/lean/TxnKernel.lean"
+  ],
+  "vote": [
+    "$OUT/lean/VoteKernel.lean",
+    "$ROOT/formal/aeneas/lean/VoteKernel.lean"
+  ],
+  "wal_ticket": [
+    "$OUT/lean/WalTicketKernel.lean"
+  ],
+  "world": [
+    "$OUT/lean/WorldKernel.lean"
+  ],
+  "write_cycle": [
+    "$OUT/lean/WriteCycleKernel.lean"
+  ]
+}

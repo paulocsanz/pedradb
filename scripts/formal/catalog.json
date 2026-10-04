@@ -1,70 +1,25 @@
 {
-  "comment": "Pedra formal glue catalog for the public engine. Production kernel is the source of record; Aeneas extracts that rustc-linked file. twin_kind: close = entry is the production fn; atom = smaller fn; model = stand-in domain. Verus side-copy twins are retired (single_artifact).",
+  "comment": "Pedra formal glue catalog. Production kernel is the source; Verus file is a twin; callers must invoke the kernel. twin_kind: close = entry (or token_src) is an exec fn in the twin; atom = smaller fn (atom) only; model = same name, stand-in domain (e.g. u64 for &[u8]). status=absent is a recorded gap (script exists, twin file does not). object: proof = machine-checked twin (exec==spec); campaign = named plant / seed replay (not forall traces). Default: id prefix in campaign_prefixes (l28_*) is campaign, else proof.",
   "object_kinds": {
     "proof": "machine-checked twin \u2014 exec==spec (Verus/Kani/Lean)",
     "campaign": "named plant / seed replay \u2014 not forall traces"
   },
-  "campaign_prefixes": [],
+  "campaign_prefixes": [
+    "l28_"
+  ],
   "pairs": [
-    {
-      "id": "changelog",
-      "finding": "F53",
-      "twin_kind": "close",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
-      "twin": "crates/pedradb-core/src/changelog_kernel.rs",
-      "callers": [
-        "crates/pedradb-core/src/db_put_kernel.rs"
-      ],
-      "entry": "changelog_needs_sst_rebuild",
-      "as_is": "changelog_needs_sst_rebuild_as_is",
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/db_put_kernel.rs",
-          "handler": "maybe_rebuild_feed_from_live"
-        }
-      ],
-      "atom_reason": {
-        "date": "2026-09-13",
-        "why": "atom 1/6 P0.3: changelog_needs_sst_rebuild the cited window \u2014 feed empty with seq>0 rebuild, feed live never; floor_atom 186\u2192187"
-      }
-    },
-    {
-      "id": "range_covers",
-      "atom_reason": {
-        "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over range_tombstone_covers in the atom rung \u2014 cited pair: key >= start E key < end; plants DST range_tombstone_covers_on_live_queued_is_not_ok"
-      },
-      "finding": "F30",
-      "twin_kind": "model",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/merge_kernel.rs",
-      "twin": "crates/pedradb-core/src/merge_kernel.rs",
-      "aeneas": "scripts/aeneas_merge.sh",
-      "callers": [
-        "crates/pedradb-core/src/merge_kernel.rs"
-      ],
-      "entry": "range_tombstone_covers",
-      "as_is": "range_tombstone_covers_as_is",
-      "live_callers": [
-        {
-          "file": "crates/pedradb-core/src/merge_kernel.rs",
-          "handler": "range_deleted"
-        }
-      ]
-    },
     {
       "id": "write_op_range_end",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over write_op_range_end in the atom rung \u2014 cited dispatch: Deletion/Value without end, RangeDeletion loads the value; plants DST write_op_range_end_on_live_stage_unapplied_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 sobre write_op_range_end no degrau \u00e1tomo \u2014 despacho citado: Deletion/Value sem fim, RangeDeletion carrega o valor; planta DST write_op_range_end_on_live_stage_unapplied_is_not_ok"
       },
       "finding": "F30",
       "twin_kind": "model",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/merge_kernel.rs",
       "twin": "crates/pedradb-core/src/merge_kernel.rs",
-      "aeneas": "scripts/aeneas_merge.sh",
+      "aeneas": "xtask:merge",
       "callers": [
         "crates/pedradb-core/src/merge_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
@@ -90,7 +45,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/merge_kernel.rs",
       "twin": "crates/pedradb-core/src/merge_kernel.rs",
-      "aeneas": "scripts/aeneas_merge.sh",
+      "aeneas": "xtask:merge",
       "callers": [
         "crates/pedradb-core/src/merge_kernel.rs"
       ],
@@ -109,37 +64,13 @@
       }
     },
     {
-      "id": "prefix",
-      "atom_reason": {
-        "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over prefix_exclusive_end in the atom rung \u2014 cited dispatch: prefix becomes Vec and the cited loop decides; plants DST prefix_exclusive_end_on_live_queued_is_not_ok"
-      },
-      "finding": "F57/F58",
-      "twin_kind": "close",
-      "atom": "bump_non_ff",
-      "single_artifact": true,
-      "kernel": "crates/pedradb-core/src/prefix_kernel.rs",
-      "twin": "crates/pedradb-core/src/prefix_kernel.rs",
-      "aeneas": "scripts/aeneas_prefix.sh",
-      "callers": [
-        "crates/rocksdb-compat/src/lib_kernel.rs",
-        "crates/pedradb-core/src/sst/table_kernel.rs",
-        "crates/pedradb-core/src/memtable_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
-      ],
-      "entry": "prefix_exclusive_end",
-      "token_src": "prefix_exclusive_end",
-      "token_dst": "*",
-      "as_is": "prefix_exclusive_end_as_is"
-    },
-    {
       "id": "wal_recover",
       "finding": "F4/F14",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
-      "aeneas": "scripts/aeneas_wal_recover.sh",
+      "aeneas": "xtask:wal_recover",
       "callers": [
         "crates/pedradb-core/src/wal/reader_kernel.rs"
       ],
@@ -151,14 +82,14 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "the coletor of recovery decides exactly by the match extraido \u2014 each the of the nine framing kinds mapeia to the its fate by the route that the rustc turns on (torn trio: fail-stop in prefix empty, keep-prefix live, or resync under the budget of the MAX extraido; crc/zero-header mid-walk resync or keep-prefix, fail-stop in alinhamento fresco)"
+        "why": "o coletor de recovery decide exatamente pelo match extraido \u2014 cada um dos nove framing kinds mapeia ao seu fate pela rota que o rustc liga (torn trio: fail-stop em prefixo vazio, keep-prefix vivo, ou resync sob o budget do MAX extraido; crc/zero-header mid-walk resync ou keep-prefix, fail-stop em alinhamento fresco)"
       }
     },
     {
       "id": "bloom_header",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "cabecalho of the bloom admits exactly the conjuncao cited \u2014 k in [1, MAX_K], nbytes covers div_ceil nbits 8 and nbytes cabe in the residual; the as-is accepts k ate u32::MAX (probe without borne)"
+        "why": "cabecalho do bloom admite exatamente a conjuncao citada \u2014 k em [1, MAX_K], nbytes cobre div_ceil nbits 8 e nbytes cabe no residual; as-is aceita k ate u32::MAX (probe sem borne)"
       },
       "finding": "F166",
       "twin_kind": "close",
@@ -187,7 +118,7 @@
       "id": "bloom_insert",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "insert writes exactly the k probes cited \u2014 inactive returns the filter itself; the active one computes hash_pair and runs the cited insert_loop loop over bits; the as-is skips the probes (false negative)"
+        "why": "insert escreve exatamente os k probes citados \u2014 inativo devolve o proprio filtro; ativo calcula hash_pair e roda o loop citado insert_loop sobre bits; as-is pula os probes (falso negativo)"
       },
       "finding": "T1 (docs/formal/bloom-filter-theorems.md)",
       "twin_kind": "close",
@@ -216,7 +147,7 @@
       "id": "bloom_may_contain",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "the query decides exactly in the cited loop \u2014 inactive and ok true; the active one computes hash_pair and the answer and the cited may_contain_loop loop over bits; the as-is probes k+1 bits (false negative)"
+        "why": "a consulta decide exatamente no loop citado \u2014 inativo e ok true; ativo calcula hash_pair e a resposta e o loop citado may_contain_loop sobre bits; as-is probeia k+1 bits (falso negativo)"
       },
       "finding": "T1/T4 (docs/formal/bloom-filter-theorems.md)",
       "twin_kind": "close",
@@ -248,7 +179,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "aeneas": "scripts/aeneas_scan.sh",
+      "aeneas": "xtask:scan",
       "callers": [
         "crates/pedradb-core/src/sst/table_kernel.rs"
       ],
@@ -267,7 +198,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 8/9 P0.4: scan_reads_file the cited chain \u2014 bounds say reads; otherwise the any over the tombstones decides (v = b1 of the par); the as-is only looks at bounds (tombstone not hides \u2014 tooth planted)"
+        "why": "\u00e1tomo 8/9 P0.4: scan_reads_file como cadeia citada \u2014 bounds dizem l\u00ea; sen\u00e3o o any sobre os t\u00famulos decide (v = b1 do par); as-is s\u00f3 olha bounds (t\u00famulo n\u00e3o esconde \u2014 dente plantado)"
       }
     },
     {
@@ -277,14 +208,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
       "twin": "crates/pedradb-core/src/manifest_kernel.rs",
-      "aeneas": "scripts/aeneas_manifest.sh",
+      "aeneas": "xtask:manifest",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "sst_recover_action",
-      "handlers": [
-        "recover_ssts"
-      ],
+      "handlers": [],
       "as_is": "sst_recover_action_as_is_scan_on_damage",
       "dst_plant": {
         "file": "crates/pedradb-core/src/manifest_kernel.rs",
@@ -304,15 +233,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
-      "aeneas": "scripts/aeneas_reopen.sh",
+      "aeneas": "xtask:reopen",
       "callers": [
-        "crates/pedradb-core/src/db_open_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "reopen_outcome",
-      "handlers": [
-        "open_with_env"
-      ],
+      "handlers": [],
       "as_is": "reopen_outcome_as_is_silent",
       "dst_plant": {
         "file": "crates/pedradb-core/src/wal/reopen_kernel.rs",
@@ -332,14 +258,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
+      "verus": "xtask:flush_decision",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "wal_rotate_decision",
-      "handlers": [
-        "flush",
-        "try_rotate_wal"
-      ],
+      "handlers": [],
       "as_is": "wal_rotate_decision_as_is_ignore_pin",
       "dst_plant": {
         "file": "crates/pedradb-core/src/flush_kernel.rs",
@@ -357,13 +281,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
+      "verus": "xtask:flush_decision",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "wal_rotate_decision",
-      "handlers": [
-        "try_rotate_wal"
-      ],
+      "handlers": [],
       "as_is": "wal_rotate_decision_as_is_ignore_pin",
       "three_teeth": true,
       "dst_plant": {
@@ -378,22 +301,21 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
+      "verus": "xtask:flush_decision",
       "callers": [
         "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "occ_snap_uses_published",
-      "atom_reason": {
-        "date": "2026-09-13",
-        "why": "OCC snapshot reads the published sequence, not an in-flight one (RFC-0045 P2.1 lock order)"
-      },
-      "handlers": [
-        "occ_snapshot"
-      ],
+      "handlers": [],
       "as_is": "occ_snap_uses_published_as_is",
       "three_teeth": true,
       "dst_plant": {
         "file": "crates/pedradb-core/src/flush_kernel.rs",
         "test": "occ_snap_uses_published_on_live_inflight_is_not_ok"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0224/escada 0188: registered forall atom; flag stays false where admitted"
       }
     },
     {
@@ -403,6 +325,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
@@ -421,7 +344,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 1/4 P0.1: occ_conflict the iff exact of the window (snap, last_seq] \u2014 conflito = touched under window non-empty, false under window empty; floor_atom 178\u2192179"
+        "why": "\u00e1tomo 1/4 P0.1: occ_conflict como iff exata da janela (snap, last_seq] \u2014 conflito = touched sob janela n\u00e3o-vazia, false sob janela vazia; floor_atom 178\u2192179"
       }
     },
     {
@@ -431,6 +354,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -449,7 +373,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 3/4 P0.1: fence_publish_seq the cited chain of the loop extracted (Form/DecodeFate template, fuel = members remaining); floor_atom 180\u2192181"
+        "why": "\u00e1tomo 3/4 P0.1: fence_publish_seq como cadeia citada do loop extra\u00eddo (molde Form/DecodeFate, combust\u00edvel = membros restantes); floor_atom 180\u2192181"
       }
     },
     {
@@ -459,14 +383,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
-      "aeneas": "scripts/aeneas_compact.sh",
+      "aeneas": "xtask:compact",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "compact_pick",
-      "handlers": [
-        "compact_with_ssts_only"
-      ],
+      "handlers": [],
       "as_is": "compact_pick_as_is",
       "dst_plant": {
         "file": "crates/pedradb-core/src/compact_kernel.rs",
@@ -486,14 +408,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
-      "aeneas": "scripts/aeneas_compact.sh",
+      "aeneas": "xtask:compact",
       "callers": [
         "crates/pedradb-core/src/merge_kernel.rs"
       ],
       "entry": "point_version_fate",
-      "handlers": [
-        "gc_snapshot_safe"
-      ],
+      "handlers": [],
       "as_is": "point_version_fate_as_is_drop_under_snapshot",
       "dst_plant": {
         "file": "crates/pedradb-core/src/compact_kernel.rs",
@@ -514,13 +434,10 @@
       "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "callers": [
-        "crates/pedradb-core/src/db_open_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "reopen_outcome",
-      "handlers": [
-        "open_with_env"
-      ],
+      "handlers": [],
       "as_is": "reopen_outcome_as_is_silent",
       "dst_plant": {
         "file": "crates/pedradb-sim/src/lib.rs",
@@ -528,8 +445,9 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 6/6 P0.3: reopen_outcome_flat_fate_iff \u2014 table complete 4 rows (without damage serves everything; PIT unscaled serves prefix; scaled or without PIT refuses), finer than the iff agrupada previous; floor_atom 191\u2192192"
-      }
+        "why": "\u00e1tomo 6/6 P0.3: reopen_outcome_flat_fate_iff \u2014 tabela completa 4 linhas (sem dano serve tudo; PIT n\u00e3o escalado serve prefixo; escalado ou sem PIT recusa), mais fina que a iff agrupada pr\u00e9via; floor_atom 191\u2192192"
+      },
+      "aeneas": "xtask:reopen"
     },
     {
       "id": "vlog_recover",
@@ -538,14 +456,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
       "twin": "crates/pedradb-core/src/vlog_gc_kernel.rs",
-      "aeneas": "scripts/aeneas_vlog_gc.sh",
+      "aeneas": "xtask:vlog_gc",
       "callers": [
         "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "vlog_recover_action",
-      "handlers": [
-        "open_with_env"
-      ],
+      "handlers": [],
       "as_is": "vlog_recover_action_as_is_ignore_swing",
       "dst_plant": {
         "file": "crates/pedradb-core/src/vlog_gc_kernel.rs",
@@ -565,14 +481,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
       "twin": "crates/pedradb-core/src/vlog_gc_kernel.rs",
-      "aeneas": "scripts/aeneas_vlog_gc.sh",
+      "aeneas": "xtask:vlog_gc",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "blob_gc_action",
-      "handlers": [
-        "compact_blob_auto"
-      ],
+      "handlers": [],
       "as_is": "blob_gc_action_as_is_rewrite_active",
       "dst_plant": {
         "file": "crates/pedradb-core/src/vlog_gc_kernel.rs",
@@ -592,6 +506,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
@@ -616,13 +531,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "rwlock_client_may_mutate",
-      "handlers": [
-        "finish_group_off_lock"
-      ],
+      "handlers": [],
       "as_is": "rwlock_client_may_mutate_as_is",
       "live_callers": [
         {
@@ -647,6 +561,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
@@ -662,6 +577,10 @@
       "dst_plant": {
         "file": "crates/pedradb-core/src/concurrent_kernel.rs",
         "test": "forall_schedules_admitted_on_live_group_is_not_ok"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0224/escada 0188: registered forall atom; flag stays false where admitted"
       }
     },
     {
@@ -671,6 +590,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-sim/src/recording.rs"
       ],
@@ -689,7 +609,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 2/4 P0.1: fsync_promotes_pending the lift puro \u2014 pending promotes iff OS honest; floor_atom 179\u2192180"
+        "why": "\u00e1tomo 2/4 P0.1: fsync_promotes_pending como lift puro \u2014 pending promove iff OS honesto; floor_atom 179\u2192180"
       }
     },
     {
@@ -699,6 +619,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -714,6 +635,10 @@
       "dst_plant": {
         "file": "crates/pedradb-core/src/db_kernel.rs",
         "test": "media_durable_admitted_on_live_db_is_not_ok"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0224/escada 0188: registered forall atom; flag stays false where admitted"
       }
     },
     {
@@ -739,20 +664,24 @@
       "dst_plant": {
         "file": "crates/pedradb-posix/src/lib_kernel.rs",
         "test": "fdatasync_rc_ok_on_live_posix_is_not_ok"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0224/escada 0188: registered forall atom; flag stays false where admitted"
       }
     },
     {
       "id": "cqe_res",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 over cqe_res_ok in the atom rung \u2014 CQE is success iff res >= 0; the as-is cqe_res_ok_as_is (everything success) refused by the plants DST cqe_res_ok_on_live_uring_is_not_ok"
+        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 sobre cqe_res_ok no degrau \u00e1tomo \u2014 CQE \u00e9 sucesso iff res >= 0; as-is cqe_res_ok_as_is (tudo sucesso) recusado pela planta DST cqe_res_ok_on_live_uring_is_not_ok"
       },
       "finding": "RFC-0074",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
       "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "aeneas": "scripts/aeneas_cqe.sh",
+      "aeneas": "xtask:cqe",
       "callers": [
         "crates/pedradb-io-uring/src/ring_kernel.rs"
       ],
@@ -774,14 +703,14 @@
       "id": "cqe_tags",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 over next_user_data in the atom rung \u2014 tags unique by SQE (c\u22600: (c,c+1) wrapping; c=0: skips the zero reservado, (1,2)); the as-is next_user_data_as_is (tag constante per opcode) refused by the plants DST unique_tags_discard_leftover_same_opcode"
+        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 sobre next_user_data no degrau \u00e1tomo \u2014 tags \u00fanicas por SQE (c\u22600: (c,c+1) wrapping; c=0: pula o zero reservado, (1,2)); as-is next_user_data_as_is (tag constante por opcode) recusado pela planta DST unique_tags_discard_leftover_same_opcode"
       },
       "finding": "F203",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
       "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "aeneas": "scripts/aeneas_cqe.sh",
+      "aeneas": "xtask:cqe",
       "callers": [
         "crates/pedradb-io-uring/src/ring_kernel.rs"
       ],
@@ -803,14 +732,14 @@
       "id": "cqe_leftover",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 over cqe_act in the atom rung \u2014 CQE taken iff user_data = want; leftover descartado; the as-is cqe_act_as_is (toma any CQE) refused by the plants DST cqe_act_as_is_adopts_leftover"
+        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 sobre cqe_act no degrau \u00e1tomo \u2014 CQE tomado iff user_data = want; leftover descartado; as-is cqe_act_as_is (toma qualquer CQE) recusado pela planta DST cqe_act_as_is_adopts_leftover"
       },
       "finding": "F203/U1",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
       "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "aeneas": "scripts/aeneas_cqe.sh",
+      "aeneas": "xtask:cqe",
       "callers": [
         "crates/pedradb-io-uring/src/ring_kernel.rs"
       ],
@@ -832,14 +761,14 @@
       "id": "cqe_submit",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 over submit_complete_act in the atom rung \u2014 the harvested CQE is used (UseHarvested), otherwise waits (WaitMore), submit_err not releases the buffer under DMA; the as-is submit_complete_act_as_is (Err in the submit with CQE pending, F208) refused by the plants DST harvest_on_submit_err_uses_cqe"
+        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 sobre submit_complete_act no degrau \u00e1tomo \u2014 CQE colhido \u00e9 usado (UseHarvested), sen\u00e3o espera (WaitMore), submit_err n\u00e3o solta o buffer sob DMA; as-is submit_complete_act_as_is (Err no submit com CQE pendente, F208) recusado pela planta DST harvest_on_submit_err_uses_cqe"
       },
       "finding": "F208",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
       "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "aeneas": "scripts/aeneas_cqe.sh",
+      "aeneas": "xtask:cqe",
       "callers": [
         "crates/pedradb-io-uring/src/ring_kernel.rs"
       ],
@@ -861,14 +790,14 @@
       "id": "cqe_ring_refusal",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 over cqe_ring_model_admitted in the atom rung \u2014 the model of ring Verus is not admitted, the door stays closed (RFC-0074 P2.2); the as-is cqe_ring_model_admitted_as_is (door open) refused by the plants DST cqe_ring_model_is_not_admitted"
+        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 sobre cqe_ring_model_admitted no degrau \u00e1tomo \u2014 o modelo de anel Verus n\u00e3o \u00e9 admitido, a porta fica fechada (RFC-0074 P2.2); as-is cqe_ring_model_admitted_as_is (porta aberta) recusado pela planta DST cqe_ring_model_is_not_admitted"
       },
       "finding": "RFC-0074 P2.2",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
       "twin": "crates/pedradb-io-uring/src/cqe_kernel.rs",
-      "aeneas": "scripts/aeneas_cqe.sh",
+      "aeneas": "xtask:cqe",
       "callers": [
         "crates/pedradb-io-uring/src/cqe_kernel.rs"
       ],
@@ -887,6 +816,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/crc_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/crc_kernel.rs",
+      "verus": "xtask:crc_match",
       "callers": [
         "crates/pedradb-core/src/wal/reader_kernel.rs",
         "crates/pedradb-core/src/sst/scan_kernel.rs",
@@ -911,7 +841,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 1/9 P0.4: crc_match_ok the lift puro of the cited equality stored = computed; floor_atom 192\u2192193"
+        "why": "\u00e1tomo 1/9 P0.4: crc_match_ok como lift puro da igualdade citada stored = computed; floor_atom 192\u2192193"
       }
     },
     {
@@ -921,7 +851,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "aeneas": "scripts/aeneas_scan.sh",
+      "aeneas": "xtask:scan",
       "callers": [
         "crates/pedradb-core/src/sst/table_kernel.rs"
       ],
@@ -940,7 +870,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 4/9 P0.4: sst_crc_fate the cited tree \u2014 matches \u2192 StripTrailer, mismatch legado \u2192 WholeBuffer, mismatch moderno \u2192 Reject; floor_atom 195\u2192196"
+        "why": "\u00e1tomo 4/9 P0.4: sst_crc_fate como \u00e1rvore citada \u2014 casa \u2192 StripTrailer, mismatch legado \u2192 WholeBuffer, mismatch moderno \u2192 Reject; floor_atom 195\u2192196"
       }
     },
     {
@@ -950,7 +880,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/src/cf_kernel.rs",
-      "aeneas": "scripts/aeneas_cf.sh",
+      "aeneas": "xtask:cf",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
         "crates/pedradb-core/src/memtable_kernel.rs",
@@ -972,7 +902,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "familia decidida exactly by the route extraida: default = without separador or with prefix 'default', nomeada = overhang estrito + starts_with + 0 separador; the mutant the as-is responde in-family for toof the key and the plants DST refuta"
+        "why": "familia decidida exatamente pela rota extraida: default = sem separador ou com prefixo 'default', nomeada = overhang estrito + starts_with + 0 separador; o mutante as-is responde in-family para toda chave e a planta DST refuta"
       }
     },
     {
@@ -982,7 +912,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/src/cf_kernel.rs",
-      "aeneas": "scripts/aeneas_cf.sh",
+      "aeneas": "xtask:cf",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs"
       ],
@@ -1000,7 +930,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "the key family decided exactly by the extracted route: no NUL or leading NUL -> 'default'; otherwise lossy decode of the bytes before the first NUL, owned by the Cow; the as-is answers 'default' for every key and the DST plants refute"
+        "why": "familia da chave decidida exatamente pela rota extraida: sem NUL ou NUL lider -> 'default'; senao decode lossy dos bytes antes do primeiro NUL, owned pelo Cow; as-is responde 'default' para toda chave e a planta DST refuta"
       }
     },
     {
@@ -1010,7 +940,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/src/cf_kernel.rs",
-      "aeneas": "scripts/aeneas_cf.sh",
+      "aeneas": "xtask:cf",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
         "crates/rocksdb-compat/src/lib_kernel.rs"
@@ -1041,7 +971,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/src/cf_kernel.rs",
-      "aeneas": "scripts/aeneas_cf.sh",
+      "aeneas": "xtask:cf",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs",
@@ -1077,7 +1007,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/src/cf_kernel.rs",
-      "aeneas": "scripts/aeneas_cf.sh",
+      "aeneas": "xtask:cf",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
         "crates/rocksdb-compat/src/lib_kernel.rs"
@@ -1108,7 +1038,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/src/cf_kernel.rs",
-      "aeneas": "scripts/aeneas_cf.sh",
+      "aeneas": "xtask:cf",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
         "crates/pedradb-core/src/sst/table_kernel.rs"
@@ -1139,7 +1069,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/cf_kernel.rs",
       "twin": "crates/pedradb-core/src/cf_kernel.rs",
-      "aeneas": "scripts/aeneas_cf.sh",
+      "aeneas": "xtask:cf",
       "callers": [
         "crates/pedradb-core/src/cf_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
@@ -1169,12 +1099,12 @@
       "twin_kind": "close",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "filter of get of the merge decides exactly by the route extraida: Value live if and so if none range covers the key; Deletion and RangeDeletion never live, any coverage; the as-is responde live for every versao and the plants DST refuta"
+        "why": "filtro de get do merge decide exatamente pela rota extraida: Value live se e so se nenhum range cobre a chave; Deletion e RangeDeletion nunca live, qualquer cobertura; as-is responde live para toda versao e a planta DST refuta"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/merge_kernel.rs",
       "twin": "crates/pedradb-core/src/merge_kernel.rs",
-      "aeneas": "scripts/aeneas_merge.sh",
+      "aeneas": "xtask:merge",
       "callers": [
         "crates/pedradb-core/src/merge_kernel.rs",
         "crates/pedradb-core/src/memtable_kernel.rs"
@@ -1190,14 +1120,14 @@
       "id": "ikey_pack",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over pack_sequence_and_type in the atom rung \u2014 cited chain: ceiling MAX_SEQUENCE_NUMBER read and afirmado (massert), shift 8, type u8\u2192u64, package = or bit the bit; plants DST pack_sequence_and_type_on_live_db_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 sobre pack_sequence_and_type no degrau \u00e1tomo \u2014 cadeia citada: teto MAX_SEQUENCE_NUMBER lido e afirmado (massert), shift 8, tipo u8\u2192u64, pacote = ou bit a bit; planta DST pack_sequence_and_type_on_live_db_is_not_ok"
       },
       "finding": "RFC-0150 P1",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/key_kernel.rs",
       "twin": "crates/pedradb-core/src/key_kernel.rs",
-      "aeneas": "scripts/aeneas_key.sh",
+      "aeneas": "xtask:key",
       "callers": [
         "crates/pedradb-core/src/key_kernel.rs"
       ],
@@ -1234,7 +1164,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "the decoded length of the batch checks against the count of the prefix exactly by the extracted route: honest u32->usize cast and the comparison decision; the as-is admits any length and the twisted-batch DST plants refute"
+        "why": "comprimento decodificado do batch confere com o count do prefixo exatamente pela rota extraida: cast u32->usize honesto e o decide da comparacao; as-is admite qualquer comprimento e a planta DST do batch torcido refuta"
       }
     },
     {
@@ -1244,14 +1174,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
-      "aeneas": "scripts/aeneas_compact.sh",
+      "aeneas": "xtask:compact",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "gc_oldest_from_pin",
-      "handlers": [
-        "compact_reclaim"
-      ],
+      "handlers": [],
       "as_is": "gc_oldest_from_pin_as_is",
       "dst_plant": {
         "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
@@ -1293,14 +1221,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
+      "verus": "xtask:flush_decision",
       "callers": [
         "crates/pedradb-core/src/flush_kernel.rs"
       ],
       "entry": "may_publish_manifest",
-      "handlers": [
-        "persist_manifest",
-        "persist_bulk_manifest"
-      ],
+      "handlers": [],
       "as_is": "may_publish_manifest_as_is",
       "dst_plant": {
         "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
@@ -1315,21 +1241,19 @@
       "id": "probe_order",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "tie of lo probes exactly the newest \u2014 the result is the cited newer index; the as-is returns the older one (resurrects a delete on the tie)"
+        "why": "empate de lo probeia exatamente o mais novo \u2014 o resultado e o indice newer citado; as-is devolve o mais velho (ressuscita deletado no empate)"
       },
       "finding": "RFC-0164 P0.1",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
       "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
+      "verus": "xtask:probe_order",
       "callers": [
         "crates/pedradb-core/src/probe_order_kernel.rs"
       ],
       "entry": "first_probe_on_equal_lo",
-      "handlers": [
-        "lookup",
-        "lookup_sst_packed"
-      ],
+      "handlers": [],
       "as_is": "first_probe_on_equal_lo_as_is",
       "dst_plant": {
         "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
@@ -1340,20 +1264,19 @@
       "id": "run_disjoint",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "disjuncao of run and exactly the cited pair \u2014 n = min of the comprimentos, n >= 2 and the all cited over 1..n (hi[i-1] < lo[i]); the as-is uses <= (tie arma the bisect that ressuscita)"
+        "why": "disjuncao de run e exatamente o par citado \u2014 n = min dos comprimentos, n >= 2 e o all citado sobre 1..n (hi[i-1] < lo[i]); as-is usa <= (empate arma o bisect que ressuscita)"
       },
       "finding": "RFC-0164 P1.2",
       "twin_kind": "model",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
       "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
+      "verus": "xtask:probe_order",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "run_pairwise_disjoint_los",
-      "handlers": [
-        "rebuild_sst_runs"
-      ],
+      "handlers": [],
       "live_callers": [
         {
           "file": "crates/pedradb-core/src/db_kernel.rs",
@@ -1373,15 +1296,12 @@
       "single_artifact": true,
       "kernel": "crates/rocksdb-compat/src/iter_kernel.rs",
       "twin": "crates/rocksdb-compat/src/iter_kernel.rs",
-      "aeneas": "scripts/aeneas_iter.sh",
+      "aeneas": "xtask:iter",
       "callers": [
         "crates/rocksdb-compat/src/lib_kernel.rs"
       ],
       "entry": "iter_window_keep",
-      "handlers": [
-        "page_forward",
-        "page_last_n"
-      ],
+      "handlers": [],
       "as_is": "iter_window_keep_as_is",
       "dst_plant": {
         "file": "crates/rocksdb-compat/src/lib_kernel.rs",
@@ -1389,7 +1309,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "window of the iterador of compat mantem the entry if and so if the snapshot still this live \u2014 identidade over the body extraido; the as-is mantem everything and ressuscita entries escondidas, the plants DST refuta"
+        "why": "janela do iterador de compat mantem a entrada se e so se o snapshot ainda esta vivo \u2014 identidade sobre o corpo extraido; as-is mantem tudo e ressuscita entradas escondidas, a planta DST refuta"
       }
     },
     {
@@ -1399,7 +1319,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "aeneas": "scripts/aeneas_scan.sh",
+      "aeneas": "xtask:scan",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -1418,7 +1338,7 @@
       },
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 3/9 P0.4: zero_glue_admitted the constante cited false \u2014 residual glue zero is never read; floor_atom 194\u2192195"
+        "why": "\u00e1tomo 3/9 P0.4: zero_glue_admitted como constante citada false \u2014 cola residual zero nunca \u00e9 lida; floor_atom 194\u2192195"
       }
     },
     {
@@ -1428,6 +1348,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
@@ -1443,6 +1364,10 @@
       "dst_plant": {
         "file": "crates/pedradb-core/src/concurrent_kernel.rs",
         "test": "claim_lock_interleavings_refused_after_put"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0224/escada 0188: registered forall atom; flag stays false where admitted"
       }
     },
     {
@@ -1452,15 +1377,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
       "twin": "crates/pedradb-core/src/leveling_kernel.rs",
-      "aeneas": "scripts/aeneas_leveling.sh",
+      "aeneas": "xtask:leveling",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "level_target_bytes",
-      "handlers": [
-        "prepare_l0_compact",
-        "prepare_pushdown_compact"
-      ],
+      "handlers": [],
       "live_callers": [
         {
           "file": "crates/pedradb-core/src/db_kernel.rs",
@@ -1487,15 +1409,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
       "twin": "crates/pedradb-core/src/leveling_kernel.rs",
-      "aeneas": "scripts/aeneas_leveling.sh",
+      "aeneas": "xtask:leveling",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "pick_l0_to_l1",
-      "handlers": [
-        "prepare_l0_compact",
-        "prepare_pushdown_compact"
-      ],
+      "handlers": [],
       "live_callers": [
         {
           "file": "crates/pedradb-core/src/db_kernel.rs",
@@ -1509,7 +1428,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "the L0->L1 job decided exactly by the extracted route: L0 empty or cap 0 => no job; otherwise cap min(len,cap) bounds the selection, the first file seeds the hull and the sel/slice loops decide the job; the as-is reabsorbs the whole L1 and the DST plants refute"
+        "why": "job L0->L1 decidido exatamente pela rota extraida: L0 vazio ou cap 0 => sem job; senao cap min(len,cap) limita a selecao, primeiro arquivo semeia o hull e os loops de sel/slice decidem o job; as-is reabsorve o L1 inteiro e a planta DST refuta"
       }
     },
     {
@@ -1521,14 +1440,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
       "twin": "crates/pedradb-core/src/leveling_kernel.rs",
-      "aeneas": "scripts/aeneas_leveling.sh",
+      "aeneas": "xtask:leveling",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "pick_pushdown",
-      "handlers": [
-        "prepare_pushdown_compact"
-      ],
+      "handlers": [],
       "live_callers": [
         {
           "file": "crates/pedradb-core/src/db_kernel.rs",
@@ -1542,7 +1459,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "the pushdown job decided exactly by the extracted route: empty source level => no job; non-disjoint destination is refused by the gate; otherwise oldest file + overlap slice decide, each step ok; the as-is skips the gate and the DST plants refute"
+        "why": "job de pushdown decidido exatamente pela rota extraida: nivel fonte vazio => sem job; destino nao-disjunto e recusado pelo gate; senao arquivo mais antigo + slice por overlap decidem, com cada passo ok; as-is pula o gate e a planta DST refuta"
       }
     },
     {
@@ -1552,7 +1469,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
       "twin": "crates/pedradb-spec/src/properties_kernel.rs",
-      "aeneas": "scripts/aeneas_properties.sh",
+      "aeneas": "xtask:properties",
       "callers": [
         "crates/pedradb-spec/src/properties_kernel.rs"
       ],
@@ -1565,7 +1482,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "spec \u00d74 P0.1 2/4: D1 accepts (acked, survives) exactly when none index ackado falls in or beyond the prefix surviving (put\u2192Ok durable, promise G1); loop real via spec_decr_nat; mutant the as-is (only synced) refused by the plants"
+        "why": "spec \u00d74 P0.1 2/4: D1 aceita (acked, survives) exatamente quando nenhum \u00edndice ackado cai em ou al\u00e9m do prefixo sobrevivente (put\u2192Ok dur\u00e1vel, promessa G1); loop real via spec_decr_nat; mutante as-is (s\u00f3 synced) recusado pela planta"
       }
     },
     {
@@ -1575,7 +1492,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
       "twin": "crates/pedradb-spec/src/properties_kernel.rs",
-      "aeneas": "scripts/aeneas_properties.sh",
+      "aeneas": "xtask:properties",
       "callers": [
         "crates/pedradb-spec/src/properties_kernel.rs"
       ],
@@ -1588,7 +1505,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "spec \u00d74 P0.1 4/4: the answer of read passes R1 exactly when it matches the first hit in probe order (r1_first_hit_fate characterizes IsFirstHit; equality Option is an axiom of extract cited); mutant the as-is (any hit covering, delete resurrected) refused"
+        "why": "spec \u00d74 P0.1 4/4: a resposta de leitura passa R1 exatamente quando bate com o primeiro hit na ordem de probe (r1_first_hit_fate caracteriza IsFirstHit; igualdade Option \u00e9 axioma de extrato citado); mutante as-is (qualquer hit cobridor, delete resurrected) recusado"
       }
     },
     {
@@ -1598,7 +1515,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
       "twin": "crates/pedradb-spec/src/properties_kernel.rs",
-      "aeneas": "scripts/aeneas_properties.sh",
+      "aeneas": "xtask:properties",
       "callers": [
         "crates/pedradb-spec/src/properties_kernel.rs"
       ],
@@ -1611,7 +1528,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "spec \u00d74 P0.1 3/4: T1 accepts exactly when the tx is all-or-nothing (never both flags, visible name staged, committed\u21d2all, otherwise none); two real loops via spec_decr_nat; the as-is mutant (only byte integrity) refused"
+        "why": "spec \u00d74 P0.1 3/4: T1 aceita exatamente quando a tx \u00e9 all-or-nothing (nunca ambos flags, vis\u00edveis nomeiam staged, committed\u21d2todos, sen\u00e3o nenhum); dois loops reais via spec_decr_nat; mutante as-is (s\u00f3 integridade de bytes) recusado"
       }
     },
     {
@@ -1621,7 +1538,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
       "twin": "crates/pedradb-spec/src/properties_kernel.rs",
-      "aeneas": "scripts/aeneas_properties.sh",
+      "aeneas": "xtask:properties",
       "callers": [
         "crates/pedradb-spec/src/properties_kernel.rs"
       ],
@@ -1634,21 +1551,21 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "spec \u00d74 P0.1 1/4: value servido passes C1 exactly when the majority of TODA config ativa replica (joint requires old E new); mutant the as-is (only majority old) refused by the plants"
+        "why": "spec \u00d74 P0.1 1/4: valor servido passa C1 exatamente quando a maioria de TODA config ativa replica (joint exige antiga E nova); mutante as-is (s\u00f3 maioria antiga) recusado pela planta"
       }
     },
     {
       "id": "leveled_enabled",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over leveled_enabled in the atom rung \u2014 read cited of PEDRA_LEVELED: absent/error turns on, present turns on except the trimmed value 0; plants DST leveled_env_switch_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 sobre leveled_enabled no degrau \u00e1tomo \u2014 leitura citada de PEDRA_LEVELED: ausente/erro liga, presente liga exceto valor aparado 0; planta DST leveled_env_switch_is_not_ok"
       },
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
       "twin": "crates/pedradb-core/src/leveling_kernel.rs",
-      "aeneas": "scripts/aeneas_leveling.sh",
+      "aeneas": "xtask:leveling",
       "callers": [
         "crates/pedradb-core/src/concurrent_kernel.rs",
         "crates/pedradb-core/src/db_kernel.rs"
@@ -1671,14 +1588,14 @@
       "id": "leveling_disjoint",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over is_disjoint in the atom rung \u2014 dispatch puro: is the outer_cited loop in 0#usize; plants DST is_disjoint_on_live_stack_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 sobre is_disjoint no degrau \u00e1tomo \u2014 despacho puro: \u00e9 o outer_loop citado em 0#usize; planta DST is_disjoint_on_live_stack_is_not_ok"
       },
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
       "twin": "crates/pedradb-core/src/leveling_kernel.rs",
-      "aeneas": "scripts/aeneas_leveling.sh",
+      "aeneas": "xtask:leveling",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs",
         "crates/pedradb-core/src/leveling_kernel.rs"
@@ -1701,14 +1618,14 @@
       "id": "leveling_overlaps",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over overlaps in the atom rung \u2014 cited pair: lo of the file <= hull_hi and hi of the file >= hull_lo; plants DST overlaps_on_live_slice_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 sobre overlaps no degrau \u00e1tomo \u2014 par citado: lo do arquivo <= hull_hi e hi do arquivo >= hull_lo; planta DST overlaps_on_live_slice_is_not_ok"
       },
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
       "twin": "crates/pedradb-core/src/leveling_kernel.rs",
-      "aeneas": "scripts/aeneas_leveling.sh",
+      "aeneas": "xtask:leveling",
       "callers": [
         "crates/pedradb-core/src/leveling_kernel.rs"
       ],
@@ -1724,14 +1641,14 @@
       "id": "leveling_total_bytes",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 over total_bytes in the atom rung \u2014 adds cited: iter of the slice, map that extrai bytes, sum u64; plants DST total_bytes_on_live_level_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.2: fate \u2200 sobre total_bytes no degrau \u00e1tomo \u2014 soma citada: iter do slice, map que extrai bytes, sum u64; planta DST total_bytes_on_live_level_is_not_ok"
       },
       "finding": "F-leveling-sweep",
       "twin_kind": "model",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
       "twin": "crates/pedradb-core/src/leveling_kernel.rs",
-      "aeneas": "scripts/aeneas_leveling.sh",
+      "aeneas": "xtask:leveling",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs",
         "crates/pedradb-core/src/leveling_kernel.rs"
@@ -1757,7 +1674,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "aeneas": "scripts/aeneas_scan.sh",
+      "aeneas": "xtask:scan",
       "callers": [
         "crates/pedradb-core/src/sst/scan_kernel.rs"
       ],
@@ -1770,7 +1687,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 7/9 P0.4: tombstone_reaches_window the the two gates cited half-open \u2014 reaches iff t_end>start E t_start\u2264end (v = the && b); the as-is returns false always (tooth planted)"
+        "why": "\u00e1tomo 7/9 P0.4: tombstone_reaches_window como os dois gates citados half-open \u2014 alcan\u00e7a sse t_end>start E t_start\u2264fim (v = a && b); as-is devolve false sempre (dente plantado)"
       }
     },
     {
@@ -1780,7 +1697,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "aeneas": "scripts/aeneas_scan.sh",
+      "aeneas": "xtask:scan",
       "callers": [
         "crates/pedradb-core/src/sst/scan_kernel.rs"
       ],
@@ -1793,7 +1710,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 5/9 P0.4: key_in_window the the two gates cited \u2014 the key enters iff passed in the start E in the end (v = the && b); the as-is 0104 only looks at the start (tooth planted)"
+        "why": "\u00e1tomo 5/9 P0.4: key_in_window como os dois gates citados \u2014 a chave entra sse passou no start E no fim (v = a && b); as-is 0104 s\u00f3 olha o start (dente plantado)"
       }
     },
     {
@@ -1803,7 +1720,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "aeneas": "scripts/aeneas_scan.sh",
+      "aeneas": "xtask:scan",
       "callers": [
         "crates/pedradb-core/src/sst/scan_kernel.rs"
       ],
@@ -1816,7 +1733,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 6/9 P0.4: point_bounds_overlap the bounds cited \u2014 without smallest/largest reads; with both reads iff lo\u2264end E hi\u2265start; the as-is 0240 delega with bounds overflowing (tooth planted)"
+        "why": "\u00e1tomo 6/9 P0.4: point_bounds_overlap como bounds citados \u2014 sem smallest/largest l\u00ea; com ambos l\u00ea sse lo\u2264fim E hi\u2265start; as-is 0240 delega com bounds estourados (dente plantado)"
       }
     },
     {
@@ -1826,7 +1743,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
       "twin": "crates/pedradb-core/src/sst/scan_kernel.rs",
-      "aeneas": "scripts/aeneas_scan.sh",
+      "aeneas": "xtask:scan",
       "callers": [
         "crates/pedradb-core/src/sst/table_kernel.rs"
       ],
@@ -1845,7 +1762,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 2/9 P0.4: sst_block_crc_ok the lift of the cited equality stored = computed (chains crc_match_ok); floor_atom 193\u2192194"
+        "why": "\u00e1tomo 2/9 P0.4: sst_block_crc_ok como lift da igualdade citada stored = computed (encadeia crc_match_ok); floor_atom 193\u2192194"
       }
     },
     {
@@ -1855,6 +1772,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/sst/magic_kernel.rs",
       "twin": "crates/pedradb-core/src/sst/magic_kernel.rs",
+      "verus": "scripts/verus_sst_magic.sh",
       "callers": [
         "crates/pedradb-core/src/sst/table_kernel.rs",
         "crates/pedradb-ops/src/dir_kind.rs"
@@ -1878,7 +1796,7 @@
       "aeneas": "scripts/aeneas_magic.sh",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 9/9 P0.4: sst_magic_is_pedra the cited chain \u2014 without 8 bytes refuses; with prefix possible admits iff the slice-eq PEDRSST\\0 matches; the as-is admits any header (drop-in in disk \u2014 tooth planted); extract new MagicKernel via aeneas_magic.sh (shim with const pinada)"
+        "why": "\u00e1tomo 9/9 P0.4: sst_magic_is_pedra como cadeia citada \u2014 sem 8 bytes recusa; com prefixo poss\u00edvel admite sse o slice-eq PEDRSST\\0 casa; as-is admite qualquer header (drop-in em disco \u2014 dente plantado); extract novo MagicKernel via aeneas_magic.sh (shim com const pinada)"
       }
     },
     {
@@ -1888,7 +1806,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
-      "aeneas": "scripts/aeneas_wal_recover.sh",
+      "aeneas": "xtask:wal_recover",
       "callers": [
         "crates/pedradb-core/src/wal/reader_kernel.rs"
       ],
@@ -1907,7 +1825,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 2/4 P0.2: is_length_resyncable the classificador cited \u2014 trio of damage of length (Truncated/LengthCorrupt/UnknownType) \u2192 true, demais six \u2192 false; floor_atom 183\u2192184"
+        "why": "\u00e1tomo 2/4 P0.2: is_length_resyncable como classificador citado \u2014 trio de dano de comprimento (Truncated/LengthCorrupt/UnknownType) \u2192 true, demais seis \u2192 false; floor_atom 183\u2192184"
       }
     },
     {
@@ -1917,7 +1835,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
-      "aeneas": "scripts/aeneas_wal_recover.sh",
+      "aeneas": "xtask:wal_recover",
       "callers": [
         "crates/pedradb-core/src/wal/reader_kernel.rs"
       ],
@@ -1936,7 +1854,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 3/4 P0.2: physical_payload_act the tree of three ifs cited \u2014 oversize \u2192 FailStop, payload beyond the block \u2192 FailStop/Truncated by alignment, inside \u2192 Continue; floor_atom 184\u2192185"
+        "why": "\u00e1tomo 3/4 P0.2: physical_payload_act como \u00e1rvore de tr\u00eas ifs citada \u2014 oversize \u2192 FailStop, payload al\u00e9m do bloco \u2192 FailStop/Truncated por alinhamento, dentro \u2192 Continue; floor_atom 184\u2192185"
       }
     },
     {
@@ -1946,7 +1864,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
-      "aeneas": "scripts/aeneas_wal_recover.sh",
+      "aeneas": "xtask:wal_recover",
       "callers": [
         "crates/pedradb-core/src/wal/reader_kernel.rs"
       ],
@@ -1965,7 +1883,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 4/4 P0.2: fragment_act the table complete FragKind \u00d7 scratch_empty cited \u2014 orphan Middle/Last with scratch empty fail-stopa; floor_atom 185\u2192186"
+        "why": "\u00e1tomo 4/4 P0.2: fragment_act como tabela completa FragKind \u00d7 scratch_empty citada \u2014 \u00f3rf\u00e3o Middle/Last com scratch vazio fail-stopa; floor_atom 185\u2192186"
       }
     },
     {
@@ -1975,7 +1893,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/recover_kernel.rs",
-      "aeneas": "scripts/aeneas_wal_recover.sh",
+      "aeneas": "xtask:wal_recover",
       "callers": [
         "crates/pedradb-core/src/wal/reader_kernel.rs"
       ],
@@ -1994,21 +1912,21 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 1/4 P0.2: from_record_type the bijection total cited RecordType\u2192FragKind (5 branches); floor_atom 182\u2192183"
+        "why": "\u00e1tomo 1/4 P0.2: from_record_type como bije\u00e7\u00e3o total citada RecordType\u2192FragKind (5 ramos); floor_atom 182\u2192183"
       }
     },
     {
       "id": "compact_split",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 over compact_should_split in the atom rung \u2014 bind cited: the gate COMPACT_TARGET_FILE_BYTES produces the alvo and the comparison decides; plants DST compact_should_split_bounds_one_output_file"
+        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 sobre compact_should_split no degrau \u00e1tomo \u2014 bind citado: o gate COMPACT_TARGET_FILE_BYTES produz o alvo e a compara\u00e7\u00e3o decide; planta DST compact_should_split_bounds_one_output_file"
       },
       "finding": "RFC-0160 OOM",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
-      "aeneas": "scripts/aeneas_compact.sh",
+      "aeneas": "xtask:compact",
       "callers": [
         "crates/pedradb-core/src/compact_kernel.rs"
       ],
@@ -2024,14 +1942,14 @@
       "id": "compact_split_at",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 over compact_should_split_at in the atom rung \u2014 decides (written >= target), mutants never dividem; plants DST compact_split_mutants_never_split_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 sobre compact_should_split_at no degrau \u00e1tomo \u2014 decide (written >= target), mutantes nunca dividem; planta DST compact_split_mutants_never_split_is_not_ok"
       },
       "finding": "RFC-0160 OOM",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
-      "aeneas": "scripts/aeneas_compact.sh",
+      "aeneas": "xtask:compact",
       "callers": [
         "crates/pedradb-core/src/compact_kernel.rs"
       ],
@@ -2047,14 +1965,14 @@
       "id": "lone_tombstone",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 over lone_tombstone_fate in the atom rung \u2014 Drop requires bottommost and single-newest; resto Keep; plants DST theorem_lone_tombstone_on_finite_domain"
+        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 sobre lone_tombstone_fate no degrau \u00e1tomo \u2014 Drop exige bottommost e \u00fanico-mais-novo; resto Keep; planta DST theorem_lone_tombstone_on_finite_domain"
       },
       "finding": "F177",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/compact_kernel.rs",
       "twin": "crates/pedradb-core/src/compact_kernel.rs",
-      "aeneas": "scripts/aeneas_compact.sh",
+      "aeneas": "xtask:compact",
       "callers": [
         "crates/pedradb-core/src/compact_kernel.rs",
         "crates/pedradb-core/src/merge_kernel.rs"
@@ -2080,6 +1998,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
+      "verus": "xtask:changelog_rebuild",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2098,7 +2017,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 2/6 P0.3: changelog_should_store the gate cited \u2014 interval 0 never, interval > 0 when commits >= interval; floor_atom 187\u2192188"
+        "why": "\u00e1tomo 2/6 P0.3: changelog_should_store como port\u00e3o citado \u2014 intervalo 0 nunca, intervalo > 0 quando commits >= intervalo; floor_atom 187\u2192188"
       }
     },
     {
@@ -2108,9 +2027,9 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
+      "verus": "xtask:changelog_rebuild",
       "callers": [
-        "crates/pedradb-core/src/db_put_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_put_kernel.rs"
       ],
       "entry": "changelog_rebuild_within_budget",
       "as_is": "changelog_rebuild_within_budget_as_is",
@@ -2127,7 +2046,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 3/6 P0.3: changelog_rebuild_within_budget the lift puro of the cited comparison live_entries \u2264 budget_entries; floor_atom 188\u2192189"
+        "why": "\u00e1tomo 3/6 P0.3: changelog_rebuild_within_budget como lift puro da compara\u00e7\u00e3o citada live_entries \u2264 budget_entries; floor_atom 188\u2192189"
       }
     },
     {
@@ -2137,15 +2056,14 @@
       "atom": "changelog_durable_commit_fate",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P0.1: the destination of the debounce of CHANGELOG in a finished commit is decision of the kernel \u2014 counts iff the resolution of sync of the write-admission (flag of the client wins, otherwise default of the DB) made the commit durable, proved \u2200 over (client_set, client_sync, db_sync) the changelog_durable_commit_fate_fate_iff in Changelog.lean; the trampoline db.rs commit_ops_with does match in the plan of the kernel"
+        "why": "RFC-0219 P0.1: o destino do debounce de CHANGELOG num commit terminado \u00e9 decis\u00e3o do kernel \u2014 conta sse a resolu\u00e7\u00e3o de sync do write-admission (flag do cliente vence, sen\u00e3o default do DB) tornou o commit dur\u00e1vel, provado \u2200 sobre (client_set, client_sync, db_sync) como changelog_durable_commit_fate_fate_iff em Changelog.lean; o trampolim db.rs commit_ops_with faz match no plano do kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
-      "aeneas": "scripts/aeneas_changelog.sh",
+      "aeneas": "xtask:changelog",
       "callers": [
-        "crates/pedradb-core/src/db_put_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_put_kernel.rs"
       ],
       "entry": "changelog_durable_commit_fate",
       "three_teeth": true,
@@ -2168,12 +2086,12 @@
       "atom": "wal_archive_delete_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P0.2: the destination keep-vs-delete of the chain arquivada of WAL is decision of the kernel \u2014 guard while the publish of the MANIFEST atrasa the files (segments above of manifest_published_seq are the single durable copy of the window), proved \u2200 over (manifest_published_seq, wal_archive_max_seq) the wal_archive_delete_plan_fate_iff in Changelog.lean; the trampoline db.rs delete_wal_archives does match in the plan of the kernel"
+        "why": "RFC-0219 P0.2: o destino keep-vs-delete da cadeia arquivada de WAL \u00e9 decis\u00e3o do kernel \u2014 guarda enquanto o publish do MANIFEST atrasa os arquivos (segmentos acima de manifest_published_seq s\u00e3o a \u00fanica c\u00f3pia dur\u00e1vel da janela), provado \u2200 sobre (manifest_published_seq, wal_archive_max_seq) como wal_archive_delete_plan_fate_iff em Changelog.lean; o trampolim db.rs delete_wal_archives faz match no plano do kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
-      "aeneas": "scripts/aeneas_changelog.sh",
+      "aeneas": "xtask:changelog",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2198,12 +2116,12 @@
       "atom": "bulk_manifest_persist_fate",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P0.3: the the publish of the MANIFEST of the bulk install is paid is decision of the kernel \u2014 sync (dir-sync) persiste inline and zeroes the debt; async amortiza by bulk_manifest_debt the each BULK_MANIFEST_EVERY, proved \u2200 over sync the bulk_manifest_persist_fate_fate_iff in Manifest.lean; the trampoline db.rs persist_bulk_manifest does match in the plan of the kernel"
+        "why": "RFC-0219 P0.3: como o publish do MANIFEST de um bulk install \u00e9 pago \u00e9 decis\u00e3o do kernel \u2014 sync (dir-sync) persiste inline e zera a d\u00edvida; async amortiza por bulk_manifest_debt a cada BULK_MANIFEST_EVERY, provado \u2200 sobre sync como bulk_manifest_persist_fate_fate_iff em Manifest.lean; o trampolim db.rs persist_bulk_manifest faz match no plano do kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
       "twin": "crates/pedradb-core/src/manifest_kernel.rs",
-      "aeneas": "scripts/aeneas_manifest.sh",
+      "aeneas": "xtask:manifest",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2228,12 +2146,12 @@
       "atom": "point_cache_validity",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.1: the gate F198/F207 of fill/hit of the point/prefix cache is decision of the kernel \u2014 fill admissible only while published seq is still equal to the seq of the answer (publish in progress invalidates the answer pre-publish), proved \u2200 over (published, answer) the point_cache_validity_fate_iff in Lookup.lean; the three trampolines db.rs (get_after_point_miss, get_at double-check, last_under_user_prefix) match in the plan of the kernel"
+        "why": "RFC-0219 P1.1: o gate F198/F207 de fill/hit do point/prefix cache \u00e9 decis\u00e3o do kernel \u2014 fill admiss\u00edvel s\u00f3 enquanto published seq ainda \u00e9 igual ao seq da resposta (publish em curso invalida a resposta pr\u00e9-publish), provado \u2200 sobre (published, answer) como point_cache_validity_fate_iff em Lookup.lean; os tr\u00eas trampolins db.rs (get_after_point_miss, get_at double-check, last_under_user_prefix) fazem match no plano do kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
-      "aeneas": "scripts/aeneas_lookup.sh",
+      "aeneas": "xtask:lookup",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2266,12 +2184,12 @@
       "atom": "point_tombstone_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.1: if the point found is servido or shadowed by range tombstone is decision of the kernel \u2014 tombstone covering (t.seq > point_seq via merge::range_deleted) shadows the value and the caller reads Deleted (RFC-0150), proved \u2200 over range_hidden the point_tombstone_plan_fate_iff in Lookup.lean; the four trampolines db.rs (lookup x2, path lock-free x2) match in the plan of the kernel"
+        "why": "RFC-0219 P1.1: se um ponto achado \u00e9 servido ou sombreado por range tombstone \u00e9 decis\u00e3o do kernel \u2014 tombstone cobrindo (t.seq > point_seq via merge::range_deleted) sombreia o valor e o caller l\u00ea Deleted (RFC-0150), provado \u2200 sobre range_hidden como point_tombstone_plan_fate_iff em Lookup.lean; os quatro trampolins db.rs (lookup x2, caminho lock-free x2) fazem match no plano do kernel"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
-      "aeneas": "scripts/aeneas_lookup.sh",
+      "aeneas": "xtask:lookup",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2296,12 +2214,12 @@
       "atom": "dir_sync_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.1: if the dir-fsync post-rename is paid is decision of the kernel \u2014 modo sync pays inline (dentry of the rename durable before the reply), async skips, proved \u2200 over sync the dir_sync_plan_fate_iff in WriteAdmission.lean (the predicate dir_sync_required follows live in the body of the plan); the five trampolines db.rs (rename SST x2, sync_dir_if_required, fsync_sst_paths, finish_merged_chunk_on) match in the plan"
+        "why": "RFC-0219 P1.1: se o dir-fsync p\u00f3s-rename \u00e9 pago \u00e9 decis\u00e3o do kernel \u2014 modo sync paga inline (dentry do rename dur\u00e1vel antes de voltar), async pula, provado \u2200 sobre sync como dir_sync_plan_fate_iff em WriteAdmission.lean (o predicado dir_sync_required segue vivo no corpo do plano); os cinco trampolins db.rs (rename SST x2, sync_dir_if_required, fsync_sst_paths, finish_merged_chunk_on) fazem match no plano"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "aeneas": "scripts/aeneas_write_admission.sh",
+      "aeneas": "xtask:write_admission",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2326,12 +2244,12 @@
       "atom": "fence_admission_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.2: admit or refuse operations after the fence of durability is decision of the kernel \u2014 fence armed refuses fail-closed each new operation (the report acked-prefix/window-incerta already is registered), proved \u2200 over the bool the fence_admission_plan_fate_iff in WriteAdmission.lean; the trampoline db.rs ensure_not_fenced does match in the plan"
+        "why": "RFC-0219 P1.2: admitir ou recusar opera\u00e7\u00f5es ap\u00f3s um fence de durabilidade \u00e9 decis\u00e3o do kernel \u2014 fence armado recusa fail-closed cada nova opera\u00e7\u00e3o (o relat\u00f3rio acked-prefix/janela-incerta j\u00e1 est\u00e1 registrado), provado \u2200 sobre o bool como fence_admission_plan_fate_iff em WriteAdmission.lean; o trampolim db.rs ensure_not_fenced faz match no plano"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "aeneas": "scripts/aeneas_write_admission.sh",
+      "aeneas": "xtask:write_admission",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2356,12 +2274,12 @@
       "atom": "fence_record_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.2: if the fence new registers the report is decision of the kernel \u2014 only the FIRST fence registers the uncertain window visible to the client (the widest, the honest one); a later fence maintains, proved \u2200 over has_report the fence_record_plan_fate_iff in WriteAdmission.lean; the trampoline db.rs fence_durability does match in the plan"
+        "why": "RFC-0219 P1.2: se um fence novo registra o relat\u00f3rio \u00e9 decis\u00e3o do kernel \u2014 s\u00f3 o PRIMEIRO fence registra a janela incerta vis\u00edvel ao client (a mais larga, a honesta); fence posterior mant\u00e9m, provado \u2200 sobre has_report como fence_record_plan_fate_iff em WriteAdmission.lean; o trampolim db.rs fence_durability faz match no plano"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "aeneas": "scripts/aeneas_write_admission.sh",
+      "aeneas": "xtask:write_admission",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2386,12 +2304,12 @@
       "atom": "group_batch_sync_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.2: if the batch forces the single barrier of the group is decision of the kernel \u2014 the batch with the sync flag forces the one-fsync shared of the group (context of the DB group: client_set=true, db_sync=false), proved \u2200 over client_sync the group_batch_sync_plan_fate_iff in WriteAdmission.lean; the trampoline db.rs group_prepare does match in the plan"
+        "why": "RFC-0219 P1.2: se um batch for\u00e7a a barreira \u00fanica do grupo \u00e9 decis\u00e3o do kernel \u2014 batch com flag de sync for\u00e7a o one-fsync compartilhado do grupo (contexto do grupo do DB: client_set=true, db_sync=false), provado \u2200 sobre client_sync como group_batch_sync_plan_fate_iff em WriteAdmission.lean; o trampolim db.rs group_prepare faz match no plano"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "aeneas": "scripts/aeneas_write_admission.sh",
+      "aeneas": "xtask:write_admission",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2416,12 +2334,12 @@
       "atom": "pit_resync_rewrite_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.4: rewriting the WAL starting from the prefix recovered is decision of the kernel \u2014 rewrites EXACTLY when the report of recovery is the resync (pit_resync_needs_rewrite follows live and proved in the body), proved \u2200 over is_resync the pit_resync_rewrite_plan_fate_iff in WriteAdmission.lean; the AS-IS never rewrites (the damage mid-log survives to the next open fail-closed \u2014 tooth); the trampoline db.rs open_with_env_sourced does match in the plan"
+        "why": "RFC-0219 P1.4: reescrever o WAL a partir do prefixo recuperado \u00e9 decis\u00e3o do kernel \u2014 reescreve EXATAMENTE quando o relat\u00f3rio de recupera\u00e7\u00e3o \u00e9 um resync (pit_resync_needs_rewrite segue vivo e provado no corpo), provado \u2200 sobre is_resync como pit_resync_rewrite_plan_fate_iff em WriteAdmission.lean; o AS-IS nunca reescreve (o dano mid-log sobrevive ao pr\u00f3ximo open fail-closed \u2014 dente); o trampolim db.rs open_with_env_sourced faz match no plano"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "aeneas": "scripts/aeneas_write_admission.sh",
+      "aeneas": "xtask:write_admission",
       "callers": [
         "crates/pedradb-core/src/db_open_kernel.rs"
       ],
@@ -2446,12 +2364,12 @@
       "atom": "parked_pair_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.3: if the queue parked-unflushed delivers the oldest pair for fold is decision of the kernel \u2014 two or more deliver (F174 revalidates on swap), a short queue waits, proved \u2200 over parked_len the parked_pair_plan_fate_iff in Flush.lean; the trampoline db.rs parked_oldest_pair_arcs does match in the plan"
+        "why": "RFC-0219 P1.3: se a fila parked-unflushed entrega o par mais velho para fold \u00e9 decis\u00e3o do kernel \u2014 dois ou mais entrega (F174 revalida no swap), fila curta espera, provado \u2200 sobre parked_len como parked_pair_plan_fate_iff em Flush.lean; o trampolim db.rs parked_oldest_pair_arcs faz match no plano"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
-      "aeneas": "scripts/aeneas_flush.sh",
+      "aeneas": "xtask:flush",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2476,12 +2394,12 @@
       "atom": "auto_flush_gate",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.3: if the scan of auto-flush runs is decision of the kernel \u2014 the two eixos of mem under its limits pulam the scan whole (nothing due); any eixo above scana each CF (gate due by-CF aplica), proved \u2200 over (global_under, cf_under) the auto_flush_gate_fate_iff in Flush.lean (the predicate skip_auto_flush follows live in the body of the gate); the trampoline db.rs maybe_auto_flush does match in the plan"
+        "why": "RFC-0219 P1.3: se o scan de auto-flush roda \u00e9 decis\u00e3o do kernel \u2014 os dois eixos de mem sob seus limites pulam o scan inteiro (nada due); qualquer eixo acima scana cada CF (gate due por-CF aplica), provado \u2200 sobre (global_under, cf_under) como auto_flush_gate_fate_iff em Flush.lean (o predicado skip_auto_flush segue vivo no corpo do gate); o trampolim db.rs maybe_auto_flush faz match no plano"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
-      "aeneas": "scripts/aeneas_flush.sh",
+      "aeneas": "xtask:flush",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2506,12 +2424,12 @@
       "atom": "mem_auto_flush_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.3: flushing the mem is decision of the kernel \u2014 triggers EXACTLY armed and at or above the limit (auto_flush_due composes the plan); disarmed or below keeps accumulating, proved \u2200 over (mem_bytes, limit, armed) the mem_auto_flush_plan_fate_iff in Flush.lean; the AS-IS never triggers (mem grows until the host hangs \u2014 tooth planted); the trampoline db.rs maybe_auto_flush does match in the plan"
+        "why": "RFC-0219 P1.3: flushar a mem \u00e9 decis\u00e3o do kernel \u2014 dispara EXATAMENTE armado e no/acima do limite (auto_flush_due comp\u00f5e o plano); desarmado ou abaixo segue acumulando, provado \u2200 sobre (mem_bytes, limit, armed) como mem_auto_flush_plan_fate_iff em Flush.lean; o AS-IS nunca dispara (mem cresce at\u00e9 o host travar \u2014 dente plantado); o trampolim db.rs maybe_auto_flush faz match no plano"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
-      "aeneas": "scripts/aeneas_flush.sh",
+      "aeneas": "xtask:flush",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2536,12 +2454,12 @@
       "atom": "manifest_publish_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.4: publishing MANIFEST/CURRENT is decision of the kernel \u2014 publishes EXACTLY when every listed SST is durable (may_publish_manifest follows live and proved in the body), proved \u2200 over sst_durable the manifest_publish_plan_fate_iff in Flush.lean; the AS-IS publishes with SST unsynced (CURRENT names the file that turns post-crash \u2014 tooth); the trampoline db.rs persist_manifest does match in the plan"
+        "why": "RFC-0219 P1.4: publicar MANIFEST/CURRENT \u00e9 decis\u00e3o do kernel \u2014 publica EXATAMENTE quando todo SST listado est\u00e1 durable (may_publish_manifest segue vivo e provado no corpo), provado \u2200 sobre sst_durable como manifest_publish_plan_fate_iff em Flush.lean; o AS-IS publica com SST unsynced (CURRENT nomeia arquivo tornado p\u00f3s-crash \u2014 dente); o trampolim db.rs persist_manifest faz match no plano"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
-      "aeneas": "scripts/aeneas_flush.sh",
+      "aeneas": "xtask:flush",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2566,12 +2484,12 @@
       "atom": "changelog_store_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P1.4: write the feed in the store point synchronous is decision of the kernel \u2014 writes EXACTLY when the publish durable of the MANIFEST covered the window arquivada (publish failed holds: the segments archived are the single copy durable), proved \u2200 over publish_ok the changelog_store_plan_fate_iff in Changelog.lean; the AS-IS writes with publish failed (the store deletes segments without coverage \u2014 tooth); the trampoline db.rs changelog_store_point does match in the plan"
+        "why": "RFC-0219 P1.4: gravar o feed no store point s\u00edncrono \u00e9 decis\u00e3o do kernel \u2014 grava EXATAMENTE quando o publish durable do MANIFEST cobriu a janela arquivada (publish falhado segura: os segmentos arquivados s\u00e3o a \u00fanica c\u00f3pia durable), provado \u2200 sobre publish_ok como changelog_store_plan_fate_iff em Changelog.lean; o AS-IS grava com publish falhado (o store apaga segmentos sem cobertura \u2014 dente); o trampolim db.rs changelog_store_point faz match no plano"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
       "twin": "crates/pedradb-core/src/changelog_kernel.rs",
-      "aeneas": "scripts/aeneas_changelog.sh",
+      "aeneas": "xtask:changelog",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2596,12 +2514,12 @@
       "atom": "parked_pop_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P2.1: popar the queue estacionada is decision of the kernel \u2014 pops EXACTLY when the queue is non-empty (batch_is_empty follows live and proved in the body), proved \u2200 over parked_len the parked_pop_plan_fate_iff in WriteAdmission.lean; the AS-IS pops of the queue empty (tooth); the trampoline db.rs take_oldest_parked does match in the plan"
+        "why": "RFC-0219 P2.1: popar a fila estacionada \u00e9 decis\u00e3o do kernel \u2014 popa EXATAMENTE quando a fila est\u00e1 n\u00e3o-vazia (batch_is_empty segue vivo e provado no corpo), provado \u2200 sobre parked_len como parked_pop_plan_fate_iff em WriteAdmission.lean; o AS-IS popa da fila vazia (dente); o trampolim db.rs take_oldest_parked faz match no plano"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
-      "aeneas": "scripts/aeneas_write_admission.sh",
+      "aeneas": "xtask:write_admission",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2620,18 +2538,78 @@
       }
     },
     {
+      "id": "put_handler_plan",
+      "finding": "RFC-0157 stage 2",
+      "twin_kind": "atom",
+      "atom": "put_handler_plan",
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0157 stage 2: o script rustc-linked de Db::put -> apply_batch_with e o kernel put_handler_plan (empty skip WAL; commit Err restaura next_seq); AS-IS sempre faz flush; trampolim apply_batch_with faz match; iff-forall put_handler_plan_fate_iff em WriteAdmission.lean"
+      },
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "aeneas": "xtask:write_admission",
+      "callers": [
+        "crates/pedradb-core/src/db_put_kernel.rs"
+      ],
+      "entry": "put_handler_plan",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db_put_kernel.rs",
+          "handler": "apply_batch_with"
+        }
+      ],
+      "as_is": "put_handler_plan_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "put_handler_plan_on_live_empty_skips_wal"
+      }
+    },
+    {
+      "id": "open_wal_head_plan",
+      "finding": "RFC-0157 stage 2",
+      "twin_kind": "atom",
+      "atom": "open_wal_head_plan",
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0157 stage 2: o script rustc-linked de open_with_env_sourced no WAL-head e o kernel open_wal_head_plan (WAL ausente skip; Truncated(0) tiny = empty-log via torn_head_is_empty_log); AS-IS sempre recovers; trampolim faz match; iff-forall open_wal_head_plan_fate_iff em WriteAdmission.lean"
+      },
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "aeneas": "xtask:write_admission",
+      "callers": [
+        "crates/pedradb-core/src/db_open_kernel.rs"
+      ],
+      "entry": "open_wal_head_plan",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db_open_kernel.rs",
+          "handler": "open_with_env_sourced"
+        }
+      ],
+      "as_is": "open_wal_head_plan_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_admission_kernel.rs",
+        "test": "open_wal_head_plan_on_live_missing_skips"
+      }
+    },
+    {
       "id": "group_ack_plan",
       "finding": "RFC-0219 P2.1",
       "twin_kind": "atom",
       "atom": "group_ack_plan",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "RFC-0219 P2.1: acking and publishing the group is decision of the kernel \u2014 publishes EXACTLY when the group's WAL I/O succeeded (may_publish_group follows live and proved in the body), proved \u2200 over wal_io_ok the group_ack_plan_fate_iff in GroupCommit.lean; the AS-IS acks the failure (Ok with lie \u2014 tooth); the trampoline db.rs lone_sync_commit does match in the plan"
+        "why": "RFC-0219 P2.1: ackar e publicar o grupo \u00e9 decis\u00e3o do kernel \u2014 publica EXATAMENTE quando a I/O de WAL do grupo teve sucesso (may_publish_group segue vivo e provado no corpo), provado \u2200 sobre wal_io_ok como group_ack_plan_fate_iff em GroupCommit.lean; o AS-IS acka a falha (Ok com mentira \u2014 dente); o trampolim db.rs lone_sync_commit faz match no plano"
       },
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
-      "aeneas": "scripts/aeneas_group_commit.sh",
+      "aeneas": "xtask:group_commit",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2650,12 +2628,153 @@
       }
     },
     {
+      "id": "lock_alphabet_linearizes_n2",
+      "finding": "RFC-0202 \u2200\u03c0 alphabet N=2",
+      "twin_kind": "atom",
+      "atom": "lock_alphabet_linearizes_n2",
+      "atom_reason": {
+        "date": "2026-09-15",
+        "why": "Passo 2 \u2200\u03c0: alfabeto finito acquire-write/flush/submit/publish; rustc lock_alphabet_linearizes_n2; Lean \u2200 unfold lock_alphabet_linearizes_n2_eq_steps; AS-IS admite publish-before-submit; admitted s\u00f3 neste alfabeto (lock_alphabet_interleavings_admitted); OS lock_interleavings_admitted continua false"
+      },
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "aeneas": "xtask:group_commit",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_put_kernel.rs"
+      ],
+      "entry": "lock_alphabet_linearizes_n2",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent_put_kernel.rs",
+          "handler": "put_with_seq"
+        }
+      ],
+      "as_is": "lock_alphabet_linearizes_n2_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+        "test": "lock_alphabet_n2_linearizes_write_then_submit"
+      }
+    },
+    {
+      "id": "cf_flush_plan",
+      "finding": "RFC-0219 P2.1",
+      "twin_kind": "atom",
+      "atom": "cf_flush_plan",
+      "atom_reason": {
+        "date": "2026-09-13",
+        "why": "RFC-0219 P2.1: dentro do scan armado de auto-flush, flushar a fam\u00edlia EXATAMENTE no/acima do limite \u00e9 decis\u00e3o do kernel (auto_flush_due segue vivo e provado no corpo), provado \u2200 sobre (mem_bytes, limit) como cf_flush_plan_fate_iff em Flush.lean; o AS-IS pula toda fam\u00edlia (CF armado s\u00f3 cresce \u2014 dente); o trampolim db.rs maybe_auto_flush faz match no plano por fam\u00edlia"
+      },
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+      "twin": "crates/pedradb-core/src/flush_kernel.rs",
+      "aeneas": "xtask:flush",
+      "callers": [
+        "crates/pedradb-core/src/db_kernel.rs"
+      ],
+      "entry": "cf_flush_plan",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db_kernel.rs",
+          "handler": "maybe_auto_flush"
+        }
+      ],
+      "as_is": "cf_flush_plan_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/flush_kernel.rs",
+        "test": "cf_flush_plan_on_live_over_limit_flushes"
+      }
+    },
+    {
+      "id": "flusher_gate_plan",
+      "finding": "RFC-0219 P2.2",
+      "twin_kind": "atom",
+      "atom": "flusher_gate_plan",
+      "atom_reason": {
+        "date": "2026-09-13",
+        "why": "RFC-0219 P2.2: o regime de submit/park/assist (workerless vs worker drenando) \u00e9 decis\u00e3o do kernel \u2014 dormir em drain \u00e9 EXATAMENTE quando h\u00e1 worker para dren\u00e1-lo, provado \u2200 sobre attached como flusher_gate_plan_fate_iff em Flush.lean; o AS-IS diz WorkerDrains sempre (writer workerless dorme em drain que ningu\u00e9m corre \u2014 dente); os cinco port\u00f5es do trampolim concurrent.rs (await_flush_debt, await_l0_park, submit_one, submit_inner, assist_flush_debt) fazem match no plano"
+      },
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+      "twin": "crates/pedradb-core/src/flush_kernel.rs",
+      "aeneas": "xtask:flush",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "flusher_gate_plan",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "await_flush_debt"
+        },
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "await_l0_park"
+        },
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "submit_one"
+        },
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "submit_inner"
+        },
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "assist_flush_debt"
+        }
+      ],
+      "as_is": "flusher_gate_plan_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/flush_kernel.rs",
+        "test": "flusher_gate_plan_on_live_workerless_parks_nowhere"
+      }
+    },
+    {
+      "id": "parked_debt_plan",
+      "finding": "RFC-0219 P2.2",
+      "twin_kind": "atom",
+      "atom": "parked_debt_plan",
+      "atom_reason": {
+        "date": "2026-09-13",
+        "why": "RFC-0219 P2.2: a d\u00edvida parked-unflushed ser real (parquear/assistir) \u00e9 decis\u00e3o do kernel \u2014 d\u00edvida EXATAMENTE quando os bytes alcan\u00e7am o cap de uma tabela, provado \u2200 sobre (parked, cap) como parked_debt_plan_fate_iff em Flush.lean; o AS-IS nunca freia (camada mem sem limite \u2014 OOM slipstream 25M \u2014 dente); os trampolins concurrent.rs await_flush_debt e assist_flush_debt fazem match no plano"
+      },
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+      "twin": "crates/pedradb-core/src/flush_kernel.rs",
+      "aeneas": "xtask:flush",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "parked_debt_plan",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "await_flush_debt"
+        },
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "assist_flush_debt"
+        }
+      ],
+      "as_is": "parked_debt_plan_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/flush_kernel.rs",
+        "test": "parked_debt_plan_on_live_at_cap_parks"
+      }
+    },
+    {
       "id": "flush_plan",
       "finding": "F2/F43",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
+      "verus": "xtask:flush_decision",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2674,7 +2793,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 4/6 P0.3: flush_plan the two-if cited tree \u2014 imm present ends-and-flushes, memtable empty rotaciona, live writes SST before; floor_atom 189\u2192190"
+        "why": "\u00e1tomo 4/6 P0.3: flush_plan como \u00e1rvore de dois ifs citada \u2014 imm presente termina-e-flusha, memtable vazio rotaciona, vivo escreve SST antes; floor_atom 189\u2192190"
       }
     },
     {
@@ -2684,7 +2803,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
       "twin": "crates/pedradb-core/src/manifest_kernel.rs",
-      "aeneas": "scripts/aeneas_manifest.sh",
+      "aeneas": "xtask:manifest",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
@@ -2693,7 +2812,7 @@
       "live_callers": [
         {
           "file": "crates/pedradb-core/src/db_kernel.rs",
-          "handler": "first_install_action"
+          "handler": "recover_ssts"
         }
       ],
       "dst_plant": {
@@ -2703,20 +2822,21 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 5/6 P0.3: first_install_action the cited table \u2014 commitado (with/without sync) proceeds, failure refuses to open (F196); floor_atom 190\u2192191"
+        "why": "\u00e1tomo 5/6 P0.3: first_install_action como tabela citada \u2014 commitado (com/sem sync) prossegue, falha recusa abrir (F196); floor_atom 190\u2192191"
       }
     },
     {
       "id": "probe_order_covering",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "the list of candidatos and exactly the cited loop \u2014 newest_first with capacity len, of the zero, porte covering_pos and gate covering_hi_ge decidindo push or skip"
+        "why": "a lista de candidatos e exatamente o loop citado \u2014 newest_first com capacidade len, do zero, porte covering_pos e gate covering_hi_ge decidindo push ou skip"
       },
       "finding": "RFC-0164 P0.2",
       "twin_kind": "model",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
       "twin": "crates/pedradb-core/src/probe_order_kernel.rs",
+      "verus": "xtask:probe_order",
       "callers": [
         "crates/pedradb-core/src/probe_order_kernel.rs"
       ],
@@ -2735,6 +2855,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/group_commit_kernel.rs"
       ],
@@ -2747,7 +2868,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "atom 4/4 P0.1: group_validate the cited chain of the loop extracted (index\u2192occ_conflict\u2192push, fuel = members); floor_atom 181\u2192182"
+        "why": "\u00e1tomo 4/4 P0.1: group_validate como cadeia citada do loop extra\u00eddo (index\u2192occ_conflict\u2192push, combust\u00edvel = membros); floor_atom 181\u2192182"
       }
     },
     {
@@ -2757,13 +2878,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/group_commit_kernel.rs"
       ],
       "entry": "occ_member_fate",
-      "handlers": [
-        "validate_occ_batch"
-      ],
+      "handlers": [],
       "as_is": "occ_member_fate_as_is",
       "dst_plant": {
         "file": "crates/pedradb-core/src/group_commit_kernel.rs",
@@ -2782,14 +2902,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
       "entry": "occ_batch_plan",
-      "handlers": [
-        "validate_occ_batch",
-        "lone_commit"
-      ],
+      "handlers": [],
       "as_is": "occ_batch_plan_as_is",
       "live_callers": [
         {
@@ -2808,7 +2926,7 @@
       "three_teeth": true,
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "the group plan decides exactly by the min-len route: n is the smaller input and every fate comes from the extracted loop \u2014 upgrade of the RFC-0198 close (glue by member) to the whole extract"
+        "why": "o plano do grupo decide exatamente pela rota min-len: n e o menor input e todo fate vem do loop extraido \u2014 upgrade do close RFC-0198 (glue por membro) para o extrato inteiro"
       }
     },
     {
@@ -2818,6 +2936,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
@@ -2833,7 +2952,11 @@
         "file": "crates/pedradb-core/src/group_commit_kernel.rs",
         "test": "pct_depth_is_not_forall_schedules"
       },
-      "three_teeth": true
+      "three_teeth": true,
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0224/escada 0188: registered forall atom; flag stays false where admitted"
+      }
     },
     {
       "id": "default_pct_depth_raised",
@@ -2842,6 +2965,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/group_commit_kernel.rs"
       ],
@@ -2851,7 +2975,11 @@
         "file": "crates/pedradb-core/src/group_commit_kernel.rs",
         "test": "pct_depth_is_not_forall_schedules"
       },
-      "three_teeth": true
+      "three_teeth": true,
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0224/escada 0188: registered forall atom; flag stays false where admitted"
+      }
     },
     {
       "id": "fsync_lie_tcg",
@@ -2860,6 +2988,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/group_commit_kernel.rs"
       ],
@@ -2869,7 +2998,11 @@
         "file": "crates/pedradb-core/src/group_commit_kernel.rs",
         "test": "fsync_ok_is_not_media_proof"
       },
-      "three_teeth": true
+      "three_teeth": true,
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0224/escada 0188: registered forall atom; flag stays false where admitted"
+      }
     },
     {
       "id": "stacked_liars",
@@ -2878,6 +3011,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
       "twin": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "verus": "xtask:group_commit_kernel",
       "callers": [
         "crates/pedradb-core/src/group_commit_kernel.rs"
       ],
@@ -2887,20 +3021,24 @@
         "file": "crates/pedradb-core/src/group_commit_kernel.rs",
         "test": "fsync_ok_is_not_media_proof"
       },
-      "three_teeth": true
+      "three_teeth": true,
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0224/escada 0188: registered forall atom; flag stays false where admitted"
+      }
     },
     {
       "id": "env_crash",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate \u2200 of the crash_legal \u2014 cut legal exactly when synced \u2264 cut \u2264 written (floor of the barrier and ceiling written); the as-is ignora the floor and come bytes prometidos."
+        "why": "RFC-0214 P0.2: fate \u2200 do crash_legal \u2014 corte legal exatamente quando synced \u2264 cut \u2264 written (piso da barreira e teto escrito); as-is ignora o piso e come bytes prometidos."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
       "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "aeneas": "scripts/aeneas_env_crash.sh",
+      "aeneas": "xtask:env_crash",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -2917,14 +3055,14 @@
       "id": "env_append",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate \u2200 of the append of the Env \u2014 ok {m with written := w} exactly when written+n does not overflow (ok w); the barrier does not move."
+        "why": "RFC-0214 P0.2: fate \u2200 do append do Env \u2014 ok {m with written := w} exatamente quando written+n n\u00e3o estoura (ok w); a barreira n\u00e3o se move."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
       "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "aeneas": "scripts/aeneas_env_crash.sh",
+      "aeneas": "xtask:env_crash",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -2941,14 +3079,14 @@
       "id": "env_sync",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: \u2200 fate of the Env sync \u2014 exactly two ok futures: Honest promotes the barrier to the full length; Lying returns Ok and the model rolls back entirely (RFC-0078); the as-is always promotes."
+        "why": "RFC-0214 P0.2: fate \u2200 do sync do Env \u2014 dois futuros ok exatos: Honest promove a barreira ao comprimento todo; Lying devolve Ok e o modelo volta inteiro (RFC-0078); as-is promove sempre."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
       "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "aeneas": "scripts/aeneas_env_crash.sh",
+      "aeneas": "xtask:env_crash",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -2965,14 +3103,14 @@
       "id": "env_barrier_floor",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate \u2200 of the floor of the barrier \u2014 ok v with v = true exact: cut illegal not loses nothing; cut legal maintains cut \u2265 synced (leg crash_legal_fate_iff, atom 1/6 of the fatia)."
+        "why": "RFC-0214 P0.2: fate \u2200 do piso da barreira \u2014 ok v com v = true exato: corte ilegal n\u00e3o perde nada; corte legal mant\u00e9m cut \u2265 synced (perna crash_legal_fate_iff, \u00e1tomo 1/6 da fatia)."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
       "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "aeneas": "scripts/aeneas_env_crash.sh",
+      "aeneas": "xtask:env_crash",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -2989,14 +3127,14 @@
       "id": "env_no_invented",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate \u2200 of the ceiling \u2014 ok v with v = true exact: cut illegal or cut \u2264 written (ceiling of the window of the crash_legal_fate_iff); the recovery never invents byte."
+        "why": "RFC-0214 P0.2: fate \u2200 do teto \u2014 ok v com v = true exato: corte ilegal ou cut \u2264 written (teto da janela do crash_legal_fate_iff); a recupera\u00e7\u00e3o nunca inventa byte."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
       "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "aeneas": "scripts/aeneas_env_crash.sh",
+      "aeneas": "xtask:env_crash",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3013,14 +3151,14 @@
       "id": "env_honest_sync",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.2: fate \u2200 of the sync honest \u2014 ok v with v = true exact: after the barrier honest the window legal collapses to a single point (written \u2264 cut \u2264 written forces cut = written); every crash legal preserves the log whole; legs sync_fate_iff + crash_legal_fate_iff."
+        "why": "RFC-0214 P0.2: fate \u2200 do sync honesto \u2014 ok v com v = true exato: ap\u00f3s a barreira honesta a janela legal colapsa num ponto (written \u2264 cut \u2264 written for\u00e7a cut = written); todo crash legal preserva o log inteiro; pernas sync_fate_iff + crash_legal_fate_iff."
       },
       "finding": "RFC-0166 P1.1",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
       "twin": "crates/pedradb-core/src/env_crash_kernel.rs",
-      "aeneas": "scripts/aeneas_env_crash.sh",
+      "aeneas": "xtask:env_crash",
       "callers": [
         "crates/pedradb-core/src/env_crash_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3037,14 +3175,14 @@
       "id": "wal_state",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate \u2200 of inv_wal \u2014 ok v exactly when v decides (acked \u2286 synced \u2227 synced \u2286 written); leg cited wal_inv_closed (RFC-0191 P2.1)."
+        "why": "RFC-0214 P0.1: fate \u2200 de inv_wal \u2014 ok v exatamente quando v decide (acked \u2286 synced \u2227 synced \u2286 written); perna citada wal_inv_closed (RFC-0191 P2.1)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-      "aeneas": "scripts/aeneas_wal_state.sh",
+      "aeneas": "xtask:wal_state",
       "callers": [
         "crates/pedradb-core/src/wal/wal_state_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3061,14 +3199,14 @@
       "id": "wal_append",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate \u2200 of the append \u2014 ok {s with written := w} exactly when the adds written+n does not overflow (ok w); leg cited wal_append_closed (RFC-0191 P2.1)."
+        "why": "RFC-0214 P0.1: fate \u2200 do append \u2014 ok {s with written := w} exatamente quando a soma written+n n\u00e3o estoura (ok w); perna citada wal_append_closed (RFC-0191 P2.1)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-      "aeneas": "scripts/aeneas_wal_state.sh",
+      "aeneas": "xtask:wal_state",
       "callers": [
         "crates/pedradb-core/src/wal/wal_state_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3085,14 +3223,14 @@
       "id": "wal_sync",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: \u2200 fate of the sync \u2014 exactly two ok futures, split by honesty (Honest promotes the barrier to what was written; Lying returns the watermarks clipped by the min); cited legs wal_sync_honest_closed/wal_sync_lying_closed (RFC-0198 P1.2)."
+        "why": "RFC-0214 P0.1: fate \u2200 do sync \u2014 exatamente dois futuros ok, um por honestidade (Honest promove a barreira a written; Lying devolve as watermarks recortadas pelo min); pernas citadas wal_sync_honest_closed/wal_sync_lying_closed (RFC-0198 P1.2)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-      "aeneas": "scripts/aeneas_wal_state.sh",
+      "aeneas": "xtask:wal_state",
       "callers": [
         "crates/pedradb-core/src/wal/wal_state_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3109,14 +3247,14 @@
       "id": "wal_ack",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate \u2200 of the ack \u2014 exactly two ok futures: inside the barrier {s with acked := a} (saturated value contained in synced), outside it refuses fail-closed (state rolls back whole); the Ok never advances acked beyond the barrier."
+        "why": "RFC-0214 P0.1: fate \u2200 do ack \u2014 exatamente dois futuros ok: dentro da barreira {s with acked := a} (valor saturado contido em synced), fora dela recusa fail-closed (estado volta inteiro); o Ok nunca avan\u00e7a acked al\u00e9m da barreira."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-      "aeneas": "scripts/aeneas_wal_state.sh",
+      "aeneas": "xtask:wal_state",
       "callers": [
         "crates/pedradb-core/src/wal/wal_state_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3133,14 +3271,14 @@
       "id": "wal_rotate",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate \u2200 of the rotate \u2014 zeroes the log exactly when everything is durable and acked (acked = synced = written); a non-durable tail is refused and the state rolls back whole; the as-is drops the log always."
+        "why": "RFC-0214 P0.1: fate \u2200 do rotate \u2014 zera o log exatamente quando tudo \u00e9 dur\u00e1vel e acked (acked = synced = written); cauda n\u00e3o-dur\u00e1vel \u00e9 recusada e o estado volta inteiro; as-is derruba o log sempre."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-      "aeneas": "scripts/aeneas_wal_state.sh",
+      "aeneas": "xtask:wal_state",
       "callers": [
         "crates/pedradb-core/src/wal/wal_state_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3157,14 +3295,14 @@
       "id": "wal_acked_survives",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0214 P0.1: fate \u2200 of the corollary of survival \u2014 two ok futures decided by the Env stitch (legal cut: v = cut \u2265 acked; illegal cut: v = true); the legality is the Env's, not re-proved (P0.2 will pin crash_legal)."
+        "why": "RFC-0214 P0.1: fate \u2200 da corol\u00e1ria de sobreviv\u00eancia \u2014 dois futuros ok decididos pela costura Env (corte legal: v = cut \u2265 acked; corte ilegal: v = true); a legalidade \u00e9 a do Env, n\u00e3o re-provada (P0.2 pinar\u00e1 crash_legal)."
       },
       "finding": "RFC-0166 P1.2",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
       "twin": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
-      "aeneas": "scripts/aeneas_wal_state.sh",
+      "aeneas": "xtask:wal_state",
       "callers": [
         "crates/pedradb-core/src/wal/wal_state_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3184,7 +3322,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/d1_modelo_kernel.rs",
       "twin": "crates/pedradb-core/src/d1_modelo_kernel.rs",
-      "aeneas": "scripts/aeneas_d1_modelo.sh",
+      "aeneas": "xtask:d1_modelo",
       "callers": [
         "crates/pedradb-core/src/d1_modelo_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3198,7 +3336,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "The put confirms exactly when the ledger crosses the barrier: ok s' and exactly the honest append->sync->ack chain with the acked->synced ordering, citing the bodies without reopening"
+        "why": "O put confirma exatamente quando o ledger cruza a barreira: ok s' e exatamente a cadeia honesta append->sync->ack com o vao acked->synced, citando os corpos sem reabrir"
       }
     },
     {
@@ -3208,7 +3346,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/d1_modelo_kernel.rs",
       "twin": "crates/pedradb-core/src/d1_modelo_kernel.rs",
-      "aeneas": "scripts/aeneas_d1_modelo.sh",
+      "aeneas": "xtask:d1_modelo",
       "callers": [
         "crates/pedradb-core/src/d1_modelo_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3222,21 +3360,21 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "The D1 machine outcome is exactly the spec's decision: ok false only on the acked+legal-crash+cut-before-the-end path (the hole of the AS-IS mutant); the constructive branch form cites inv_wal/CrashModel.of/crash_legal without reopening bodies"
+        "why": "O desfecho da maquina D1 e exatamente a decisao do spec: ok false so na vereda ackado+crash-legal+corte-antes-do-fim (o buraco do mutante AS-IS); forma de ramos construtiva cita inv_wal/CrashModel.of/crash_legal sem reabrir corpos"
       }
     },
     {
       "id": "write_ack_append",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 over on_append in the atom rung \u2014 the step append of the ledger is the atom wal_append (written grows, acked/synced untouched); the as-is write_ack_ledger_as_is (ack without barrier) refused by the plants DST verified_write_ack_on_live_profile_is_not_ok"
+        "why": "2026-09-12 RFC-0214 P1.1: fate \u2200 sobre on_append no degrau \u00e1tomo \u2014 o passo append do ledger \u00e9 o \u00e1tomo wal_append (written cresce, acked/synced intocados); as-is write_ack_ledger_as_is (ack sem barreira) recusado pela planta DST verified_write_ack_on_live_profile_is_not_ok"
       },
       "finding": "RFC-0166 P1.4",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
       "twin": "crates/pedradb-core/src/write_ack_kernel.rs",
-      "aeneas": "scripts/aeneas_write_ack.sh",
+      "aeneas": "xtask:write_ack",
       "callers": [
         "crates/pedradb-core/src/write_ack_kernel.rs",
         "crates/pedradb-core/src/concurrent_kernel.rs",
@@ -3254,14 +3392,14 @@
       "id": "write_ack_barrier",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "atom write_ack_barrier: the Ok of the barrier Honest is exactly the state promovido (synced := written) \u2014 wal_sync with fsync_promotes_pending; without Ok with pending items (RFC-0214 P1.1 7/8)"
+        "why": "\u00e1tomo write_ack_barrier: o Ok da barreira Honest \u00e9 exatamente o estado promovido (synced := written) \u2014 wal_sync com fsync_promotes_pending; sem Ok com pend\u00eancias (RFC-0214 P1.1 7/8)"
       },
       "finding": "RFC-0166 P1.4",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
       "twin": "crates/pedradb-core/src/write_ack_kernel.rs",
-      "aeneas": "scripts/aeneas_write_ack.sh",
+      "aeneas": "xtask:write_ack",
       "callers": [
         "crates/pedradb-core/src/write_ack_kernel.rs",
         "crates/pedradb-core/src/concurrent_kernel.rs",
@@ -3279,14 +3417,14 @@
       "id": "write_ack_ack",
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "atom write_ack_ack: the Ok of the ack there is iff acked \u2264 synced and is exactly acked := synced (gap becomes acknowledged, saturated promotes only up to the barrier); outside of the invariant the checked subtraction failure (RFC-0214 P1.1 8/8)"
+        "why": "\u00e1tomo write_ack_ack: o Ok do ack existe iff acked \u2264 synced e \u00e9 exatamente acked := synced (gap vira acknowledged, saturado promove s\u00f3 at\u00e9 a barreira); fora da invariante a sub checada falha (RFC-0214 P1.1 8/8)"
       },
       "finding": "RFC-0166 P1.4",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
       "twin": "crates/pedradb-core/src/write_ack_kernel.rs",
-      "aeneas": "scripts/aeneas_write_ack.sh",
+      "aeneas": "xtask:write_ack",
       "callers": [
         "crates/pedradb-core/src/write_ack_kernel.rs",
         "crates/pedradb-core/src/concurrent_kernel.rs",
@@ -3304,7 +3442,7 @@
       "id": "lsm_probe",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 over lsm_probe in the atom rung \u2014 one step of the cited loop via loop.eq_def: body in the level 0 ends (done) or goes down the level (cont); plants DST r1_modelo_on_live_delete_shape_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 sobre lsm_probe no degrau \u00e1tomo \u2014 um passo do loop citado via loop.eq_def: corpo no n\u00edvel 0 termina (done) ou desce um n\u00edvel (cont); planta DST r1_modelo_on_live_delete_shape_is_not_ok"
       },
       "entry": "lsm_probe",
       "as_is": "lsm_probe_as_is",
@@ -3313,7 +3451,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
       "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
-      "aeneas": "scripts/aeneas_lsm_r1.sh",
+      "aeneas": "xtask:lsm_r1",
       "callers": [
         "crates/pedradb-core/src/lsm_r1_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3328,7 +3466,7 @@
       "id": "lsm_compact",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 over lsm_compact in the atom rung \u2014 cited dispatch: level 0 and level >= MAX_LEVELS do not compact; inside, the cited loop with drop_all_tombs false; plants DST r1_modelo_on_live_delete_shape_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 sobre lsm_compact no degrau \u00e1tomo \u2014 despacho citado: n\u00edvel 0 e n\u00edvel >= MAX_LEVELS n\u00e3o compactam; dentro, o loop citado com drop_all_tombs false; planta DST r1_modelo_on_live_delete_shape_is_not_ok"
       },
       "entry": "lsm_compact",
       "as_is": "lsm_compact_as_is",
@@ -3337,7 +3475,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
       "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
-      "aeneas": "scripts/aeneas_lsm_r1.sh",
+      "aeneas": "xtask:lsm_r1",
       "callers": [
         "crates/pedradb-core/src/lsm_r1_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3352,7 +3490,7 @@
       "id": "lsm_reopen",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 over lsm_reopen in the atom rung \u2014 identidade cited, the state exits intacto; plants DST r1_modelo_on_live_delete_shape_is_not_ok"
+        "why": "2026-09-13 RFC-0218 P1.1: fate \u2200 sobre lsm_reopen no degrau \u00e1tomo \u2014 identidade citada, o estado sai intacto; planta DST r1_modelo_on_live_delete_shape_is_not_ok"
       },
       "entry": "lsm_reopen",
       "as_is": "lsm_reopen_as_is",
@@ -3361,7 +3499,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
       "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
-      "aeneas": "scripts/aeneas_lsm_r1.sh",
+      "aeneas": "xtask:lsm_r1",
       "callers": [
         "crates/pedradb-core/src/lsm_r1_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3381,7 +3519,7 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
       "twin": "crates/pedradb-core/src/lsm_r1_kernel.rs",
-      "aeneas": "scripts/aeneas_lsm_r1.sh",
+      "aeneas": "xtask:lsm_r1",
       "callers": [
         "crates/pedradb-core/src/lsm_r1_kernel.rs",
         "crates/pedradb-sim/src/three_teeth_plants.rs"
@@ -3393,7 +3531,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "The R1 machine outcome is exactly the spec's decision: ok true when probe and newest agree (or the inventory does not even pass), ok false when they disagree; constructive branches cite inv_lsm/lsm_probe/r1_newest without reopening bodies"
+        "why": "O desfecho da maquina R1 e exatamente a decisao do spec: ok true quando sonda e mais-novo concordam (ou o inventario nem passa), ok false quando discordam; ramos construtivos citam inv_lsm/lsm_probe/r1_newest sem reabrir corpos"
       }
     },
     {
@@ -3403,14 +3541,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "xtask:write_admission",
       "callers": [
-        "crates/pedradb-core/src/db_put_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_put_kernel.rs"
       ],
       "entry": "write_admission_idle",
-      "handlers": [
-        "write_admission_idle"
-      ],
+      "handlers": [],
       "as_is": "write_admission_idle_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3419,7 +3555,7 @@
       },
       "atom_reason": {
         "date": "2026-09-12",
-        "why": "RFC-0213 P0.1 (RFC-0170 P2.4): the gate idle of write-admission and true exactly when none knob of stall this armed; the as-is respondia idle with knobs armados"
+        "why": "RFC-0213 P0.1 (RFC-0170 P2.4): o gate idle de write-admission e true exatamente quando nenhum knob de stall esta armado; as-is respondia idle com knobs armados"
       }
     },
     {
@@ -3429,13 +3565,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "xtask:write_admission",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "write_admit",
-      "handlers": [
-        "ensure_write_admitted_for"
-      ],
+      "handlers": [],
       "as_is": "write_admit_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3454,14 +3589,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "xtask:write_admission",
       "callers": [
-        "crates/pedradb-core/src/db_put_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_put_kernel.rs"
       ],
       "entry": "wal_sync_required",
-      "handlers": [
-        "commit_ops_with"
-      ],
+      "handlers": [],
       "as_is": "wal_sync_required_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3480,15 +3613,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "xtask:write_admission",
       "callers": [
-        "crates/pedradb-core/src/db_open_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "seq_exhausted",
-      "handlers": [
-        "alloc_seq",
-        "open_with_env_sourced"
-      ],
+      "handlers": [],
       "as_is": "seq_exhausted_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3507,14 +3637,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "xtask:write_admission",
       "callers": [
-        "crates/pedradb-core/src/db_open_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "batch_is_empty",
-      "handlers": [
-        "apply_batch_with"
-      ],
+      "handlers": [],
       "as_is": "batch_is_empty_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3534,14 +3662,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "xtask:write_admission",
       "callers": [
-        "crates/pedradb-core/src/db_open_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "fence_on_sync_fail",
-      "handlers": [
-        "commit_ops_with"
-      ],
+      "handlers": [],
       "as_is": "fence_on_sync_fail_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3560,14 +3686,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "xtask:write_admission",
       "callers": [
-        "crates/pedradb-core/src/db_open_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "wal_commit_plan",
-      "handlers": [
-        "commit_ops_with"
-      ],
+      "handlers": [],
       "as_is": "wal_commit_plan_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3586,13 +3710,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "xtask:write_admission",
       "callers": [
         "crates/pedradb-core/src/write_admission_kernel.rs"
       ],
       "entry": "torn_head_is_empty_log",
-      "handlers": [
-        "open_with_env_sourced"
-      ],
+      "handlers": [],
       "as_is": "torn_head_is_empty_log_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3611,13 +3734,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "xtask:write_admission",
       "callers": [
         "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "torn_tail_needs_cut",
-      "handlers": [
-        "open_with_env_sourced"
-      ],
+      "handlers": [],
       "as_is": "torn_tail_needs_cut_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3636,13 +3758,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "xtask:write_admission",
       "callers": [
         "crates/pedradb-core/src/db_open_kernel.rs"
       ],
       "entry": "seq_after_feed",
-      "handlers": [
-        "open_with_env_sourced"
-      ],
+      "handlers": [],
       "as_is": "seq_after_feed_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3661,13 +3782,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "xtask:write_admission",
       "callers": [
         "crates/pedradb-core/src/write_admission_kernel.rs"
       ],
       "entry": "pit_resync_needs_rewrite",
-      "handlers": [
-        "open_with_env_sourced"
-      ],
+      "handlers": [],
       "as_is": "pit_resync_needs_rewrite_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3686,13 +3806,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
       "twin": "crates/pedradb-core/src/write_admission_kernel.rs",
+      "verus": "xtask:write_admission",
       "callers": [
         "crates/pedradb-core/src/write_admission_kernel.rs"
       ],
       "entry": "dir_sync_required",
-      "handlers": [
-        "sync_dir_if_required"
-      ],
+      "handlers": [],
       "as_is": "dir_sync_required_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3712,13 +3831,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
+      "verus": "xtask:flush_decision",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "auto_flush_due",
-      "handlers": [
-        "maybe_auto_flush"
-      ],
+      "handlers": [],
       "as_is": "auto_flush_due_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3737,13 +3855,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+      "verus": "xtask:lookup",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "snap_is_empty",
-      "handlers": [
-        "get_at"
-      ],
+      "handlers": [],
       "as_is": "snap_is_empty_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3762,14 +3879,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+      "verus": "xtask:lookup",
       "callers": [
-        "crates/pedradb-core/src/db_put_kernel.rs",
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_put_kernel.rs"
       ],
       "entry": "snap_below_watermark",
-      "handlers": [
-        "get_at"
-      ],
+      "handlers": [],
       "as_is": "snap_below_watermark_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3788,13 +3903,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+      "verus": "xtask:lookup",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "mem_point_decides",
-      "handlers": [
-        "lookup"
-      ],
+      "handlers": [],
       "as_is": "mem_point_decides_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3813,13 +3927,12 @@
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
       "twin": "crates/pedradb-core/src/lookup_kernel.rs",
+      "verus": "xtask:lookup",
       "callers": [
         "crates/pedradb-core/src/db_kernel.rs"
       ],
       "entry": "prefer_newer_seq",
-      "handlers": [
-        "lookup"
-      ],
+      "handlers": [],
       "as_is": "prefer_newer_seq_as_is",
       "three_teeth": true,
       "dst_plant": {
@@ -3835,14 +3948,14 @@
       "id": "scale_probes",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "point-get probes are exactly the saturating_add cited \u2014 levels + L0 covering; the as-is walks every live SST (lying GPS)"
+        "why": "probes de point get sao exatamente o saturating_add citado \u2014 levels + L0 cobrindo; as-is anda cada SST vivo (GPS mentindo)"
       },
       "finding": "RFC-0176 P0",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/scale_kernel.rs",
       "twin": "crates/pedradb-core/src/scale_kernel.rs",
-      "aeneas": "scripts/aeneas_scale.sh",
+      "aeneas": "xtask:scale",
       "callers": [
         "crates/pedradb-core/src/scale_kernel.rs"
       ],
@@ -3858,14 +3971,14 @@
       "id": "scale_warm",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "the WARM ceiling is exactly the cited chain \u2014 ceiling 0 is the floor 3 GiB; otherwise max(floor, 3/4 ceiling) cut by the reserved ceiling - 1 GiB; the as-is ignores the ceiling (u64::MAX)"
+        "why": "teto do WARM e exatamente a cadeia citada \u2014 ceiling 0 e o piso 3 GiB; senao max(piso, 3/4 ceiling) cortado pelo reservado ceiling - 1 GiB; as-is ignora o ceiling (u64::MAX)"
       },
       "finding": "RFC-0176 P0",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/scale_kernel.rs",
       "twin": "crates/pedradb-core/src/scale_kernel.rs",
-      "aeneas": "scripts/aeneas_scale.sh",
+      "aeneas": "xtask:scale",
       "callers": [
         "crates/pedradb-core/src/scale_kernel.rs"
       ],
@@ -3881,14 +3994,14 @@
       "id": "scale_probes_worst",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "worse matches of producao and exactly the same adds cited \u2014 point_get_probes with the trigger full of the L0; the as-is still walks each file live"
+        "why": "pior caso de producao e exatamente a mesma soma citada \u2014 point_get_probes com o trigger cheio do L0; as-is ainda anda cada arquivo vivo"
       },
       "finding": "RFC-0176 P1",
       "twin_kind": "close",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/scale_kernel.rs",
       "twin": "crates/pedradb-core/src/scale_kernel.rs",
-      "aeneas": "scripts/aeneas_scale.sh",
+      "aeneas": "xtask:scale",
       "callers": [
         "crates/pedradb-core/src/scale_kernel.rs"
       ],
@@ -3904,14 +4017,14 @@
       "id": "scale_predict",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "the relogio previsto and exactly the cited chain \u2014 clamps min(hot,SCALE_BPS)/min(noisy,9000), mix hot.tau_ram+(SCALE_BPS-hot).tau_disk, counts u128, taxa (1+eta), try_from with ceiling u64::MAX; the as-is ignora eta"
+        "why": "o relogio previsto e exatamente a cadeia citada \u2014 clamps min(hot,SCALE_BPS)/min(noisy,9000), mix hot.tau_ram+(SCALE_BPS-hot).tau_disk, conta u128, taxa (1+eta), try_from com teto u64::MAX; as-is ignora eta"
       },
       "finding": "RFC-0176 P1",
       "twin_kind": "model",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/scale_kernel.rs",
       "twin": "crates/pedradb-core/src/scale_kernel.rs",
-      "aeneas": "scripts/aeneas_scale.sh",
+      "aeneas": "xtask:scale",
       "callers": [
         "crates/pedradb-core/examples/scale_spectrum.rs"
       ],
@@ -3927,14 +4040,14 @@
       "id": "scale_happy_hot",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "the hot fraction of the happy path is exactly the cited gate \u2014 the store fitting in the warm_cap returns SCALE_BPS; otherwise the residual SCALE_HAPPY_COLD_HOT_BPS; the as-is says 100% always"
+        "why": "fracao quente do caminho feliz e exatamente o gate citado \u2014 loja cabendo no warm_cap devolve SCALE_BPS; senao o residual SCALE_HAPPY_COLD_HOT_BPS; as-is diz 100% sempre"
       },
       "finding": "RFC-0176 P1",
       "twin_kind": "model",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/scale_kernel.rs",
       "twin": "crates/pedradb-core/src/scale_kernel.rs",
-      "aeneas": "scripts/aeneas_scale.sh",
+      "aeneas": "xtask:scale",
       "callers": [
         "crates/pedradb-core/examples/scale_spectrum.rs"
       ],
@@ -3950,81 +4063,716 @@
       "id": "scale_forecast",
       "atom_reason": {
         "date": "2026-09-13",
-        "why": "the RFC-0176 table is exactly the cited composition \u2014 each field is the kernel's atom (sat_mul, level_count callee, point_get_probes, probes_worst, div_ceil, warm_cap_bytes, happy_hot_bps, best/happy/worst_get_ns) and hot is the store <= warm_cap gate; the as-is walks all the files and always says hot"
+        "why": "a tabela RFC-0176 e exatamente a composicao citada \u2014 cada campo e o atomo do kernel (sat_mul, level_count callee, point_get_probes, probes_worst, div_ceil, warm_cap_bytes, happy_hot_bps, best/happy/worst_get_ns) e hot e o gate store <= warm_cap; as-is anda todos os arquivos e diz sempre quente"
       },
       "finding": "RFC-0176 P1.2",
       "twin_kind": "model",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/scale_kernel.rs",
       "twin": "crates/pedradb-core/src/scale_kernel.rs",
-      "aeneas": "scripts/aeneas_scale.sh",
-      "callers": [
-        "crates/pedradb-core/src/ratio_curve_kernel.rs",
-        "crates/snapshot-bench/src/diagnose.rs"
-      ],
+      "aeneas": "xtask:scale",
+      "callers": [],
       "entry": "scale_forecast",
       "as_is": "scale_forecast_as_is",
       "three_teeth": true,
+      "live_callers": [],
       "dst_plant": {
         "file": "crates/pedradb-core/src/scale_kernel.rs",
         "test": "scale_forecast_on_always_hot_walk_is_not_ok"
       }
     },
     {
-      "id": "ops_pitr_window",
-      "finding": "PITR restore_pitr filter",
+      "id": "pipeline_drain_cap",
+      "finding": "RFC-0201 P0.1",
       "twin_kind": "close",
-      "kernel": "crates/pedradb-ops/src/ops_kernel.rs",
-      "twin": "crates/pedradb-ops/src/ops_kernel.rs",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/client_axis_kernel.rs",
+      "twin": "crates/pedradb-core/src/client_axis_kernel.rs",
+      "aeneas": "xtask:client_axis",
       "callers": [
-        "crates/pedradb-ops/src/lib.rs"
+        "crates/pedradb-core/src/concurrent_kernel.rs"
       ],
-      "entry": "pitr_record_in_window",
-      "as_is": "pitr_record_in_window_as_is",
+      "entry": "pipeline_drain_cap",
+      "as_is": "pipeline_drain_cap_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/client_axis_kernel.rs",
+        "test": "rfc0201_drain_cap_full_below_misuse_floor"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: pipeline_drain_cap is clamp(queued,1,256) \u2014 full drain up to the misuse floor; AS-IS clamps at 8 (cap-8 convoy). Fate forall over the extracted body (ClientAxis.lean). Production WriteGroup::lead calls it."
+      }
+    },
+    {
+      "id": "async_merge_policy",
+      "finding": "RFC-0201 P0.3",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/client_axis_kernel.rs",
+      "twin": "crates/pedradb-core/src/client_axis_kernel.rs",
+      "aeneas": "xtask:client_axis",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "async_merge_policy",
+      "as_is": "async_merge_policy_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/client_axis_kernel.rs",
+        "test": "rfc0201_async_merge_policy_boundary_and_pins"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: async_merge_policy merges iff env pin or writers>ncpu (ncpu=0 never). AS-IS is env-pin only. Fate forall over the extracted body (ClientAxis.lean). Production submit path calls it."
+      }
+    },
+    {
+      "id": "merge_eligible",
+      "finding": "RFC-0217 P0.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_window_kernel.rs",
+      "aeneas": "xtask:group_window",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "merge_eligible",
+      "as_is": "merge_eligible_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_window_kernel.rs",
+        "test": "rfc0217_group_window_merge_eligibility_boundary"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: merge_eligible is window_us>0 AND (writers>=2 OR peers_recent); AS-IS always false (RFC-0044 bypass). Fate forall over the extracted body (GroupWindow.lean). Production submit path calls it."
+      }
+    },
+    {
+      "id": "flight_capped_window_us",
+      "finding": "RFC-0217 P0.4",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_window_kernel.rs",
+      "aeneas": "xtask:group_window",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "flight_capped_window_us",
+      "as_is": "flight_capped_window_us_as_is",
+      "three_teeth": true,
       "live_callers": [
         {
-          "file": "crates/pedradb-ops/src/lib.rs",
-          "handler": "restore_pitr"
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "effective_group_window_us"
         }
       ],
       "dst_plant": {
-        "file": "crates/pedradb-ops/src/ops_kernel.rs",
-        "test": "pitr_record_in_window_on_future_seq_is_not_ok"
+        "file": "crates/pedradb-core/src/group_window_kernel.rs",
+        "test": "rfc0217_p04_window_never_exceeds_flight"
       },
-      "single_artifact": true
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: flight_capped_window_us is min(window, flight-or-seed) collapsing below one quiescence slice when cap_to_flight; else the flat window. Fate forall over the extracted body (GroupWindow.lean). Production effective_group_window_us calls it."
+      }
     },
     {
-      "id": "cf_flush_plan",
-      "finding": "RFC-0219 P2.1",
+      "id": "herd_collect_us",
+      "finding": "RFC-0217 herd collect",
       "twin_kind": "atom",
-      "atom": "cf_flush_plan",
-      "atom_reason": {
-        "date": "2026-09-13",
-        "why": "RFC-0219 P2.1: inside the armed auto-flush scan, flushing the family EXACTLY at or above the limit is decision of the kernel (auto_flush_due follows live and proved in the body), proved \u2200 over (mem_bytes, limit) the cf_flush_plan_fate_iff in Flush.lean; the AS-IS skips every family (CF armed only grows \u2014 tooth); the trampoline db.rs maybe_auto_flush does match in the plan per family"
+      "atom": "herd_collect_us",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_window_kernel.rs",
+      "aeneas": "xtask:group_window",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "herd_collect_us",
+      "as_is": "herd_collect_us_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "lead"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_window_kernel.rs",
+        "test": "herd_collect_waits_only_for_missing_inflight"
       },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "A2b: herd_collect_us waits HERD_COLLECT_US iff the frame is not herd_full AND (active>batch OR peers_recent); AS-IS never waits. ConcurrentDb lead calls it. iff-forall herd_collect_us_fate_iff GroupWindow.lean."
+      }
+    },
+    {
+      "id": "seal_async_first_drain",
+      "finding": "RFC-0211 follow-up seal (findings/2026-09-14-write-degrada-n-seal-async)",
+      "twin_kind": "atom",
+      "atom": "seal_async_first_drain",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_window_kernel.rs",
+      "aeneas": "xtask:group_window",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "seal_async_first_drain",
+      "as_is": "seal_async_first_drain_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "lead"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_window_kernel.rs",
+        "test": "seal_async_first_drain_boundary"
+      },
+      "atom_reason": {
+        "date": "2026-09-16",
+        "why": "RFC-0226 P0.2: seal_async_first_drain seals iff !any_sync AND window_us==0 AND writers<=ncpu AND batch_len==1 (a multi-member first drain keeps collect \u2014 the mc16 \u221213% of the 2026-09-14 cut). AS-IS is that 2026-09-14 policy (ignores batch_len). RFC-0233 P1.4 negative result 2026-09-16: an inflight<=batch_len gate formed avg_group 2.17 groups (lock_wait 4.28\u21920.49\u00b5s) yet halved throughput (min-of-3 0.732\u21920.429) \u2014 async WAL mmap memcpy has no fd to amortize; collect is pure latency tax; reverted. iff-forall seal_async_first_drain_fate_iff GroupWindow.lean. ConcurrentDb lead calls it; PEDRA_SEAL_ASYNC=0 never seals."
+      }
+    },
+    {
+      "id": "solo_leader_bypass",
+      "finding": "RFC-0226 P1.1 (findings/2026-09-14-write-degrada-n-seal-async)",
+      "twin_kind": "atom",
+      "atom": "solo_leader_bypass",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_window_kernel.rs",
+      "aeneas": "xtask:group_window",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "solo_leader_bypass",
+      "as_is": "solo_leader_bypass_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "lead"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_window_kernel.rs",
+        "test": "solo_leader_bypass_boundary"
+      },
+      "atom_reason": {
+        "date": "2026-09-15",
+        "why": "RFC-0226 P1.1: solo_leader_bypass is batch_len==1 AND queue_len==0 AND active<=1 (a still-alone first drain takes commit_async_one); AS-IS always keeps the group serial section. iff-forall solo_leader_bypass_fate_iff GroupWindow.lean. ConcurrentDb lead calls it under PEDRA_SOLO_BYPASS=1 (default off until P1.2 meter)."
+      }
+    },
+    {
+      "id": "herd_full",
+      "finding": "RFC-0217 herd collect",
+      "twin_kind": "atom",
+      "atom": "herd_full",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_window_kernel.rs",
+      "aeneas": "xtask:group_window",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "herd_full",
+      "as_is": "herd_full_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_window_kernel.rs",
+        "test": "herd_collect_waits_only_for_missing_inflight"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "A2b: herd_full is batch_len >= HERD_TARGET; AS-IS never full. herd_collect_us and post_group_grace_us call it. iff-forall herd_full_fate_iff GroupWindow.lean."
+      }
+    },
+    {
+      "id": "post_group_grace_us",
+      "finding": "RFC-0217 herd collect",
+      "twin_kind": "atom",
+      "atom": "post_group_grace_us",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+      "twin": "crates/pedradb-core/src/group_window_kernel.rs",
+      "aeneas": "xtask:group_window",
+      "callers": [
+        "crates/pedradb-core/src/concurrent_kernel.rs"
+      ],
+      "entry": "post_group_grace_us",
+      "as_is": "post_group_grace_us_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "lead"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_window_kernel.rs",
+        "test": "herd_collect_waits_only_for_missing_inflight"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "A2b: post_group_grace_us spins after a multi-member publish iff prev_len>=2 AND not herd_full; AS-IS never spins. ConcurrentDb lead calls it. iff-forall post_group_grace_us_fate_iff GroupWindow.lean."
+      }
+    },
+    {
+      "id": "leftover_page_advice",
+      "finding": "RFC-0194 P0.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/leftover_page_kernel.rs",
+      "twin": "crates/pedradb-core/src/leftover_page_kernel.rs",
+      "aeneas": "xtask:leftover_page",
+      "callers": [
+        "crates/pedradb-core/src/leftover_page_kernel.rs"
+      ],
+      "entry": "leftover_page_advice",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/leftover_page_kernel.rs",
+        "test": "default_budget_never_drops"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: leftover_page_advice drops iff budget=0 AND uncovered AND above warm cap; AS-IS always KeepDefault. Fate forall over the extracted body (LeftoverPage.lean). rustc now links the module (lib.rs)."
+      },
+      "as_is": "leftover_page_advice_as_is"
+    },
+    {
+      "id": "scan_readahead_window",
+      "finding": "RFC-0195 P0.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/scan_readahead_kernel.rs",
+      "twin": "crates/pedradb-core/src/scan_readahead_kernel.rs",
+      "aeneas": "xtask:scan_readahead",
+      "callers": [
+        "crates/pedradb-core/src/scan_readahead_kernel.rs"
+      ],
+      "entry": "scan_readahead_window",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/scan_readahead_kernel.rs",
+        "test": "fitting_store_never_reads_ahead"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: scan_readahead_window is NONE on a hot store (Fire-118/v69); AS-IS always NONE. Fate forall over the extracted body (ScanReadahead.lean). rustc now links the module (lib.rs)."
+      },
+      "as_is": "scan_readahead_window_as_is"
+    },
+    {
+      "id": "serial_cs_ns",
+      "finding": "RFC-0192",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/write_cycle_kernel.rs",
+      "twin": "crates/pedradb-core/src/write_cycle_kernel.rs",
+      "aeneas": "xtask:write_cycle",
+      "callers": [
+        "crates/pedradb-core/src/write_cycle_kernel.rs"
+      ],
+      "entry": "serial_cs_ns",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/write_cycle_kernel.rs",
+        "test": "rfc0192_write_off_lock_drops_cs_by_wr"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: serial_cs_ns is the saturating sum of encode+write+guard+lock+insert+publish+grp; AS-IS is the fire-120 constant 2200 ns. Fate forall over the extracted body (WriteCycle.lean)."
+      },
+      "as_is": "serial_cs_ns_as_is"
+    },
+    {
+      "id": "spine_replay",
+      "finding": "RFC-0214 P2.1",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/durability_spine_kernel.rs",
+      "twin": "crates/pedradb-core/src/durability_spine_kernel.rs",
+      "aeneas": "xtask:durability_spine",
+      "callers": [
+        "crates/pedradb-core/src/durability_spine_kernel.rs"
+      ],
+      "entry": "spine_replay",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/durability_spine_kernel.rs",
+        "test": "spine_any_sequence_keeps_inv_and_d1"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: spine_replay folds WriteAckLedger over ANY step sequence and asserts Inv-WAL per step; AS-IS acks without barrier. Fate forall over the extracted body (DurabilitySpine.lean)."
+      },
+      "as_is": "spine_replay_as_is"
+    },
+    {
+      "id": "cold_permille",
+      "finding": "RFC-0197",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/ratio_curve_kernel.rs",
+      "twin": "crates/pedradb-core/src/ratio_curve_kernel.rs",
+      "aeneas": "xtask:ratio_curve",
+      "callers": [
+        "crates/pedradb-core/src/ratio_curve_kernel.rs"
+      ],
+      "entry": "cold_permille",
+      "three_teeth": false,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/ratio_curve_kernel.rs",
+        "test": "rfc0197_cold_permille_zero_hot_and_monotone_bounded"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: cold_permille is 0 when the store fits the warm cap, else min(1000,(store-warm)*1000/store). Whole-file extract blocked by &'static str; --start-from isolates this predicate. Fate forall (RatioCurve.lean)."
+      }
+    },
+    {
+      "id": "product_crown",
+      "finding": "RFC-0215 P1.2",
+      "twin_kind": "close",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/product_crown_kernel.rs",
+      "twin": "crates/pedradb-core/src/product_crown_kernel.rs",
+      "aeneas": "scripts/aeneas_product_crown.sh",
+      "callers": [
+        "crates/pedradb-core/src/product_crown_kernel.rs"
+      ],
+      "entry": "product_crown",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/product_crown_kernel.rs",
+        "test": "crown_agrees_on_every_reachable_ledger"
+      },
+      "atom_reason": {
+        "date": "2026-09-14",
+        "why": "RFC-0222 P0.7 enrollment: product_crown folds d1_modelo \u2227 (legal cut \u21d2 d1_holds) over every torn cut; Isolated while (not Iterator.all). Fate forall over the extracted body (ProductCrown.lean)."
+      },
+      "as_is": "product_crown_as_is"
+    },
+    {
+      "id": "reserve_frame",
+      "finding": "RFC-0230 P0.3 / RFC-0193",
+      "twin_kind": "atom",
+      "atom": "reserve_frame",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/wal_ticket_kernel.rs",
+      "twin": "crates/pedradb-core/src/wal_ticket_kernel.rs",
+      "aeneas": "xtask:wal_ticket",
+      "callers": [
+        "crates/pedradb-core/src/wal/writer_kernel.rs"
+      ],
+      "entry": "reserve_frame",
+      "as_is": "reserve_frame_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/wal/writer_kernel.rs",
+          "handler": "reserve_pending"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/wal_ticket_kernel.rs",
+        "test": "rfc0193_reserve_frame_advances_ticket"
+      },
+      "atom_reason": {
+        "date": "2026-09-16",
+        "why": "RFC-0230 P0.3: reserve_frame returns ticket=reserved_to and advances by len; empty len is a no-op. AS-IS never advances a distinct cursor. iff-forall reserve_frame_fate_iff WalTicket.lean. WalWriter reserves under the meta lock; the sink write uses the ticket offset."
+      }
+    },
+    {
+      "id": "pwrite_off_lock",
+      "finding": "RFC-0230 P0.3 / RFC-0193",
+      "twin_kind": "atom",
+      "atom": "pwrite_off_lock",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/wal_ticket_kernel.rs",
+      "twin": "crates/pedradb-core/src/wal_ticket_kernel.rs",
+      "aeneas": "xtask:wal_ticket",
+      "callers": [
+        "crates/pedradb-core/src/wal/mod_kernel.rs"
+      ],
+      "entry": "pwrite_off_lock",
+      "as_is": "pwrite_off_lock_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/wal/mod_kernel.rs",
+          "handler": "take_pwrite_job"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/wal_ticket_kernel.rs",
+        "test": "rfc0193_pwrite_off_lock_requires_want_and_capability"
+      },
+      "atom_reason": {
+        "date": "2026-09-16",
+        "why": "RFC-0230 P0.3: pwrite_off_lock is want AND can (env pin AND positional handle). AS-IS always false (locked sequential write). iff-forall pwrite_off_lock_fate_iff WalTicket.lean."
+      }
+    },
+    {
+      "id": "l0_compact_due",
+      "finding": "RFC-0234 P0.1",
+      "twin_kind": "atom",
+      "atom": "l0_compact_due",
       "single_artifact": true,
       "kernel": "crates/pedradb-core/src/flush_kernel.rs",
       "twin": "crates/pedradb-core/src/flush_kernel.rs",
-      "aeneas": "scripts/aeneas_flush.sh",
+      "aeneas": "xtask:flush",
       "callers": [
-        "crates/pedradb-core/src/db_kernel.rs"
+        "crates/pedradb-core/src/db_kernel.rs",
+        "crates/pedradb-core/src/concurrent_kernel.rs",
+        "crates/rocksdb-compat/src/lib_kernel.rs"
       ],
-      "entry": "cf_flush_plan",
+      "entry": "l0_compact_due",
+      "as_is": "l0_compact_due_as_is",
       "three_teeth": true,
       "live_callers": [
         {
           "file": "crates/pedradb-core/src/db_kernel.rs",
-          "handler": "maybe_auto_flush"
+          "handler": "maybe_auto_compact"
+        },
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "maybe_compact_l0_at_trigger"
+        },
+        {
+          "file": "crates/pedradb-core/src/concurrent_kernel.rs",
+          "handler": "drain_l0_below_trigger"
+        },
+        {
+          "file": "crates/rocksdb-compat/src/lib_kernel.rs",
+          "handler": "spawn_compact_worker"
         }
       ],
-      "as_is": "cf_flush_plan_as_is",
       "dst_plant": {
         "file": "crates/pedradb-core/src/flush_kernel.rs",
-        "test": "cf_flush_plan_on_live_over_limit_flushes"
+        "test": "l0_compact_due_on_live_at_trigger_is_not_ok"
+      },
+      "atom_reason": {
+        "date": "2026-09-16",
+        "why": "RFC-0234 P0.1: L0 compact is due EXACTLY when live file count is at/above the trigger. AS-IS never compacta (the park that left 54\u2013773 L0 after a 10M seed). iff-forall l0_compact_due_fate_iff Flush.lean. maybe_auto_compact / maybe_compact_l0_at_trigger / drain_l0_below_trigger / spawn_compact_worker match the kernel; inflight no longer skips a due compact."
+      }
+    },
+    {
+      "id": "workload_class",
+      "finding": "RFC-0235 P0.1",
+      "twin_kind": "atom",
+      "atom": "workload_class",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/workload_class_kernel.rs",
+      "twin": "crates/pedradb-core/src/workload_class_kernel.rs",
+      "aeneas": "scripts/aeneas_workload_class.sh",
+      "callers": [
+        "crates/pedradb-core/src/db_kernel.rs"
+      ],
+      "entry": "workload_class",
+      "as_is": "workload_class_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db_kernel.rs",
+          "handler": "workload_class_now"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/workload_class_kernel.rs",
+        "test": "workload_class_on_live_scan_window_is_not_ok"
+      },
+      "atom_reason": {
+        "date": "2026-09-17",
+        "why": "RFC-0235 P0.1: Endure class is the unique strict max of (z0,z1,q,W); empty/tie is Mixed. AS-IS always Mixed (every fire rediscovers a knob). iff-forall workload_class_short_range_iff WorkloadClass.lean. Production get/scan/put windows feed the four counters; no PEDRA_WORKLOAD pin."
+      }
+    },
+    {
+      "id": "filter_partition",
+      "finding": "RFC-0236 P0.1",
+      "twin_kind": "atom",
+      "atom": "filter_partition",
+      "single_artifact": true,
+      "kernel": "crates/pedradb-core/src/filter_partition_kernel.rs",
+      "twin": "crates/pedradb-core/src/filter_partition_kernel.rs",
+      "aeneas": "scripts/aeneas_filter_partition.sh",
+      "callers": [
+        "crates/pedradb-core/src/bloom_kernel.rs"
+      ],
+      "entry": "filter_partition",
+      "as_is": "filter_partition_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/bloom_kernel.rs",
+          "handler": "may_contain"
+        },
+        {
+          "file": "crates/pedradb-core/src/bloom_kernel.rs",
+          "handler": "insert"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/filter_partition_kernel.rs",
+        "test": "filter_partition_on_live_scan_window_is_not_ok"
+      },
+      "atom_reason": {
+        "date": "2026-09-17",
+        "why": "RFC-0236 P0.1: filter_partition(h1, nparts) is h1 % nparts (0 when nparts<=1). AS-IS always 0 (monolithic Bloom). iff-forall filter_partition_collapses_iff FilterPartition.lean. SST write emits partitions; miss loads one. No PEDRA_FILTER_PARTS pin."
       }
     }
   ],
   "clones": [
+    {
+      "id": "commit_raft_store",
+      "finding": "F10/F11/F23",
+      "a": "crates/pedradb-raft/src/commit_kernel.rs",
+      "b": "crates/pedradb-store/src/commit_kernel.rs",
+      "agreement": "twin_agrees_with_raft_commit_kernel_on_full_domain",
+      "fns": [
+        "recover_commit",
+        "may_commit_at",
+        "propose_ack_ok",
+        "may_commit_at_as_is",
+        "propose_ack_ok_as_is",
+        "recover_commit_as_is",
+        "recover_last_applied",
+        "recover_last_applied_as_is",
+        "should_advance_commit",
+        "should_advance_commit_as_is"
+      ]
+    },
+    {
+      "id": "membership_raft_store",
+      "finding": "RFC-0064/0094",
+      "a": "crates/pedradb-raft/src/membership_kernel.rs",
+      "b": "crates/pedradb-store/src/membership_kernel.rs",
+      "agreement": "twin_agrees_with_raft_membership_kernel_on_full_domain",
+      "fns": [
+        "majority_of",
+        "joint_election_ok",
+        "joint_still_active",
+        "joint_leave_ok",
+        "queued_leave_finish_ok",
+        "disk_membership_overrides_cli",
+        "membership_identity_before_applied",
+        "high_water_at_least",
+        "participating_if_member",
+        "recover_must_apply",
+        "recover_apply_node_counts",
+        "recover_truncate_node_counts",
+        "recover_drop_orphan_seg",
+        "recover_abort_node_counts",
+        "persist_meta_node_counts",
+        "persist_hist_node_counts",
+        "persist_fence_node_counts",
+        "force_clear_node_counts",
+        "drop_preimages_node_counts",
+        "open_peer_uses_disk",
+        "local_id_if_member",
+        "reader_id_local",
+        "discard_node_counts",
+        "discard_leader_local",
+        "removed_steps_down",
+        "hint_if_member",
+        "drop_repl_slot",
+        "drop_sent_through",
+        "pending_joint_node_counts",
+        "election_grant_from_counts",
+        "joint_target_counts",
+        "joint_add_target_counts",
+        "liveness_admitted",
+        "elect_claim_banner",
+        "discard_leader_local_as_is",
+        "discard_node_counts_as_is",
+        "disk_membership_overrides_cli_as_is",
+        "drop_preimages_node_counts_as_is",
+        "drop_repl_slot_as_is",
+        "drop_sent_through_as_is",
+        "elect_claim_banner_as_is",
+        "election_grant_from_counts_as_is",
+        "force_clear_node_counts_as_is",
+        "high_water_at_least_as_is",
+        "hint_if_member_as_is",
+        "joint_add_target_counts_as_is",
+        "joint_election_ok_as_is",
+        "joint_leave_ok_as_is",
+        "joint_still_active_as_is",
+        "joint_target_counts_as_is",
+        "liveness_admitted_as_is",
+        "local_id_if_member_as_is",
+        "membership_identity_before_applied_as_is",
+        "open_peer_uses_disk_as_is",
+        "participating_if_member_as_is",
+        "pending_joint_node_counts_as_is",
+        "persist_fence_node_counts_as_is",
+        "persist_hist_node_counts_as_is",
+        "persist_meta_node_counts_as_is",
+        "queued_leave_finish_ok_as_is",
+        "reader_id_local_as_is",
+        "recover_abort_node_counts_as_is",
+        "recover_apply_node_counts_as_is",
+        "recover_drop_orphan_seg_as_is",
+        "recover_must_apply_as_is",
+        "recover_truncate_node_counts_as_is",
+        "removed_steps_down_as_is",
+        "plant_joint_schedule_ok",
+        "plant_joint_schedule_ok_as_is",
+        "replica_served_ok",
+        "replica_served_ok_as_is"
+      ]
+    },
+    {
+      "id": "ae_ack_raft_store",
+      "finding": "F48/F16",
+      "a": "crates/pedradb-raft/src/ae_kernel.rs",
+      "b": "crates/pedradb-store/src/ae_ack_kernel.rs",
+      "agreement": "twin_agrees_with_raft_ae_kernel_on_full_domain",
+      "fns": [
+        "ae_ack_success",
+        "ae_entry_action",
+        "ae_prev_log_ok",
+        "ae_entry_action_as_is_rewrite_committed",
+        "ae_ack_success_as_is",
+        "ae_f16_safe",
+        "ae_f16_safe_as_is"
+      ]
+    },
+    {
+      "id": "vote_raft_store",
+      "finding": "F15",
+      "a": "crates/pedradb-raft/src/vote_kernel.rs",
+      "b": "crates/pedradb-store/src/vote_kernel.rs",
+      "agreement": "twin_agrees_with_raft_vote_kernel_on_full_domain",
+      "fns": [
+        "vote_decision",
+        "can_vote",
+        "log_up_to_date",
+        "grant_after_persist",
+        "durable_term_if_newer",
+        "vote_decision_as_is_ignore_log_and_vote",
+        "grant_after_persist_as_is",
+        "durable_term_if_newer_as_is"
+      ]
+    },
+    {
+      "id": "apply_raft_store",
+      "finding": "F10-apply",
+      "a": "crates/pedradb-raft/src/apply_kernel.rs",
+      "b": "crates/pedradb-store/src/apply_kernel.rs",
+      "agreement": "twin_agrees_with_raft_apply_kernel_on_full_domain",
+      "fns": [
+        "apply_advance",
+        "apply_advance_as_is_skip_holes"
+      ]
+    },
     {
       "id": "iter_window_merge",
       "finding": "RFC-0151 P1",
@@ -4037,27 +4785,97 @@
       ]
     },
     {
-      "id": "bench_gap_get_cost",
-      "finding": "public-only bench cost helpers (identical token stream kept as one clone)",
-      "a": "crates/pedradb-core/src/bench_gap_kernel.rs",
-      "b": "crates/pedradb-core/src/get_cost_kernel.rs",
+      "id": "peek_pin_journal_stream",
+      "finding": "F54",
+      "a": "crates/pedradb-journal/src/pin_kernel.rs",
+      "b": "crates/pedradb-stream/src/cursor_kernel.rs",
+      "agreement": "twin_agrees_with_journal_pin_kernel_on_full_domain",
       "fns": [
-        "line"
-      ],
-      "diverged": {
-        "from_token": "public bench helper, deliberately divergent",
-        "token": "public bench helper, deliberately divergent"
-      }
+        "peek_pins_cursor",
+        "peek_pins_cursor_as_is"
+      ]
     }
   ],
   "models": [
+    {
+      "crate": "pedradb-raft",
+      "test": "vote_model"
+    },
+    {
+      "crate": "pedradb-raft",
+      "test": "ae_model"
+    },
+    {
+      "crate": "pedradb-store",
+      "test": "txn_model"
+    },
+    {
+      "crate": "pedradb-journal",
+      "test": "pin_model"
+    },
     {
       "crate": "pedradb-core",
       "test": "recover_model"
     },
     {
+      "crate": "pedradb-dcs",
+      "test": "lease_model"
+    },
+    {
+      "crate": "pedradb-store",
+      "test": "compact_model"
+    },
+    {
       "crate": "pedradb-core",
       "test": "recover_choose"
+    },
+    {
+      "crate": "pedradb-store",
+      "test": "snapshot_model"
+    },
+    {
+      "crate": "pedradb-dcs",
+      "test": "apply_model"
+    },
+    {
+      "crate": "pedradb-raft",
+      "test": "commit_model"
+    },
+    {
+      "crate": "pedradb-raft",
+      "test": "joint_model"
+    },
+    {
+      "crate": "pedradb-raft",
+      "test": "joint_leave_model"
+    },
+    {
+      "crate": "pedradb-store",
+      "test": "si_model"
+    },
+    {
+      "crate": "pedradb-stream",
+      "test": "cursor_model"
+    },
+    {
+      "crate": "pedradb-http",
+      "test": "fail_closed_model"
+    },
+    {
+      "crate": "pedradb-http",
+      "test": "cl_model"
+    },
+    {
+      "crate": "pedradb-http",
+      "test": "form_model"
+    },
+    {
+      "crate": "pedradb-http",
+      "test": "path_model"
+    },
+    {
+      "crate": "pedradb-fold",
+      "test": "isolated_model"
     },
     {
       "crate": "pedradb-core",
@@ -4072,6 +4890,22 @@
       "test": "changelog_model"
     },
     {
+      "crate": "montanha-fdb-recipes",
+      "test": "pack_model"
+    },
+    {
+      "crate": "montanha-fdb-recipes",
+      "test": "children_model"
+    },
+    {
+      "crate": "montanha-fdb-recipes",
+      "test": "fields_model"
+    },
+    {
+      "crate": "pedradb-replicate",
+      "test": "ship_model"
+    },
+    {
       "crate": "pedradb-core",
       "test": "bloom_model"
     },
@@ -4082,6 +4916,26 @@
     {
       "crate": "pedradb-core",
       "test": "bloom_filter_model"
+    },
+    {
+      "crate": "pedradb-store",
+      "test": "si_read_model"
+    },
+    {
+      "crate": "pedradb-fold",
+      "test": "fold_range_model"
+    },
+    {
+      "crate": "pedradb-raft",
+      "test": "compose_model"
+    },
+    {
+      "crate": "pedradb-raft",
+      "test": "tcp_node_model"
+    },
+    {
+      "crate": "pedradb-core",
+      "test": "write_group_model"
     }
   ]
 }

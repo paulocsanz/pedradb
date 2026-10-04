@@ -124,15 +124,11 @@ impl<E: Env> Db<E> {
         let sst_payload_pool = Arc::new(crate::cache::SstPayloadPool::with_budget(
             opts.sst_payload_budget_bytes,
         ));
-        let plain_block_cache = Arc::new(crate::cache::PlainBlockCache::with_budget_bytes(
-            plain_block_budget_from_env(),
-        ));
         if let Some(src) = &source {
             sst_payload_pool.arm();
             table_cache.set_payload_kit(crate::cache::PayloadKit {
                 source: Arc::clone(src),
                 pool: Arc::clone(&sst_payload_pool),
-                plain: Arc::clone(&plain_block_cache),
             });
         }
         // Official YCSB records=4096 (zipfian). 2048 FIFO + sequential load
@@ -293,68 +289,68 @@ impl<E: Env> Db<E> {
                             (records, last_good)
                         }
                     }
+                    Err(CoreError::Truncated(0)) => {
+                        let len = env.metadata_len(&wal_path).unwrap_or(0);
+                        match crate::write_admission_kernel::open_wal_head_plan(true, true, len) {
+                            crate::write_admission_kernel::OpenWalHeadPlan::EmptyTiny
+                            | crate::write_admission_kernel::OpenWalHeadPlan::Skip => {
+                                (Vec::new(), 0)
+                            }
+                            crate::write_admission_kernel::OpenWalHeadPlan::RecoverSpan => {
+                                let escalated = crate::corrupt::escalate_or_fail(
+                                    &env,
+                                    &dir,
+                                    "truncated_head",
+                                    0,
+                                    CoreError::Truncated(0),
+                                );
+                                match crate::wal::reopen_kernel::reopen_outcome(
+                                    crate::wal::reopen_kernel::ReopenDamage::TruncatedHead,
+                                    opts.wal_recovery == WalRecovery::PointInTime,
+                                    matches!(escalated, CoreError::CorruptionEscalated { .. }),
+                                ) {
+                                    crate::wal::reopen_kernel::ReopenOutcome::ServePrefixReport => {
+                                        let (records, last_good, _prefix_err, _resync) =
+                                            Wal::recover_prefix_span_on(&env, &wal_path)?;
+                                        point_in_time_report = Some(RecoveryReport {
+                                            kind: "truncated_head",
+                                            corrupt_offset: 0,
+                                            good_through_offset: last_good,
+                                            discarded_bytes: len.saturating_sub(last_good),
+                                        });
+                                        (records, last_good)
+                                    }
+                                    _ => return Err(escalated),
+                                }
+                            }
+                        }
+                    }
                     Err(CoreError::Truncated(offset)) => {
                         let len = env.metadata_len(&wal_path).unwrap_or(0);
-                        if offset == 0 {
-                            match crate::write_admission_kernel::open_wal_head_plan(true, true, len) {
-                                crate::write_admission_kernel::OpenWalHeadPlan::EmptyTiny
-                                | crate::write_admission_kernel::OpenWalHeadPlan::Skip => {
-                                    (Vec::new(), 0)
-                                }
-                                crate::write_admission_kernel::OpenWalHeadPlan::RecoverSpan => {
-                                    let escalated = crate::corrupt::escalate_or_fail(
-                                        &env,
-                                        &dir,
-                                        "truncated_head",
-                                        0,
-                                        CoreError::Truncated(0),
-                                    );
-                                    match crate::wal::reopen_kernel::reopen_outcome(
-                                        crate::wal::reopen_kernel::ReopenDamage::TruncatedHead,
-                                        opts.wal_recovery == WalRecovery::PointInTime,
-                                        matches!(escalated, CoreError::CorruptionEscalated { .. }),
-                                    ) {
-                                        crate::wal::reopen_kernel::ReopenOutcome::ServePrefixReport => {
-                                            let (records, last_good, _prefix_err, _resync) =
-                                                Wal::recover_prefix_span_on(&env, &wal_path)?;
-                                            point_in_time_report = Some(RecoveryReport {
-                                                kind: "truncated_head",
-                                                corrupt_offset: 0,
-                                                good_through_offset: last_good,
-                                                discarded_bytes: len.saturating_sub(last_good),
-                                            });
-                                            (records, last_good)
-                                        }
-                                        _ => return Err(escalated),
-                                    }
-                                }
+                        let escalated = crate::corrupt::escalate_or_fail(
+                            &env,
+                            &dir,
+                            "truncated_tail",
+                            offset,
+                            CoreError::Truncated(offset),
+                        );
+                        match crate::wal::reopen_kernel::reopen_outcome(
+                            crate::wal::reopen_kernel::ReopenDamage::TruncatedTail,
+                            opts.wal_recovery == WalRecovery::PointInTime,
+                            matches!(escalated, CoreError::CorruptionEscalated { .. }),
+                        ) {
+                            crate::wal::reopen_kernel::ReopenOutcome::ServePrefixReport => {
+                                let (records, last_good, _prefix_err, _resync) =
+                                    Wal::recover_prefix_span_on(&env, &wal_path)?;
+                                point_in_time_report = Some(RecoveryReport {
+                                    kind: "truncated_tail",
+                                    corrupt_offset: offset,
+                                    good_through_offset: last_good,
+                                    discarded_bytes: len.saturating_sub(last_good),
+                                });
+                                (records, last_good)
                             }
-                        } else {
-                            let escalated = crate::corrupt::escalate_or_fail(
-                                &env,
-                                &dir,
-                                "truncated_tail",
-                                offset,
-                                CoreError::Truncated(offset),
-                            );
-                            match crate::wal::reopen_kernel::reopen_outcome(
-                                crate::wal::reopen_kernel::ReopenDamage::TruncatedTail,
-                                opts.wal_recovery == WalRecovery::PointInTime,
-                                matches!(escalated, CoreError::CorruptionEscalated { .. }),
-                            ) {
-                                crate::wal::reopen_kernel::ReopenOutcome::ServePrefixReport => {
-                                    let (records, last_good, _prefix_err, _resync) =
-                                        Wal::recover_prefix_span_on(&env, &wal_path)?;
-                                    point_in_time_report = Some(RecoveryReport {
-                                        kind: "truncated_tail",
-                                        corrupt_offset: offset,
-                                        good_through_offset: last_good,
-                                        discarded_bytes: len.saturating_sub(last_good),
-                                    });
-                                    (records, last_good)
-                                }
-                                _ => return Err(escalated),
-                            }
+                            _ => return Err(escalated),
                         }
                     }
                     Err(e @ CoreError::Crc { offset, .. }) => {
@@ -604,7 +600,6 @@ impl<E: Env> Db<E> {
             bulk_runs: HashMap::new(),
             parked_bulk: VecDeque::new(),
             parked_bulk_count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            cgroup_pressure_cache: std::sync::Mutex::new(None),
             bulk_encodings: Vec::new(),
             bulk_manifest_debt: 0,
             fold_pair_expected: None,
@@ -631,7 +626,6 @@ impl<E: Env> Db<E> {
             table_cache,
             block_cache,
             sst_payload_pool,
-            plain_block_cache,
             sst_source: source,
             sst_file_cache,
             sst_page_keep_budget: 0,
@@ -712,13 +706,14 @@ impl<E: Env> Db<E> {
             write_pressure_count: 0,
             max_ram_bytes: crate::ram_pressure_kernel::resolve_ram_budget(
                 None,
-                pedradb_posix::effective_memory_limit_bytes(),
+                pedradb_posix::total_physical_memory_bytes(),
             ),
             ram_pressure_throttle_count: 0,
             snapshot_pins: std::collections::BTreeMap::new(),
             snapshot_pin_times: std::collections::BTreeMap::new(),
             backpressure_config: crate::backpressure_kernel::BackpressureConfig::default(),
             compaction_pacer: crate::backpressure_kernel::CompactionIoPacer::new(0, 0),
+            pending_pacing_delay: None,
             next_snapshot_pin_id: 1,
             earliest_readable_seq,
             history: opts.history,
@@ -792,7 +787,7 @@ impl<E: Env> Db<E> {
         // so the armed pool bounds them too.
         if let Some(src) = &db.sst_source {
             for t in &db.ssts {
-                t.attach_payload_kit(src, &db.sst_payload_pool, &db.plain_block_cache);
+                t.attach_payload_kit(src, &db.sst_payload_pool);
             }
         }
         db.rebuild_sst_order();

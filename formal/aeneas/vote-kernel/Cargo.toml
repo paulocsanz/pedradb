@@ -1,0 +1,13 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-vote-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate whose src is the production vote_kernel (include!). Charon/Aeneas target."
+
+[lib]
+# Production file is the crate root — not a paraphrase / include!.
+path = "../../../crates/pedradb-raft/src/vote_kernel.rs"

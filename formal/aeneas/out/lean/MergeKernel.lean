@@ -196,7 +196,7 @@ def env_crash_kernel.CrashModel.of
   ok { written, synced := i }
 
 /-- [pedra_aeneas_merge_kernel::group_commit_kernel::fsync_promotes_pending]:
-    Source: 'src/lib.rs', lines 24:4-26:5
+    Source: 'src/lib.rs', lines 36:4-38:5
     Visibility: public -/
 def group_commit_kernel.fsync_promotes_pending
   (honest : Bool) : Result Bool := do
@@ -227,7 +227,7 @@ def env_crash_kernel.crash_legal
   else ok false
 
 /-- [pedra_aeneas_merge_kernel::key::ValueType]
-    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 31:0-40:1
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 35:0-44:1
     Visibility: public -/
 @[discriminant u8]
 inductive key.ValueType where
@@ -236,7 +236,7 @@ inductive key.ValueType where
 | RangeDeletion : key.ValueType
 
 /-- [pedra_aeneas_merge_kernel::key::InternalKey]
-    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 90:0-97:1
+    Source: 'src/../../../../crates/pedradb-core/src/key_kernel.rs', lines 94:0-101:1
     Visibility: public -/
 structure key.InternalKey where
   user_key : bytes.bytes.Bytes
@@ -244,7 +244,7 @@ structure key.InternalKey where
   kind : key.ValueType
 
 /-- [pedra_aeneas_merge_kernel::merge::RangeTombstone]
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 73:0-80:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 72:0-79:1
     Visibility: public -/
 structure merge.RangeTombstone where
   start : bytes.bytes.Bytes
@@ -252,7 +252,7 @@ structure merge.RangeTombstone where
   sequence : Std.U64
 
 /-- [pedra_aeneas_merge_kernel::merge::range_tombstone_covers]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 84:0-86:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 83:0-85:1
     Visibility: public -/
 def merge.range_tombstone_covers
   (start : Slice Std.U8) (end1 : Slice Std.U8) (key : Slice Std.U8) :
@@ -268,7 +268,7 @@ def merge.range_tombstone_covers
   else ok false
 
 /-- [pedra_aeneas_merge_kernel::merge::range_tombstone_covers_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 90:0-92:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 89:0-91:1
     Visibility: public -/
 def merge.range_tombstone_covers_as_is
   (start : Slice Std.U8) (_end : Slice Std.U8) (key : Slice Std.U8) :
@@ -277,7 +277,7 @@ def merge.range_tombstone_covers_as_is
   core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 key start
 
 /-- [pedra_aeneas_merge_kernel::merge::write_op_covers_key]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 99:0-104:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 98:0-103:1
     Visibility: public -/
 def merge.write_op_covers_key
   (kind : key.ValueType) (start : Slice Std.U8) (end1 : Slice Std.U8)
@@ -292,7 +292,7 @@ def merge.write_op_covers_key
   | .RangeDeletion => merge.range_tombstone_covers start end1 key
 
 /-- [pedra_aeneas_merge_kernel::merge::write_op_covers_key_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 108:0-113:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 107:0-112:1
     Visibility: public -/
 def merge.write_op_covers_key_as_is
   (kind : key.ValueType) (start : Slice Std.U8) (end1 : Slice Std.U8)
@@ -306,7 +306,7 @@ def merge.write_op_covers_key_as_is
     merge.range_tombstone_covers_as_is start end1 key
 
 /-- [pedra_aeneas_merge_kernel::merge::write_op_range_end]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 120:0-125:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 119:0-124:1
     Visibility: public -/
 def merge.write_op_range_end
   (kind : key.ValueType) (value : Slice Std.U8) :
@@ -318,7 +318,7 @@ def merge.write_op_range_end
   | key.ValueType.RangeDeletion => ok (some value)
 
 /-- [pedra_aeneas_merge_kernel::merge::write_op_range_end_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 131:0-133:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 130:0-132:1
     Visibility: public -/
 def merge.write_op_range_end_as_is
   (_kind : key.ValueType) (_value : Slice Std.U8) :
@@ -327,7 +327,7 @@ def merge.write_op_range_end_as_is
   ok none
 
 /-- [pedra_aeneas_merge_kernel::merge::visible_at]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 141:0-146:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 140:0-149:1
     Visibility: public -/
 def merge.visible_at
   (kind : key.ValueType) (range_hidden : Bool) : Result Bool := do
@@ -337,14 +337,14 @@ def merge.visible_at
   | key.ValueType.RangeDeletion => ok false
 
 /-- [pedra_aeneas_merge_kernel::merge::visible_at_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 150:0-152:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 153:0-155:1
     Visibility: public -/
 def merge.visible_at_as_is
   (_kind : key.ValueType) (_range_hidden : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_merge_kernel::merge::get_live]: loop body 0:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 167:4-173:5
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 170:4-176:5
     Visibility: public -/
 @[rust_loop_body]
 def merge.get_live_loop.body
@@ -367,7 +367,7 @@ def merge.get_live_loop.body
   else ok (done live)
 
 /-- [pedra_aeneas_merge_kernel::merge::get_live]: loop 0:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 167:4-173:5
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 170:4-176:5
     Visibility: public -/
 @[rust_loop]
 def merge.get_live_loop
@@ -381,7 +381,7 @@ def merge.get_live_loop
     (i, live, decided)
 
 /-- [pedra_aeneas_merge_kernel::merge::get_live]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 162:0-175:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 165:0-178:1
     Visibility: public -/
 def merge.get_live
   (kinds : Slice key.ValueType) (hiddens : Slice Bool) : Result Bool := do
@@ -391,14 +391,14 @@ def merge.get_live
   merge.get_live_loop kinds hiddens n 0#usize false false
 
 /-- [pedra_aeneas_merge_kernel::merge::get_live_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 179:0-181:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 182:0-184:1
     Visibility: public -/
 def merge.get_live_as_is
   (_kinds : Slice key.ValueType) (_hiddens : Slice Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_merge_kernel::write_admission_kernel::fence_on_sync_fail]:
-    Source: 'src/../../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 379:0-381:1
+    Source: 'src/../../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 373:0-375:1
     Visibility: public -/
 def write_admission_kernel.fence_on_sync_fail
   (sync_required : Bool) (sync_failed : Bool) : Result Bool := do
@@ -416,7 +416,7 @@ inductive write_admission_kernel.WalCommitPlan where
 | AppendSyncFence : write_admission_kernel.WalCommitPlan
 
 /-- [pedra_aeneas_merge_kernel::write_admission_kernel::wal_commit_plan]:
-    Source: 'src/../../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 394:0-396:1
+    Source: 'src/../../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 388:0-390:1
     Visibility: public -/
 def write_admission_kernel.wal_commit_plan
   (need_sync : Bool) (sync_failed : Bool) :
@@ -431,7 +431,7 @@ def write_admission_kernel.wal_commit_plan
     else ok write_admission_kernel.WalCommitPlan.AppendApplyOk
 
 /-- [pedra_aeneas_merge_kernel::write_admission_kernel::PutHandlerPlan]
-    Source: 'src/../../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 301:0-309:1
+    Source: 'src/../../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 299:0-307:1
     Visibility: public -/
 @[discriminant isize]
 inductive write_admission_kernel.PutHandlerPlan where
@@ -446,7 +446,7 @@ def write_admission_kernel.batch_is_empty (n : Std.U64) : Result Bool := do
   ok (n = 0#u64)
 
 /-- [pedra_aeneas_merge_kernel::write_admission_kernel::put_handler_plan]:
-    Source: 'src/../../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 315:0-323:1
+    Source: 'src/../../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 313:0-321:1
     Visibility: public -/
 def write_admission_kernel.put_handler_plan
   (n_records : Std.U64) (commit_failed : Bool) :
@@ -461,7 +461,7 @@ def write_admission_kernel.put_handler_plan
     else ok write_admission_kernel.PutHandlerPlan.CommitThenFlush
 
 /-- [pedra_aeneas_merge_kernel::wal::recover_kernel::RecoverAct]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 70:0-81:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:0-80:1
     Visibility: public -/
 @[discriminant isize]
 inductive wal.recover_kernel.RecoverAct where
@@ -472,7 +472,7 @@ inductive wal.recover_kernel.RecoverAct where
 | FailStop : wal.recover_kernel.RecoverAct
 
 /-- [pedra_aeneas_merge_kernel::wal::recover_kernel::RecoverKind]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 43:0-66:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 42:0-65:1
     Visibility: public -/
 @[discriminant isize]
 inductive wal.recover_kernel.RecoverKind where
@@ -487,7 +487,7 @@ inductive wal.recover_kernel.RecoverKind where
 | Other : wal.recover_kernel.RecoverKind
 
 /-- [pedra_aeneas_merge_kernel::wal::recover_kernel::MAX_CONSECUTIVE_SKIPS]
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 39:0-39:55
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 38:0-38:55
     Visibility: public -/
 @[global_simps, irreducible]
 def wal.recover_kernel.MAX_CONSECUTIVE_SKIPS : Result Std.U64 := do
@@ -495,7 +495,7 @@ def wal.recover_kernel.MAX_CONSECUTIVE_SKIPS : Result Std.U64 := do
   i * 1024#u64
 
 /-- [pedra_aeneas_merge_kernel::wal::recover_kernel::recover_collect_act]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 182:0-230:1
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 181:0-229:1
     Visibility: public -/
 def wal.recover_kernel.recover_collect_act
   (kind : wal.recover_kernel.RecoverKind) (prefix_n : Std.U64)
@@ -566,7 +566,7 @@ def wal.recover_kernel.recover_collect_act
     ok wal.recover_kernel.RecoverAct.FailStop
 
 /-- [pedra_aeneas_merge_kernel::wal::recover_kernel::{impl core::cmp::PartialEq<pedra_aeneas_merge_kernel::wal::recover_kernel::RecoverAct> for pedra_aeneas_merge_kernel::wal::recover_kernel::RecoverAct}::eq]:
-    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 69:29-69:38
+    Source: 'src/../../../../crates/pedradb-core/src/wal/recover_kernel.rs', lines 68:29-68:38
     Visibility: public -/
 def wal.recover_kernel.RecoverAct.Insts.CoreCmpPartialEqRecoverAct.eq
   (self : wal.recover_kernel.RecoverAct)
@@ -578,7 +578,7 @@ def wal.recover_kernel.RecoverAct.Insts.CoreCmpPartialEqRecoverAct.eq
   ok (self1 = other1)
 
 /-- [pedra_aeneas_merge_kernel::merge::put_crash_reopen_survives]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 187:0-221:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 190:0-226:1
     Visibility: public -/
 def merge.put_crash_reopen_survives
   (n_records : Std.U64) (commit_failed : Bool) (need_sync : Bool)
@@ -629,7 +629,7 @@ def merge.put_crash_reopen_survives
   else ok true
 
 /-- [pedra_aeneas_merge_kernel::merge::put_crash_reopen_survives_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 225:0-238:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 230:0-243:1
     Visibility: public -/
 def merge.put_crash_reopen_survives_as_is
   (_n_records : Std.U64) (_commit_failed : Bool) (_need_sync : Bool)
@@ -641,19 +641,19 @@ def merge.put_crash_reopen_survives_as_is
   merge.get_live kinds hiddens
 
 /-- [pedra_aeneas_merge_kernel::merge::iter_window_keep]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 245:0-247:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 250:0-252:1
     Visibility: public -/
 def merge.iter_window_keep (snapshot_live : Bool) : Result Bool := do
   ok snapshot_live
 
 /-- [pedra_aeneas_merge_kernel::merge::iter_window_keep_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 251:0-253:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 256:0-258:1
     Visibility: public -/
 def merge.iter_window_keep_as_is (_snapshot_live : Bool) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_merge_kernel::merge::SiftStep]
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 260:0-267:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 265:0-272:1
     Visibility: public -/
 @[discriminant isize]
 inductive merge.SiftStep where
@@ -662,7 +662,7 @@ inductive merge.SiftStep where
 | SwapRight : merge.SiftStep
 
 /-- [pedra_aeneas_merge_kernel::merge::sift_step]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 274:0-282:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 279:0-287:1
     Visibility: public -/
 def merge.sift_step
   (r_exists : Bool) (r_lt_l : Bool) (best_lt_hole : Bool) :
@@ -679,7 +679,7 @@ def merge.sift_step
   else ok merge.SiftStep.Stay
 
 /-- [pedra_aeneas_merge_kernel::merge::sift_step_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 287:0-289:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 292:0-294:1
     Visibility: public -/
 def merge.sift_step_as_is
   (_r_exists : Bool) (_r_lt_l : Bool) (_best_lt_hole : Bool) :
@@ -688,7 +688,7 @@ def merge.sift_step_as_is
   ok merge.SiftStep.Stay
 
 /-- [pedra_aeneas_merge_kernel::merge::user_key_in_range]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 301:0-313:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 306:0-318:1
     Visibility: public -/
 def merge.user_key_in_range
   (user_key : Slice Std.U8) (start : core.ops.range.Bound (Slice Std.U8))
@@ -718,7 +718,7 @@ def merge.user_key_in_range
   else ok false
 
 /-- [pedra_aeneas_merge_kernel::merge::past_end]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 318:0-324:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 323:0-329:1
     Visibility: public -/
 def merge.past_end
   (user_key : Slice Std.U8) (end1 : core.ops.range.Bound (Slice Std.U8)) :
@@ -734,7 +734,7 @@ def merge.past_end
   | core.ops.range.Bound.Unbounded => ok false
 
 /-- [pedra_aeneas_merge_kernel::merge::StreamingVisibleIter]
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 457:0-476:1
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 462:0-481:1
     Visibility: public -/
 structure merge.StreamingVisibleIter where
   heap : alloc.vec.Vec Std.Usize
@@ -750,13 +750,13 @@ structure merge.StreamingVisibleIter where
   skip_user : Option (alloc.vec.Vec Std.U8)
 
 /-- [pedra_aeneas_merge_kernel::merge::streaming_visible_iter_emitted]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 482:0-484:1 -/
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 487:0-489:1 -/
 def merge.streaming_visible_iter_emitted
   (it : merge.StreamingVisibleIter) : Result Std.Usize := do
   ok it.emitted
 
 /-- [pedra_aeneas_merge_kernel::merge::bound_to_owned]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 834:0-840:1 -/
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 839:0-845:1 -/
 def merge.bound_to_owned
   (b : core.ops.range.Bound (Slice Std.U8)) :
   Result (core.ops.range.Bound bytes.bytes.Bytes)
@@ -771,7 +771,7 @@ def merge.bound_to_owned
   | core.ops.range.Bound.Unbounded => ok core.ops.range.Bound.Unbounded
 
 /-- [pedra_aeneas_merge_kernel::merge::bound_as_ref]:
-    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 842:0-848:1 -/
+    Source: 'src/../../../../crates/pedradb-core/src/merge_kernel.rs', lines 847:0-853:1 -/
 def merge.bound_as_ref
   (b : core.ops.range.Bound bytes.bytes.Bytes) :
   Result (core.ops.range.Bound (Slice Std.U8))

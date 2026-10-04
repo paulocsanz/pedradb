@@ -147,7 +147,8 @@ pub trait EnvFile: Read + Write + Seek {
     ///
     /// # Errors
     /// Underlying I/O.
-    fn write_wal(&mut self, buf: &[u8], _at: u64) -> io::Result<()> {
+    fn write_wal(&mut self, buf: &[u8], at: u64) -> io::Result<()> {
+        self.seek(SeekFrom::Start(at))?;
         self.write_all(buf)
     }
 
@@ -1152,6 +1153,14 @@ mod tests {
             "fdatasync p50 {p50:?} ≤ {budget_2x_a:?} — P1.2 1c A would be open on this box"
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_env_file_write_wal_seeks_at_red_to_green() {
+        let mut cur = std::io::Cursor::new(vec![0u8; 32]);
+        cur.write_wal(b"ABCD", 10).unwrap();
+        assert_eq!(&cur.get_ref()[10..14], b"ABCD");
+        assert_eq!(&cur.get_ref()[0..4], &[0, 0, 0, 0]);
     }
 }
 

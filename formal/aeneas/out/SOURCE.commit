@@ -1,0 +1,4 @@
+path=crates/pedradb-raft/src/commit_kernel.rs
+sha256=97edb3f387dad3ca99490e2a0071ce1703448b595a7ec815f4151a5cdee4d66d
+aeneas=f5a4c58-dirty
+charon=0.1.232

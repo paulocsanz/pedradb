@@ -48,6 +48,16 @@ pub struct PrefixComparator {
     pub prefix_len: usize,
 }
 
+impl PrefixComparator {
+    /// Creates a prefix comparator with prefix length validation.
+    pub fn try_new(prefix_len: usize) -> Result<Self, ComparatorAxiomViolation> {
+        if prefix_len == 0 {
+            return Err(ComparatorAxiomViolation::ZeroPrefixLength);
+        }
+        Ok(Self { prefix_len })
+    }
+}
+
 impl KeyComparator for PrefixComparator {
     fn compare(&self, a: &[u8], b: &[u8]) -> Ordering {
         let a_prefix = &a[..a.len().min(self.prefix_len)];
@@ -89,7 +99,38 @@ pub enum ComparatorAxiomViolation {
         /// Third key.
         key_c: Vec<u8>,
     },
+    /// Sample set provided for axiomatic verification is empty.
+    EmptySampleSet,
+    /// Prefix length for prefix comparator cannot be zero.
+    ZeroPrefixLength,
 }
+
+impl std::fmt::Display for ComparatorAxiomViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IrreflexivityViolated { key } => write!(
+                f,
+                "Irreflexivity axiom violated: key {key:?} < itself returned true"
+            ),
+            Self::AsymmetryViolated { key_a, key_b } => write!(
+                f,
+                "Asymmetry axiom violated: both {key_a:?} < {key_b:?} and {key_b:?} < {key_a:?} are true"
+            ),
+            Self::OrderTransitivityViolated { key_a, key_b, key_c } => write!(
+                f,
+                "Order transitivity violated: {key_a:?} < {key_b:?} and {key_b:?} < {key_c:?}, but not ({key_a:?} < {key_c:?})"
+            ),
+            Self::EquivalenceTransitivityViolated { key_a, key_b, key_c } => write!(
+                f,
+                "Equivalence transitivity violated: {key_a:?} ~ {key_b:?} and {key_b:?} ~ {key_c:?}, but not ({key_a:?} ~ {key_c:?})"
+            ),
+            Self::EmptySampleSet => write!(f, "Sample set for comparator axiom verification is empty"),
+            Self::ZeroPrefixLength => write!(f, "Prefix length cannot be zero"),
+        }
+    }
+}
+
+impl std::error::Error for ComparatorAxiomViolation {}
 
 /// Verification engine for comparator axioms.
 pub struct AxiomaticComparatorVerifier;
@@ -103,6 +144,9 @@ impl AxiomaticComparatorVerifier {
         cmp: &C,
         samples: &[Vec<u8>],
     ) -> Result<(), ComparatorAxiomViolation> {
+        if samples.is_empty() {
+            return Err(ComparatorAxiomViolation::EmptySampleSet);
+        }
         let n = samples.len();
 
         // 1. Irreflexivity: ∀ a: ¬(a < a)
@@ -179,5 +223,24 @@ impl AxiomaticComparatorVerifier {
             b"keyboard".to_vec(),            // Prefix extension
             vec![0xFF, 0x00, 0x7F, 0x80],    // Mixed boundary bytes
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_comparator_axiom_bounds_red_to_green() {
+        assert_eq!(
+            PrefixComparator::try_new(0).err(),
+            Some(ComparatorAxiomViolation::ZeroPrefixLength)
+        );
+
+        let cmp = ByteLexicographicalComparator;
+        assert_eq!(
+            AxiomaticComparatorVerifier::verify_strict_weak_ordering(&cmp, &[]).err(),
+            Some(ComparatorAxiomViolation::EmptySampleSet)
+        );
     }
 }

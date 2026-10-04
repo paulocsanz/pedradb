@@ -214,12 +214,12 @@ def alloc.string.String.Insts.CoreConvertFromShared0Str : core.convert.From
 }
 
 /-- [pedra_aeneas_cf_kernel::cf_family_of::closure]
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 26:35-26:46 -/
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 25:35-25:46 -/
 @[reducible]
 def cf_family_of.closure := Unit
 
 /-- [pedra_aeneas_cf_kernel::cf_family_of::{impl core::ops::function::FnMut<(&'_ u8,), bool> for pedra_aeneas_cf_kernel::cf_family_of::closure}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 26:35-26:46 -/
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 25:35-25:46 -/
 def cf_family_of.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool.call_mut
   (c : cf_family_of.closure) (tupled_args : Std.U8) :
   Result (Bool × cf_family_of.closure)
@@ -227,7 +227,7 @@ def cf_family_of.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool.call_mut
   ok (tupled_args = 0#u8, c)
 
 /-- [pedra_aeneas_cf_kernel::cf_family_of::{impl core::ops::function::FnOnce<(&'_ u8,), bool> for pedra_aeneas_cf_kernel::cf_family_of::closure}::call_once]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 26:35-26:46 -/
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 25:35-25:46 -/
 def cf_family_of.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool.call_once
   (c : cf_family_of.closure) (i : Std.U8) : Result Bool := do
   let (b, _) ←
@@ -236,7 +236,7 @@ def cf_family_of.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool.call_once
   ok b
 
 /-- Trait implementation: [pedra_aeneas_cf_kernel::cf_family_of::{impl core::ops::function::FnOnce<(&'_ u8,), bool> for pedra_aeneas_cf_kernel::cf_family_of::closure}]
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 26:35-26:46 -/
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 25:35-25:46 -/
 @[reducible]
 def cf_family_of.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool :
   core.ops.function.FnOnce cf_family_of.closure Std.U8 Bool := {
@@ -245,7 +245,7 @@ def cf_family_of.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool :
 }
 
 /-- Trait implementation: [pedra_aeneas_cf_kernel::cf_family_of::{impl core::ops::function::FnMut<(&'_ u8,), bool> for pedra_aeneas_cf_kernel::cf_family_of::closure}]
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 26:35-26:46 -/
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 25:35-25:46 -/
 @[reducible]
 def cf_family_of.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool :
   core.ops.function.FnMut cf_family_of.closure Std.U8 Bool := {
@@ -256,7 +256,7 @@ def cf_family_of.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool :
 }
 
 /-- [pedra_aeneas_cf_kernel::cf_family_of]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 25:0-30:1
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 24:0-29:1
     Visibility: public -/
 def cf_family_of (user_key : Slice Std.U8) : Result String := do
   let i ← core.slice.Slice.iter user_key
@@ -280,13 +280,20 @@ def cf_family_of (user_key : Slice Std.U8) : Result String := do
       core.convert.IntoFrom.into
         alloc.string.String.Insts.CoreConvertFromShared0Str (toStr "default")
 
+/-- [pedra_aeneas_cf_kernel::cf_family_of_as_is]:
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 33:0-35:1
+    Visibility: public -/
+def cf_family_of_as_is (_user_key : Slice Std.U8) : Result String := do
+  core.convert.IntoFrom.into
+    alloc.string.String.Insts.CoreConvertFromShared0Str (toStr "default")
+
 /-- [pedra_aeneas_cf_kernel::key_in_cf_family::closure]
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 43:39-43:50 -/
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 42:39-42:50 -/
 @[reducible]
 def key_in_cf_family.closure := Unit
 
 /-- [pedra_aeneas_cf_kernel::key_in_cf_family::{impl core::ops::function::FnMut<(&'_ u8,), bool> for pedra_aeneas_cf_kernel::key_in_cf_family::closure}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 43:39-43:50 -/
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 42:39-42:50 -/
 def
   key_in_cf_family.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool.call_mut
   (c : key_in_cf_family.closure) (tupled_args : Std.U8) :
@@ -295,7 +302,7 @@ def
   ok (tupled_args = 0#u8, c)
 
 /-- [pedra_aeneas_cf_kernel::key_in_cf_family::{impl core::ops::function::FnOnce<(&'_ u8,), bool> for pedra_aeneas_cf_kernel::key_in_cf_family::closure}::call_once]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 43:39-43:50 -/
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 42:39-42:50 -/
 def
   key_in_cf_family.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool.call_once
   (c : key_in_cf_family.closure) (i : Std.U8) : Result Bool := do
@@ -305,7 +312,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_cf_kernel::key_in_cf_family::{impl core::ops::function::FnOnce<(&'_ u8,), bool> for pedra_aeneas_cf_kernel::key_in_cf_family::closure}]
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 43:39-43:50 -/
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 42:39-42:50 -/
 @[reducible]
 def key_in_cf_family.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool :
   core.ops.function.FnOnce key_in_cf_family.closure Std.U8 Bool := {
@@ -314,7 +321,7 @@ def key_in_cf_family.closure.Insts.CoreOpsFunctionFnOnceTupleSharedU8Bool :
 }
 
 /-- Trait implementation: [pedra_aeneas_cf_kernel::key_in_cf_family::{impl core::ops::function::FnMut<(&'_ u8,), bool> for pedra_aeneas_cf_kernel::key_in_cf_family::closure}]
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 43:39-43:50 -/
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 42:39-42:50 -/
 @[reducible]
 def key_in_cf_family.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool :
   core.ops.function.FnMut key_in_cf_family.closure Std.U8 Bool := {
@@ -325,7 +332,7 @@ def key_in_cf_family.closure.Insts.CoreOpsFunctionFnMutTupleSharedU8Bool :
 }
 
 /-- [pedra_aeneas_cf_kernel::key_in_cf_family]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 41:0-51:1
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 40:0-50:1
     Visibility: public -/
 def key_in_cf_family
   (user_key : Slice Std.U8) (family : Str) : Result Bool := do
@@ -367,23 +374,27 @@ def key_in_cf_family
     else ok false
 
 /-- [pedra_aeneas_cf_kernel::key_in_cf_family_as_is]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 55:0-57:1
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 54:0-56:1
     Visibility: public -/
 def key_in_cf_family_as_is
   (_user_key : Slice Std.U8) (_family : Str) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_cf_kernel::cf_encode_effective]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 61:0-67:1
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 60:0-66:1
     Visibility: public -/
 def cf_encode_effective (cf : Str) (default_raw : Bool) : Result Str := do
-  let b ← Str.Insts.CoreCmpPartialEqStr.eq cf (toStr "default")
-  if b && default_raw
-  then ok (toStr "")
-  else ok cf
+  sorry
+
+/-- [pedra_aeneas_cf_kernel::cf_encode_effective_as_is]:
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 70:0-72:1
+    Visibility: public -/
+def cf_encode_effective_as_is
+  (_cf : Str) (_default_raw : Bool) : Result Str := do
+  ok _cf
 
 /-- [pedra_aeneas_cf_kernel::encode_cf_key]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 77:0-87:1
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 76:0-86:1
     Visibility: public -/
 def encode_cf_key
   (cf : Str) (key : Slice Std.U8) (default_raw : Bool) :
@@ -404,30 +415,35 @@ def encode_cf_key
     let out2 ← alloc.vec.Vec.push out1 0#u8
     alloc.vec.Vec.extend_from_slice core.clone.CloneU8 out2 key
 
+/-- [pedra_aeneas_cf_kernel::encode_cf_key_as_is]:
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 90:0-92:1
+    Visibility: public -/
+def encode_cf_key_as_is
+  (_cf : Str) (_key : Slice Std.U8) (_default_raw : Bool) :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  alloc.slice.Slice.to_vec core.clone.CloneU8 _key
+
 /-- [pedra_aeneas_cf_kernel::decode_cf_key]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 98:0-104:1
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 97:0-103:1
     Visibility: public -/
 def decode_cf_key
   (cf : Str) (encoded : Slice Std.U8) (default_raw : Bool) :
   Result (Slice Std.U8)
   := do
-  let effective ← cf_encode_effective cf default_raw
-  let b ← core.str.Str.is_empty effective
-  if b
-  then ok encoded
-  else
-    let i ← core.str.Str.len effective
-    let i1 ← i + 1#usize
-    let n := Slice.len encoded
-    if i1 > n
-    then lift (Array.to_slice (Std.Array.empty Std.U8))
-    else
-      core.slice.index.Slice.index
-        (core.slice.index.SliceIndexRangeFromUsizeSlice Std.U8) encoded
-        { start := i1 }
+  sorry
+
+/-- [pedra_aeneas_cf_kernel::decode_cf_key_as_is]:
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 107:0-109:1
+    Visibility: public -/
+def decode_cf_key_as_is
+  (_cf : Str) (_encoded : Slice Std.U8) (_default_raw : Bool) :
+  Result (Slice Std.U8)
+  := do
+  ok _encoded
 
 /-- [pedra_aeneas_cf_kernel::infer_sst_cf]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 114:0-128:1
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 113:0-127:1
     Visibility: public -/
 def infer_sst_cf
   (smallest : Option (Slice Std.U8)) (largest : Option (Slice Std.U8)) :
@@ -449,8 +465,18 @@ def infer_sst_cf
       then ok a
       else alloc.string.String.new
 
+/-- [pedra_aeneas_cf_kernel::infer_sst_cf_as_is]:
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 132:0-134:1
+    Visibility: public -/
+def infer_sst_cf_as_is
+  (_smallest : Option (Slice Std.U8)) (_largest : Option (Slice Std.U8)) :
+  Result String
+  := do
+  core.convert.IntoFrom.into
+    alloc.string.String.Insts.CoreConvertFromShared0Str (toStr "default")
+
 /-- [pedra_aeneas_cf_kernel::compact_rewrites_sst_cf]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 142:0-147:1
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 141:0-146:1
     Visibility: public -/
 def compact_rewrites_sst_cf (sst_cf : Str) (family : Str) : Result Bool := do
   let b ← core.str.Str.is_empty sst_cf
@@ -463,7 +489,7 @@ def compact_rewrites_sst_cf (sst_cf : Str) (family : Str) : Result Bool := do
     key_in_cf_family s1 family
 
 /-- [pedra_aeneas_cf_kernel::compact_rewrites_sst_cf_as_is]:
-    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 151:0-153:1
+    Source: '../../../crates/pedradb-core/src/cf_kernel.rs', lines 150:0-152:1
     Visibility: public -/
 def compact_rewrites_sst_cf_as_is
   (_sst_cf : Str) (_family : Str) : Result Bool := do

@@ -5,7 +5,7 @@
 //! is the term — not a collision theorem (`crc_collision_admitted` stays
 //! false; `never_floor` keeps `R-crc`).
 //!
-//!   ./scripts/verus_crc_match.sh
+//!   cargo xtask verus crc_match
 //!
 //! RocksDB does not store the raw CRC32C in a record header; it applies a
 //! reversible mask so that data containing pre-existing valid checksums is

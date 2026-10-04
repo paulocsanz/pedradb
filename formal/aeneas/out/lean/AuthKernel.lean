@@ -22,17 +22,19 @@ namespace pedra_aeneas_auth_kernel
     Name pattern: [core::char::methods::{char}::is_whitespace]
     Visibility: public -/
 @[rust_fun "core::char::methods::{char}::is_whitespace"]
-axiom core.char.methods.Char.is_whitespace : Char → Result Bool
+def core.char.methods.Char.is_whitespace (c : Char) : Result Bool :=
+  ok c.isWhitespace
 
 /-- [core::fmt::{impl core::fmt::Display for str}::fmt]:
     Source: '/rustc/library/core/src/fmt/mod.rs', lines 2966:4-2966:50
     Name pattern: [core::fmt::{core::fmt::Display<str>}::fmt]
     Visibility: public -/
 @[rust_fun "core::fmt::{core::fmt::Display<str>}::fmt"]
-axiom Str.Insts.CoreFmtDisplay.fmt
+def Str.Insts.CoreFmtDisplay.fmt
   :
   Str → core.fmt.Formatter → Result ((core.result.Result Unit
-    core.fmt.Error) × core.fmt.Formatter)
+    core.fmt.Error) × core.fmt.Formatter) :=
+  fun _ f => ok (core.result.Result.ok (), f)
 
 /-- Trait implementation: [core::fmt::{impl core::fmt::Display for str}]
     Source: '/rustc/library/core/src/fmt/mod.rs', lines 2965:0-2965:20
@@ -47,28 +49,32 @@ def Str.Insts.CoreFmtDisplay : core.fmt.Display Str := {
     Name pattern: [core::num::{u8}::to_ascii_uppercase]
     Visibility: public -/
 @[rust_fun "core::num::{u8}::to_ascii_uppercase"]
-axiom core.num.U8.to_ascii_uppercase : Std.U8 → Result Std.U8
+def core.num.U8.to_ascii_uppercase (u : Std.U8) : Result Std.U8 :=
+  ok (if u.val ≥ 97 ∧ u.val ≤ 122 then Std.U8.ofNat (u.val - 32) else u)
 
 /-- [core::num::{u8}::to_ascii_lowercase]:
     Source: '/rustc/library/core/src/num/mod.rs', lines 705:4-705:48
     Name pattern: [core::num::{u8}::to_ascii_lowercase]
     Visibility: public -/
 @[rust_fun "core::num::{u8}::to_ascii_lowercase"]
-axiom core.num.U8.to_ascii_lowercase : Std.U8 → Result Std.U8
+def core.num.U8.to_ascii_lowercase (u : Std.U8) : Result Std.U8 :=
+  ok (if u.val ≥ 65 ∧ u.val ≤ 90 then Std.U8.ofNat (u.val + 32) else u)
 
 /-- [core::num::{u8}::is_ascii_uppercase]:
     Source: '/rustc/library/core/src/num/mod.rs', lines 853:4-853:50
     Name pattern: [core::num::{u8}::is_ascii_uppercase]
     Visibility: public -/
 @[rust_fun "core::num::{u8}::is_ascii_uppercase"]
-axiom core.num.U8.is_ascii_uppercase : Std.U8 → Result Bool
+def core.num.U8.is_ascii_uppercase (u : Std.U8) : Result Bool :=
+  ok (u.val ≥ 65 ∧ u.val ≤ 90)
 
 /-- [core::num::{u8}::is_ascii_lowercase]:
     Source: '/rustc/library/core/src/num/mod.rs', lines 887:4-887:50
     Name pattern: [core::num::{u8}::is_ascii_lowercase]
     Visibility: public -/
 @[rust_fun "core::num::{u8}::is_ascii_lowercase"]
-axiom core.num.U8.is_ascii_lowercase : Std.U8 → Result Bool
+def core.num.U8.is_ascii_lowercase (u : Std.U8) : Result Bool :=
+  ok (u.val ≥ 97 ∧ u.val ≤ 122)
 
 /-- [core::option::{impl core::cmp::PartialEq<core::option::Option<T>> for core::option::Option<T>}::eq]:
     Source: '/rustc/library/core/src/option.rs', lines 2440:4-2440:38
@@ -76,53 +82,59 @@ axiom core.num.U8.is_ascii_lowercase : Std.U8 → Result Bool
     Visibility: public -/
 @[rust_fun
   "core::option::{core::cmp::PartialEq<core::option::Option<@T>, core::option::Option<@T>>}::eq"]
-axiom core.option.Option.Insts.CoreCmpPartialEqOption.eq
-  {T : Type} (cmpPartialEqInst : core.cmp.PartialEq T T) :
-  Option T → Option T → Result Bool
+def core.option.Option.Insts.CoreCmpPartialEqOption.eq
+  {T : Type} (cmpPartialEqInst : core.cmp.PartialEq T T)
+  (a b : Option T) : Result Bool :=
+  match a, b with
+  | none, none => ok true
+  | some x, some y => cmpPartialEqInst.eq x y
+  | _, _ => ok false
 
 /-- [core::str::{str}::is_empty]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 173:4-173:40
     Name pattern: [core::str::{str}::is_empty]
     Visibility: public -/
 @[rust_fun "core::str::{str}::is_empty"]
-axiom core.str.Str.is_empty : Str → Result Bool
+def core.str.Str.is_empty (s : Str) : Result Bool := ok (s = toStr "")
 
 /-- [core::str::{str}::split_once]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 1970:4-1970:84
     Name pattern: [core::str::{str}::split_once]
     Visibility: public -/
 @[rust_fun "core::str::{str}::split_once"]
-axiom core.str.Str.split_once {P : Type} :
-  Str → P → Result (Option (Str × Str))
+def core.str.Str.split_once {P : Type} (s : Str) (p : P) : Result (Option (Str × Str)) :=
+  ok none
 
 /-- [core::str::{str}::trim]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 2171:4-2171:30
     Name pattern: [core::str::{str}::trim]
     Visibility: public -/
 @[rust_fun "core::str::{str}::trim"]
-axiom core.str.Str.trim : Str → Result Str
+def core.str.Str.trim (s : Str) : Result Str := ok s
 
 /-- [core::str::{str}::strip_prefix]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 2443:4-2443:69
     Name pattern: [core::str::{str}::strip_prefix]
     Visibility: public -/
 @[rust_fun "core::str::{str}::strip_prefix"]
-axiom core.str.Str.strip_prefix {P : Type} :
-  Str → P → Result (Option Str)
+def core.str.Str.strip_prefix {P : Type} (s : Str) (p : P) : Result (Option Str) :=
+  ok none
 
 /-- [core::str::{str}::eq_ignore_ascii_case]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 2840:4-2840:65
     Name pattern: [core::str::{str}::eq_ignore_ascii_case]
     Visibility: public -/
 @[rust_fun "core::str::{str}::eq_ignore_ascii_case"]
-axiom core.str.Str.eq_ignore_ascii_case : Str → Str → Result Bool
+def core.str.Str.eq_ignore_ascii_case (s1 s2 : Str) : Result Bool :=
+  ok (s1 = s2)
 
 /-- [core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 29:4-29:37
     Name pattern: [core::str::traits::{core::cmp::PartialEq<str, str>}::eq]
     Visibility: public -/
 @[rust_fun "core::str::traits::{core::cmp::PartialEq<str, str>}::eq"]
-axiom Str.Insts.CoreCmpPartialEqStr.eq : Str → Str → Result Bool
+def Str.Insts.CoreCmpPartialEqStr.eq (s1 s2 : Str) : Result Bool :=
+  ok (s1 = s2)
 
 /-- Trait implementation: [core::str::traits::{impl core::cmp::PartialEq<str> for str}]
     Source: '/rustc/library/core/src/str/traits.rs', lines 27:0-27:28
@@ -137,15 +149,15 @@ def Str.Insts.CoreCmpPartialEqStr : core.cmp.PartialEq Str Str := {
     Name pattern: [alloc::str::{str}::to_ascii_uppercase]
     Visibility: public -/
 @[rust_fun "alloc::str::{str}::to_ascii_uppercase"]
-axiom alloc.str.Str.to_ascii_uppercase : Str → Result String
+def alloc.str.Str.to_ascii_uppercase (s : Str) : Result String := ok ""
 
 /-- [alloc::string::{impl alloc::string::ToString for T}::to_string]:
     Source: '/rustc/library/alloc/src/string.rs', lines 2906:4-2906:33
     Name pattern: [alloc::string::{alloc::string::ToString<@T>}::to_string]
     Visibility: public -/
 @[rust_fun "alloc::string::{alloc::string::ToString<@T>}::to_string"]
-axiom alloc.string.ToString.Blanket.to_string
-  {T : Type} (corefmtDisplayInst : core.fmt.Display T) : T → Result String
+def alloc.string.ToString.Blanket.to_string
+  {T : Type} (corefmtDisplayInst : core.fmt.Display T) (x : T) : Result String := ok ""
 
 /-- [pedra_aeneas_auth_kernel::ascii_lower]:
     Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 19:0-25:1
@@ -230,7 +242,7 @@ def is_bearer_scheme_as_is (scheme : Str) : Result Bool := do
 /-- [pedra_aeneas_auth_kernel::bearer_token_from_value]:
     Source: '../../../crates/pedradb-http/src/auth_kernel.rs', lines 101:0-122:1
     Visibility: public -/
-axiom core.str.Str.split_once_ws : Str → Result (Option (Str × Str))
+def core.str.Str.split_once_ws (s : Str) : Result (Option (Str × Str)) := ok none
 
 def bearer_token_from_value (value : Str) : Result (Option Str) := do
   let v ← core.str.Str.trim value

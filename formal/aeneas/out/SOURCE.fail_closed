@@ -1,0 +1,4 @@
+path=crates/pedradb-http/src/fail_closed_kernel.rs
+sha256=9577e3f836b244d8c49b4e8d583aa9771af8bef0c6225e65913fa63bdc1fa1d5
+aeneas=daa85d7
+charon=0.1.232

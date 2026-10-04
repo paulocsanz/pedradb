@@ -21,16 +21,16 @@
 //!
 //! Single artifact (Aeneas-paid): the rustc body this crate links IS the
 //! proof term — theorems over the Charon+Aeneas extract
-//! (`./scripts/aeneas_compact.sh`, `CompactKernel.lean` without `sorry`;
+//! (`cargo xtask aeneas compact`, `CompactKernel.lean` without `sorry`;
 //! spec page: `docs/formal/crash-dictionary.md`, compaction section).
 
 #![forbid(unsafe_code)]
 
 //! **Term:** this file is what `rustc` links. Aeneas extracts that body
-//! (`scripts/aeneas_compact.sh`). A 3-arg Verus compact_pick is not
+//! (`cargo xtask aeneas compact`). A 3-arg Verus compact_pick is not
 //! last-wins of rustc 4-arg `compact_pick` (deleted).
 //!
-//!   ./scripts/aeneas_compact.sh --required
+//!   cargo xtask aeneas compact --required
 
 /// Target size of one merged compaction output SST (the Rocks
 /// `target_file_size_base` role). The SST writer buffers one output

@@ -4,7 +4,7 @@
 //! what the Lean theorems run over — Charon+Aeneas extract of these exact
 //! bodies. No Verus twin stands in for them.
 //!
-//!   ./scripts/aeneas_wal_recover.sh
+//!   cargo xtask aeneas wal_recover
 //!
 //! Production [`crate::wal::reader::WalReader::collect_all`] and
 //! [`crate::wal::reader::WalReader::read_record`] call these. Bytes on disk,
@@ -27,10 +27,10 @@
 #![forbid(unsafe_code)]
 
 //! **Term:** this file is what `rustc` links. Aeneas extracts that body
-//! (`scripts/aeneas_wal_recover.sh`). A Verus stand-in of RecoverKind billed
+//! (`cargo xtask aeneas wal_recover`). A Verus stand-in of RecoverKind billed
 //! as last-wins of a cfg-split file is a model twin (deleted).
 //!
-//!   ./scripts/aeneas_wal_recover.sh --required
+//!   cargo xtask aeneas wal_recover --required
 
 use super::format::RecordType;
 

@@ -1,4 +1,4 @@
 path=crates/pedradb-core/src/wal/reopen_kernel.rs
-sha256=af74b0fb7783201a832404b743ae56ff4ff9edd9ec43bf3f7963217e5c6123bb
+sha256=2f23320d0b1f21ecfc4cf496e3ad85c5afa686935b9ace7390fd2bb53d479d24
 aeneas=f5a4c58-dirty
 charon=0.1.232

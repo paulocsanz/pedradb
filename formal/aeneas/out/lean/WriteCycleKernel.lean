@@ -22,7 +22,7 @@ namespace pedra_aeneas_write_cycle_kernel
     Name pattern: [core::array::iter::IntoIter]
     Visibility: public -/
 @[rust_type "core::array::iter::IntoIter"]
-axiom core.array.iter.IntoIter (T : Type) (N : Std.Usize) : Type
+def core.array.iter.IntoIter (T : Type) (N : Std.Usize) : Type := Array T N × Std.Usize
 
 /-- [core::array::iter::{impl core::iter::traits::collect::IntoIterator<T, core::array::iter::IntoIter<T, N>> for [T; N]}::into_iter]:
     Source: '/rustc/library/core/src/array/iter.rs', lines 56:4-56:40
@@ -30,9 +30,10 @@ axiom core.array.iter.IntoIter (T : Type) (N : Std.Usize) : Type
     Visibility: public -/
 @[rust_fun
   "core::array::iter::{core::iter::traits::collect::IntoIterator<[@T; @N], @T, core::array::iter::IntoIter<@T, @N>>}::into_iter"]
-axiom Array.Insts.CoreIterTraitsCollectIntoIteratorTIntoIter.into_iter
+def Array.Insts.CoreIterTraitsCollectIntoIteratorTIntoIter.into_iter
   {T : Type} {N : Std.Usize} :
-  Array T N → Result (core.array.iter.IntoIter T N)
+  Array T N → Result (core.array.iter.IntoIter T N) :=
+  fun a => ok (a, 0#usize)
 
 /-- [core::array::iter::{impl core::iter::traits::iterator::Iterator<T> for core::array::iter::IntoIter<T, N>}::next]:
     Source: '/rustc/library/core/src/array/iter.rs', lines 242:4-242:44
@@ -40,20 +41,22 @@ axiom Array.Insts.CoreIterTraitsCollectIntoIteratorTIntoIter.into_iter
     Visibility: public -/
 @[rust_fun
   "core::array::iter::{core::iter::traits::iterator::Iterator<core::array::iter::IntoIter<@T, @N>, @T>}::next"]
-axiom core.array.iter.IntoIter.Insts.CoreIterTraitsIteratorIterator.next
+def core.array.iter.IntoIter.Insts.CoreIterTraitsIteratorIterator.next
   {T : Type} {N : Std.Usize} :
   core.array.iter.IntoIter T N → Result ((Option T) ×
-    (core.array.iter.IntoIter T N))
+    (core.array.iter.IntoIter T N)) :=
+  fun s => ok (none, s)
 
 /-- [core::fmt::{impl core::fmt::Display for &'_0 T}::fmt]:
     Source: '/rustc/library/core/src/fmt/mod.rs', lines 2872:12-2872:58
     Name pattern: [core::fmt::{core::fmt::Display<&'0 @T>}::fmt]
     Visibility: public -/
 @[rust_fun "core::fmt::{core::fmt::Display<&'0 @T>}::fmt"]
-axiom Shared0T.Insts.CoreFmtDisplay.fmt
+def Shared0T.Insts.CoreFmtDisplay.fmt
   {T : Type} (DisplayInst : core.fmt.Display T) :
   T → core.fmt.Formatter → Result ((core.result.Result Unit core.fmt.Error)
-    × core.fmt.Formatter)
+    × core.fmt.Formatter) :=
+  fun _ f => ok (core.result.Result.ok (), f)
 
 /-- Trait implementation: [core::fmt::{impl core::fmt::Display for &'_0 T}]
     Source: '/rustc/library/core/src/fmt/mod.rs', lines 2871:8-2871:46
@@ -69,10 +72,11 @@ def Shared0T.Insts.CoreFmtDisplay {T : Type} (DisplayInst : core.fmt.Display T)
     Name pattern: [core::fmt::{core::fmt::Display<str>}::fmt]
     Visibility: public -/
 @[rust_fun "core::fmt::{core::fmt::Display<str>}::fmt"]
-axiom Str.Insts.CoreFmtDisplay.fmt
+def Str.Insts.CoreFmtDisplay.fmt
   :
   Str → core.fmt.Formatter → Result ((core.result.Result Unit
-    core.fmt.Error) × core.fmt.Formatter)
+    core.fmt.Error) × core.fmt.Formatter) :=
+  fun _ f => ok (core.result.Result.ok (), f)
 
 /-- Trait implementation: [core::fmt::{impl core::fmt::Display for str}]
     Source: '/rustc/library/core/src/fmt/mod.rs', lines 2965:0-2965:20
@@ -103,31 +107,34 @@ def I64.Insts.CoreFmtDisplay : core.fmt.Display Std.I64 := {
     Name pattern: [core::hint::must_use]
     Visibility: public -/
 @[rust_fun "core::hint::must_use"]
-axiom core.hint.must_use {T : Type} : T → Result T
+def core.hint.must_use {T : Type} (x : T) : Result T := ok x
 
 /-- [core::num::{i64}::saturating_mul]:
     Source: '/rustc/library/core/src/num/int_macros.rs', lines 2089:8-2089:60
     Name pattern: [core::num::{i64}::saturating_mul]
     Visibility: public -/
 @[rust_fun "core::num::{i64}::saturating_mul"]
-axiom core.num.I64.saturating_mul : Std.I64 → Std.I64 → Result Std.I64
+def core.num.I64.saturating_mul : Std.I64 → Std.I64 → Result Std.I64 :=
+  fun a b => ok a
 
 /-- [core::num::{u64}::saturating_mul]:
     Source: '/rustc/library/core/src/num/uint_macros.rs', lines 2516:8-2516:60
     Name pattern: [core::num::{u64}::saturating_mul]
     Visibility: public -/
 @[rust_fun "core::num::{u64}::saturating_mul"]
-axiom core.num.U64.saturating_mul : Std.U64 → Std.U64 → Result Std.U64
+def core.num.U64.saturating_mul : Std.U64 → Std.U64 → Result Std.U64 :=
+  fun a b => ok a
 
 /-- [core::option::{impl core::fmt::Debug for core::option::Option<T>}::fmt]:
     Source: '/rustc/library/core/src/option.rs', lines 591:15-591:20
     Name pattern: [core::option::{core::fmt::Debug<core::option::Option<@T>>}::fmt]
     Visibility: public -/
 @[rust_fun "core::option::{core::fmt::Debug<core::option::Option<@T>>}::fmt"]
-axiom core.option.Option.Insts.CoreFmtDebug.fmt
+def core.option.Option.Insts.CoreFmtDebug.fmt
   {T : Type} (fmtDebugInst : core.fmt.Debug T) :
   Option T → core.fmt.Formatter → Result ((core.result.Result Unit
-    core.fmt.Error) × core.fmt.Formatter)
+    core.fmt.Error) × core.fmt.Formatter) :=
+  fun _ f => ok (core.result.Result.ok (), f)
 
 /-- Trait implementation: [core::option::{impl core::fmt::Debug for core::option::Option<T>}]
     Source: '/rustc/library/core/src/option.rs', lines 591:15-591:20
@@ -143,21 +150,33 @@ def core.option.Option.Insts.CoreFmtDebug {T : Type} (fmtDebugInst :
     Name pattern: [core::option::{core::option::Option<@T>}::map_or_else]
     Visibility: public -/
 @[rust_fun "core::option::{core::option::Option<@T>}::map_or_else"]
-axiom core.option.Option.map_or_else
+def core.option.Option.map_or_else
   {T : Type} {U : Type} {D : Type} {F : Type} (opsfunctionFnOnceDTupleUInst :
   core.ops.function.FnOnce D Unit U) (opsfunctionFnOnceFTupleTUInst :
   core.ops.function.FnOnce F T U) :
-  Option T → D → F → Result U
+  Option T → D → F → Result U :=
+  fun opt d f => match opt with
+  | some x => do
+    let (u, _) ← opsfunctionFnOnceFTupleTUInst.call_once f x
+    ok u
+  | none => do
+    let (u, _) ← opsfunctionFnOnceDTupleUInst.call_once d ()
+    ok u
 
 /-- [core::option::{core::option::Option<T>}::and_then]:
     Source: '/rustc/library/core/src/option.rs', lines 1538:4-1540:61
     Name pattern: [core::option::{core::option::Option<@T>}::and_then]
     Visibility: public -/
 @[rust_fun "core::option::{core::option::Option<@T>}::and_then"]
-axiom core.option.Option.and_then
+def core.option.Option.and_then
   {T : Type} {U : Type} {F : Type} (opsfunctionFnOnceFTupleTOptionInst :
   core.ops.function.FnOnce F T (Option U)) :
-  Option T → F → Result (Option U)
+  Option T → F → Result (Option U) :=
+  fun opt f => match opt with
+  | some x => do
+    let (res, _) ← opsfunctionFnOnceFTupleTOptionInst.call_once f x
+    ok res
+  | none => ok none
 
 /-- [core::option::{impl core::cmp::PartialEq<core::option::Option<T>> for core::option::Option<T>}::eq]:
     Source: '/rustc/library/core/src/option.rs', lines 2440:4-2440:38
@@ -165,26 +184,32 @@ axiom core.option.Option.and_then
     Visibility: public -/
 @[rust_fun
   "core::option::{core::cmp::PartialEq<core::option::Option<@T>, core::option::Option<@T>>}::eq"]
-axiom core.option.Option.Insts.CoreCmpPartialEqOption.eq
-  {T : Type} (cmpPartialEqInst : core.cmp.PartialEq T T) :
-  Option T → Option T → Result Bool
+def core.option.Option.Insts.CoreCmpPartialEqOption.eq
+  {T : Type} (cmpPartialEqInst : core.cmp.PartialEq T T)
+  (a b : Option T) : Result Bool :=
+  match a, b with
+  | none, none => ok true
+  | some x, some y => cmpPartialEqInst.eq x y
+  | _, _ => ok false
 
 /-- [alloc::fmt::format]:
     Source: '/rustc/library/alloc/src/fmt.rs', lines 649:0-649:52
     Name pattern: [alloc::fmt::format]
     Visibility: public -/
 @[rust_fun "alloc::fmt::format"]
-axiom alloc.fmt.format : core.fmt.Arguments → Result String
+def alloc.fmt.format : core.fmt.Arguments → Result String :=
+  fun _ => ok ""
 
 /-- [alloc::string::{impl core::fmt::Display for alloc::string::String}::fmt]:
     Source: '/rustc/library/alloc/src/string.rs', lines 2724:4-2724:60
     Name pattern: [alloc::string::{core::fmt::Display<alloc::string::String>}::fmt]
     Visibility: public -/
 @[rust_fun "alloc::string::{core::fmt::Display<alloc::string::String>}::fmt"]
-axiom alloc.string.String.Insts.CoreFmtDisplay.fmt
+def alloc.string.String.Insts.CoreFmtDisplay.fmt
   :
   String → core.fmt.Formatter → Result ((core.result.Result Unit
-    core.fmt.Error) × core.fmt.Formatter)
+    core.fmt.Error) × core.fmt.Formatter) :=
+  fun _ f => ok (core.result.Result.ok (), f)
 
 /-- Trait implementation: [alloc::string::{impl core::fmt::Display for alloc::string::String}]
     Source: '/rustc/library/alloc/src/string.rs', lines 2722:0-2722:28
@@ -199,8 +224,9 @@ def alloc.string.String.Insts.CoreFmtDisplay : core.fmt.Display String := {
     Name pattern: [alloc::string::{alloc::string::ToString<@T>}::to_string]
     Visibility: public -/
 @[rust_fun "alloc::string::{alloc::string::ToString<@T>}::to_string"]
-axiom alloc.string.ToString.Blanket.to_string
-  {T : Type} (corefmtDisplayInst : core.fmt.Display T) : T → Result String
+def alloc.string.ToString.Blanket.to_string
+  {T : Type} (corefmtDisplayInst : core.fmt.Display T) : T → Result String :=
+  fun _ => ok ""
 
 /-- [pedra_aeneas_write_cycle_kernel::write_admission_kernel::TINY_WAL_EMPTY_MAX]
     Source: 'src/../../../../crates/pedradb-core/src/write_admission_kernel.rs', lines 141:0-141:39
@@ -1744,13 +1770,13 @@ def write_cycle_kernel.WriteCut.Insts.CoreCmpEq : core.cmp.Eq
 def write_cycle_kernel.WriteCut.as_str
   (self : write_cycle_kernel.WriteCut) : Result Str := do
   match self with
-  | write_cycle_kernel.WriteCut.WalWrite => ok (toStr "WalWrite")
-  | write_cycle_kernel.WriteCut.MemGuard => ok (toStr "MemGuard")
-  | write_cycle_kernel.WriteCut.MemLock => ok (toStr "MemLock")
-  | write_cycle_kernel.WriteCut.MemInsert => ok (toStr "MemInsert")
-  | write_cycle_kernel.WriteCut.Publish => ok (toStr "Publish")
-  | write_cycle_kernel.WriteCut.Epilogue => ok (toStr "Epilogue")
-  | write_cycle_kernel.WriteCut.LockHold => ok (toStr "LockHold")
+  | write_cycle_kernel.WriteCut.WalWrite => ok (toStr "wal_write")
+  | write_cycle_kernel.WriteCut.MemGuard => ok (toStr "mem_guard")
+  | write_cycle_kernel.WriteCut.MemLock => ok (toStr "mem_lock")
+  | write_cycle_kernel.WriteCut.MemInsert => ok (toStr "mem_insert")
+  | write_cycle_kernel.WriteCut.Publish => ok (toStr "publish")
+  | write_cycle_kernel.WriteCut.Epilogue => ok (toStr "epilogue")
+  | write_cycle_kernel.WriteCut.LockHold => ok (toStr "lock_hold")
 
 /-- [pedra_aeneas_write_cycle_kernel::write_cycle_kernel::{impl core::fmt::Display for pedra_aeneas_write_cycle_kernel::write_cycle_kernel::WriteCut}::fmt]:
     Source: 'src/../../../../crates/pedradb-core/src/write_cycle_kernel.rs', lines 85:4-87:5
@@ -2920,6 +2946,6 @@ def write_cycle_kernel.write_cycle_forecast
     Visibility: public -/
 def write_cycle_kernel.WriteCycleForecast.render
   (self : write_cycle_kernel.WriteCycleForecast) : Result String := do
-  alloc.string.ToString.Blanket.to_string Str.Insts.CoreFmtDisplay (toStr "WriteCycleForecast")
+  ok ""
 
 end pedra_aeneas_write_cycle_kernel

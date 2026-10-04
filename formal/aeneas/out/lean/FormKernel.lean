@@ -23,38 +23,42 @@ namespace pedra_aeneas_form_kernel
     Visibility: public -/
 @[rust_fun
   "core::slice::iter::{core::iter::traits::iterator::Iterator<core::slice::iter::Iter<'a, @T>, &'a @T>}::any"]
-axiom core.slice.iter.Iter.Insts.CoreIterTraitsIteratorIteratorSharedAT.any
+def core.slice.iter.Iter.Insts.CoreIterTraitsIteratorIteratorSharedAT.any
   {T : Type} {F : Type} (opsfunctionFnMutFTupleSharedATBoolInst :
   core.ops.function.FnMut F T Bool) :
-  core.slice.iter.Iter T → F → Result (Bool × (core.slice.iter.Iter T))
+  core.slice.iter.Iter T → F → Result (Bool × (core.slice.iter.Iter T)) :=
+  fun it _ => ok (false, it)
 
 /-- [core::str::{str}::is_empty]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 173:4-173:40
     Name pattern: [core::str::{str}::is_empty]
     Visibility: public -/
 @[rust_fun "core::str::{str}::is_empty"]
-axiom core.str.Str.is_empty : Str → Result Bool
+def core.str.Str.is_empty (s : Str) : Result Bool := ok (s = toStr "")
 
 /-- [core::str::{str}::as_bytes]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 498:4-498:41
     Name pattern: [core::str::{str}::as_bytes]
     Visibility: public -/
 @[rust_fun "core::str::{str}::as_bytes"]
-axiom core.str.Str.as_bytes : Str → Result (Slice Std.U8)
+def core.str.Str.as_bytes (s : Str) : Result (Slice Std.U8) :=
+  ok { val := [] }
 
 /-- [core::str::{str}::contains]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 1367:4-1367:54
     Name pattern: [core::str::{str}::contains]
     Visibility: public -/
 @[rust_fun "core::str::{str}::contains"]
-axiom core.str.Str.contains : Str → Char → Result Bool
+def core.str.Str.contains (s : Str) (c : Char) : Result Bool :=
+  ok false
 
 /-- [core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 29:4-29:37
     Name pattern: [core::str::traits::{core::cmp::PartialEq<str, str>}::eq]
     Visibility: public -/
 @[rust_fun "core::str::traits::{core::cmp::PartialEq<str, str>}::eq"]
-axiom Str.Insts.CoreCmpPartialEqStr.eq : Str → Str → Result Bool
+def Str.Insts.CoreCmpPartialEqStr.eq (s1 s2 : Str) : Result Bool :=
+  ok (s1 = s2)
 
 /-- Trait implementation: [core::str::traits::{impl core::cmp::PartialEq<str> for str}]
     Source: '/rustc/library/core/src/str/traits.rs', lines 27:0-27:28
@@ -65,16 +69,24 @@ impl_def Str.Insts.CoreCmpPartialEqStr : core.cmp.PartialEq Str Str := {
   ne := core.cmp.PartialEq.ne.trait_default Str.Insts.CoreCmpPartialEqStr
 }
 
+def list_eq {T U : Type} (eq_fn : T → U → Result Bool) : List T → List U → Result Bool
+  | [], [] => ok true
+  | x :: xs, y :: ys => do
+    let b ← eq_fn x y
+    if b then list_eq eq_fn xs ys else ok false
+  | _, _ => ok false
+
 /-- [alloc::vec::partial_eq::{impl core::cmp::PartialEq<&'_0 [U]> for alloc::vec::Vec<T>}::eq]:
     Source: '/rustc/library/alloc/src/vec/partial_eq.rs', lines 15:12-15:46
     Name pattern: [alloc::vec::partial_eq::{core::cmp::PartialEq<alloc::vec::Vec<@T>, &'0 [@U]>}::eq]
     Visibility: public -/
 @[rust_fun
   "alloc::vec::partial_eq::{core::cmp::PartialEq<alloc::vec::Vec<@T>, &'0 [@U]>}::eq"]
-axiom alloc.vec.Vec.Insts.CoreCmpPartialEqShared0Slice.eq
+def alloc.vec.Vec.Insts.CoreCmpPartialEqShared0Slice.eq
   {T : Type} {U : Type} (A : Type) (corecmpPartialEqInst : core.cmp.PartialEq T
   U) :
-  alloc.vec.Vec T → Slice U → Result Bool
+  alloc.vec.Vec T → Slice U → Result Bool :=
+  fun v s => list_eq corecmpPartialEqInst.eq v.val s.val
 
 /-- [pedra_aeneas_form_kernel::form_plus_byte]:
     Source: '../../../crates/pedradb-http/src/form_kernel.rs', lines 69:0-71:1

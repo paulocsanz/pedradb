@@ -35,7 +35,60 @@ pub enum LeaseViolation {
         /// Required majority threshold (N/2 + 1).
         majority_required: usize,
     },
+    /// Cluster size is zero.
+    ZeroClusterSize,
+    /// Configured lease duration is zero.
+    ZeroLeaseDuration,
+    /// Clock drift margin (2 * Delta) equals or exceeds the lease duration.
+    ClockDriftExceedsLease {
+        lease_duration_micros: u64,
+        drift_margin_micros: u64,
+    },
+    /// Multiplication overflow occurred when computing clock drift margin.
+    ClockDriftMultiplicationOverflow {
+        max_clock_drift_micros: u64,
+    },
+    /// Invalid leader index supplied for renewal.
+    InvalidLeaderIndex {
+        leader: usize,
+        cluster_size: usize,
+    },
 }
+
+impl std::fmt::Display for LeaseViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StaleReadUnderExpiredLease { elapsed_micros, safe_duration_micros } => write!(
+                f,
+                "Stale read attempted under expired lease: elapsed {elapsed_micros}us >= safe duration {safe_duration_micros}us"
+            ),
+            Self::ClockDriftExceeded { drift_micros, bound_micros } => write!(
+                f,
+                "Cluster clock drift exceeded: drift {drift_micros}us > bound {bound_micros}us"
+            ),
+            Self::QuorumLossUnderAsymmetry { active_responses, majority_required } => write!(
+                f,
+                "Quorum lost under asymmetry: active responses {active_responses} < required {majority_required}"
+            ),
+            Self::ZeroClusterSize => write!(f, "Cluster size cannot be zero"),
+            Self::ZeroLeaseDuration => write!(f, "Lease duration cannot be zero"),
+            Self::ClockDriftExceedsLease { lease_duration_micros, drift_margin_micros } => write!(
+                f,
+                "Clock drift margin {drift_margin_micros}us exceeds or equals lease duration {lease_duration_micros}us"
+            ),
+            Self::ClockDriftMultiplicationOverflow { max_clock_drift_micros } => write!(
+                f,
+                "Multiplication overflow in clock drift: 2 * {max_clock_drift_micros}"
+            ),
+            Self::InvalidLeaderIndex { leader, cluster_size } => write!(
+                f,
+                "Invalid leader index {leader} for cluster size {cluster_size}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LeaseViolation {}
 
 /// A directed network connectivity matrix representing asymmetric partitions.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,6 +100,14 @@ pub struct DirectedNetworkMatrix {
 }
 
 impl DirectedNetworkMatrix {
+    /// Creates a fully connected network with cluster size validation.
+    pub fn try_fully_connected(cluster_size: usize) -> Result<Self, LeaseViolation> {
+        if cluster_size == 0 {
+            return Err(LeaseViolation::ZeroClusterSize);
+        }
+        Ok(Self::fully_connected(cluster_size))
+    }
+
     /// Creates a fully connected network.
     #[must_use]
     pub fn fully_connected(cluster_size: usize) -> Self {
@@ -89,15 +150,44 @@ pub struct LeaderLeaseTracker {
 }
 
 impl LeaderLeaseTracker {
-    /// Initializes a new lease tracker.
-    #[must_use]
-    pub fn new(cluster_size: usize, lease_duration_micros: u64, max_clock_drift_micros: u64) -> Self {
-        Self {
+    /// Initializes a new lease tracker with fail-closed bounds validation.
+    pub fn try_new(
+        cluster_size: usize,
+        lease_duration_micros: u64,
+        max_clock_drift_micros: u64,
+    ) -> Result<Self, LeaseViolation> {
+        if cluster_size == 0 {
+            return Err(LeaseViolation::ZeroClusterSize);
+        }
+        if lease_duration_micros == 0 {
+            return Err(LeaseViolation::ZeroLeaseDuration);
+        }
+        let drift_margin = max_clock_drift_micros
+            .checked_mul(2)
+            .ok_or(LeaseViolation::ClockDriftMultiplicationOverflow { max_clock_drift_micros })?;
+        if drift_margin >= lease_duration_micros {
+            return Err(LeaseViolation::ClockDriftExceedsLease {
+                lease_duration_micros,
+                drift_margin_micros: drift_margin,
+            });
+        }
+        Ok(Self {
             cluster_size,
             lease_duration_micros,
             max_clock_drift_micros,
             last_quorum_timestamp_micros: 0,
-        }
+        })
+    }
+
+    /// Initializes a new lease tracker.
+    #[must_use]
+    pub fn new(cluster_size: usize, lease_duration_micros: u64, max_clock_drift_micros: u64) -> Self {
+        Self::try_new(cluster_size, lease_duration_micros, max_clock_drift_micros).unwrap_or_else(|_| Self {
+            cluster_size: cluster_size.max(1),
+            lease_duration_micros,
+            max_clock_drift_micros,
+            last_quorum_timestamp_micros: 0,
+        })
     }
 
     /// Required majority threshold (N / 2 + 1).
@@ -110,7 +200,7 @@ impl LeaderLeaseTracker {
     ///   safe_duration = lease_duration - 2 * \Delta_max.
     #[must_use]
     pub fn safe_lease_duration(&self) -> u64 {
-        let drift_margin = 2 * self.max_clock_drift_micros;
+        let drift_margin = self.max_clock_drift_micros.saturating_mul(2);
         self.lease_duration_micros.saturating_sub(drift_margin)
     }
 
@@ -121,6 +211,13 @@ impl LeaderLeaseTracker {
         network: &DirectedNetworkMatrix,
         current_time_micros: u64,
     ) -> Result<(), LeaseViolation> {
+        if leader >= self.cluster_size {
+            return Err(LeaseViolation::InvalidLeaderIndex {
+                leader,
+                cluster_size: self.cluster_size,
+            });
+        }
+
         let mut successful_responses = 1; // Leader votes for itself
 
         for follower in 0..self.cluster_size {
@@ -167,5 +264,46 @@ impl LeaderLeaseTracker {
         } else {
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_leader_lease_validation_red_to_green() {
+        assert_eq!(LeaderLeaseTracker::try_new(0, 1000, 100), Err(LeaseViolation::ZeroClusterSize));
+        assert_eq!(LeaderLeaseTracker::try_new(3, 0, 100), Err(LeaseViolation::ZeroLeaseDuration));
+        assert_eq!(
+            LeaderLeaseTracker::try_new(3, 1000, 500),
+            Err(LeaseViolation::ClockDriftExceedsLease {
+                lease_duration_micros: 1000,
+                drift_margin_micros: 1000,
+            })
+        );
+        assert_eq!(
+            LeaderLeaseTracker::try_new(3, 1000, u64::MAX),
+            Err(LeaseViolation::ClockDriftMultiplicationOverflow { max_clock_drift_micros: u64::MAX })
+        );
+
+        let mut tracker = LeaderLeaseTracker::try_new(3, 5_000_000, 200_000).expect("valid tracker");
+        assert_eq!(tracker.safe_lease_duration(), 5_000_000 - 400_000);
+
+        let net = DirectedNetworkMatrix::try_fully_connected(3).expect("net");
+        assert_eq!(
+            tracker.attempt_renew(5, &net, 1000),
+            Err(LeaseViolation::InvalidLeaderIndex { leader: 5, cluster_size: 3 })
+        );
+
+        assert!(tracker.attempt_renew(0, &net, 1_000_000).is_ok());
+        assert!(tracker.check_local_read_authorized(2_000_000).is_ok());
+        assert_eq!(
+            tracker.check_local_read_authorized(1_000_000 + 4_600_000),
+            Err(LeaseViolation::StaleReadUnderExpiredLease {
+                elapsed_micros: 4_600_000,
+                safe_duration_micros: 4_600_000,
+            })
+        );
     }
 }

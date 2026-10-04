@@ -160,6 +160,13 @@ impl<F: EnvFile> PwriteJob<F> {
 
 impl<F: EnvFile> Drop for PwriteJob<F> {
     fn drop(&mut self) {
+        if !self.done {
+            // Contract F182 (RFC-0330): never trust an offset without bytes.
+            // If the job is dropped before run() is called (task cancellation, pool drop, panic),
+            // write the pre-formatted, checksummed buffer to the reserved ticket offset so the
+            // log never contains an uninitialized gap that triggers recovery fail-stop.
+            let _ = self.file.write_wal_at_shared(&self.buf, self.ticket);
+        }
         self.drop_inflight();
     }
 }
@@ -369,10 +376,12 @@ impl<F: EnvFile> Wal<F> {
             // write under the lock at the ticket.
             self.reserve_space(frame.len() as u64);
             let ticket = self.writer.reserve_pending(frame.len() as u64);
+            let len = frame.len() as u64;
             if let Err(e) = self.writer.write_all_at(&frame, ticket) {
                 self.writer.restore_frame(frame);
                 return Err(e);
             }
+            self.writer.commit_pwrite(ticket, len);
             frame.clear();
             self.writer.restore_frame(frame);
             return Ok(None);
@@ -441,9 +450,10 @@ impl<F: EnvFile> Wal<F> {
     pub fn finish_pwrite(&mut self, ticket: u64, len: u64) {
         if !crate::write_admission_kernel::batch_is_empty(len) {
             self.writer.commit_pwrite(ticket, len);
-        } else {
-            self.writer.abort_pwrite();
         }
+        // len == 0 is the cancel/failed-run signal: a no-op. Resetting the
+        // reservation frontier here (the old `abort_pwrite`) overlapped
+        // in-flight tickets — the F-CAMP-4 torn-record class.
     }
 
     fn wait_inflight(&self) {
@@ -457,7 +467,7 @@ impl<F: EnvFile> Wal<F> {
     /// reservation) the segment appends plain and the frontier stays put —
     /// the next write just retries.
     fn reserve_space(&mut self, upcoming: u64) {
-        let pos = self.writer.position();
+        let pos = self.writer.reservation_frontier();
         // Bytes below `pos` are written (allocated); anchor the frontier
         // there so a recovered segment never over-reserves.
         self.prealloc_to = self.prealloc_to.max(pos);
@@ -511,7 +521,11 @@ impl<F: EnvFile> Wal<F> {
         self.wait_inflight();
         self.write_pending_frame()?;
         self.writer.flush()?;
-        self.writer.sync_data_sink(self.full_fsync)?;
+        crate::mutate_switch!(
+            crate::mutation_switch_kernel::MUTANT_BYPASS_WAL_SYNC,
+            self.writer.sync_data_sink(self.full_fsync)?,
+            ()
+        );
         Ok(())
     }
 
@@ -614,14 +628,34 @@ impl<F: EnvFile> Wal<F> {
     /// Flush buffered WAL data without taking ownership (for `Db` paths with `Drop`).
     ///
     /// # Errors
-    /// Returns [`std::io::Error`] if flushing fails.
+    /// Returns [`std::io::Error`] if flushing or draining fails.
     pub fn flush(&mut self) -> Result<()> {
         self.write_pending_frame()?;
+        self.drain_staged()?;
         self.writer.flush()
     }
 
+    /// Hand the staged group-commit bytes to the sink (RFC-0209 order
+    /// rule (b): every barrier — WAL truncate/rotate, `flush`, close —
+    /// must drain first). Staged bytes are logical segment content: a
+    /// barrier that skips the drain either truncates them away or sees
+    /// the drained watermark (`position`) stuck at 0, wrongly concludes
+    /// the segment is empty, and skips the WAL rotate — and with it the
+    /// MANIFEST pay-point that installs the flushed L0 (the orphaned-L0
+    /// durability hole, 2026-10-03).
+    ///
+    /// # Errors
+    /// Returns [`std::io::Error`] if the sink write fails (staged bytes
+    /// return to the buffer; the drain is retryable).
+    pub(crate) fn drain_staged(&mut self) -> Result<()> {
+        self.writer.drain_staged()
+    }
+
     /// Logical bytes written to the current segment (framed payload size;
-    /// preallocated space beyond EOF does not count).
+    /// preallocated space beyond EOF does not count). This is the contiguous
+    /// DRAINED watermark: it never moves at reserve time and never exceeds
+    /// what a reader can observe on the sink (F-CAMP-4 keeps every span
+    /// exclusive; the reservation frontier is private to the allocator).
     #[must_use]
     pub fn position(&self) -> u64 {
         self.writer.position()
@@ -634,6 +668,12 @@ impl<F: EnvFile> Wal<F> {
     pub fn close(mut self) -> Result<()> {
         self.flush()?;
         self.writer.truncate_to_logical()
+    }
+
+    /// Discard any uncommitted in-memory staged/framed data and shrink the
+    /// physical file to `offset` (RFC-0333).
+    pub(crate) fn discard_uncommitted(&mut self, offset: u64) -> Result<()> {
+        self.writer.discard_uncommitted(offset)
     }
 }
 
@@ -1086,7 +1126,7 @@ mod probe_tests {
             "Shared WAL sink is mmap (write_wal_at_shared), not generic pwrite"
         );
         let run = wal
-            .split("pub(crate) fn run(self)")
+            .split("pub fn run(self)")
             .nth(1)
             .expect("PwriteJob::run")
             .split("impl Wal")
@@ -1394,4 +1434,75 @@ mod probe_tests {
         drop(w);
         let _ = std::fs::remove_dir_all(&dir);
     }
+    // RFC-0331 V1.4 — calibration mutant 1009 (locked write ignores its
+    // reserved span): deterministic kill, orchestrated interleave. The
+    // mutex serializes these tests against each other: MutantGuard is
+    // process-global and the env knobs are read at Wal::create.
+
+    static RFC0331_V14_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn rfc0331_v14_baseline_inflight_ticket_plus_locked_write() {
+        let _v14 = RFC0331_V14_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("PEDRA_WAL_BUFFER", "0");
+        std::env::set_var("PEDRA_WAL_PWRITE", "1");
+        let dir = rfc0209_dir("v14-base");
+        let path = dir.join("wal.log");
+        {
+            let mut w = Wal::create(&path).unwrap();
+            w.encode_write_op_batches(&[rfc0209_put(1).as_slice()])
+                .unwrap();
+            let job = w.take_pwrite_job().unwrap().expect("pwrite job");
+            assert_eq!(
+                w.position(),
+                0,
+                "reserve must not move the drained watermark"
+            );
+            w.encode_write_op_batches(&[rfc0209_put(2).as_slice()])
+                .unwrap();
+            w.write_pending_frame().unwrap();
+            let (t, l) = job.run().unwrap();
+            w.finish_pwrite(t, l);
+        }
+        let recs = Wal::recover(&path).unwrap();
+        assert_eq!(
+            recs.len(),
+            2,
+            "baseline: spans are exclusive, both records intact"
+        );
+    }
+
+    #[test]
+    fn rfc0331_v14_mutant_1009_locked_write_at_position_is_killed() {
+        let _v14 = RFC0331_V14_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("PEDRA_WAL_BUFFER", "0");
+        std::env::set_var("PEDRA_WAL_PWRITE", "1");
+        let dir = rfc0209_dir("v14-m1009");
+        let path = dir.join("wal.log");
+        {
+            let mut w = Wal::create(&path).unwrap();
+            w.encode_write_op_batches(&[rfc0209_put(1).as_slice()])
+                .unwrap();
+            let job = w.take_pwrite_job().unwrap().expect("pwrite job");
+            w.encode_write_op_batches(&[rfc0209_put(2).as_slice()])
+                .unwrap();
+            {
+                let _g = crate::mutation_switch_kernel::MutantGuard::activate(
+                    crate::mutation_switch_kernel::MUTANT_WAL_WRITE_AT_POSITION,
+                );
+                w.write_pending_frame().unwrap();
+            }
+            let (t, l) = job.run().unwrap();
+            w.finish_pwrite(t, l);
+        }
+        match Wal::recover(&path) {
+            Ok(recs) => assert_ne!(
+                recs.len(),
+                2,
+                "mutant 1009 (locked write at position) must be DETECTED: two intact records means the kill oracle is vacuous"
+            ),
+            Err(_) => {} // damaged region at recovery: kill confirmed
+        }
+    }
+
 }

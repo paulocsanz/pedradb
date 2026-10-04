@@ -20,7 +20,7 @@
 //! The Verus twin is `crates/pedradb-core/verus/group_commit.rs` except
 //! [`rwlock_client_may_mutate`]: that fn is **single artifact** — this
 //! file is what `rustc` links *and* what Verus proves
-//! (`cfg(verus_keep_ghost)`). `./scripts/verus_group_commit_kernel.sh`
+//! (`cfg(verus_keep_ghost)`). `cargo xtask verus group_commit_kernel`
 //!
 //! The Aeneas extract is `formal/aeneas/lean/GroupCommitKernel.lean` with
 //! theorems in `GroupCommit.lean` (second machine).
@@ -639,7 +639,10 @@ pub fn write_group_wait_grant_as_is(_harness_owns: bool) -> WriteGroupWait {
 #[must_use]
 pub fn write_group_wait_grant_linearizes(harness_owns: bool) -> bool {
     match write_group_wait_grant(harness_owns) {
-        WriteGroupWait::HarnessGrant | WriteGroupWait::OsPark => {
+        WriteGroupWait::HarnessGrant => {
+            lock_alphabet_linearizes_n2(LOCK_ACT_ACQUIRE_WRITE, LOCK_ACT_SUBMIT)
+        }
+        WriteGroupWait::OsPark => {
             lock_alphabet_linearizes_n2(LOCK_ACT_ACQUIRE_WRITE, LOCK_ACT_SUBMIT)
         }
     }

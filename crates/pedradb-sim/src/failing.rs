@@ -80,7 +80,7 @@ pub enum OpClass {
 }
 
 impl OpClass {
-    fn matches(self, op: OpClass) -> bool {
+    pub(crate) fn matches(self, op: OpClass) -> bool {
         matches!(self, OpClass::Any) || self == op
     }
 }

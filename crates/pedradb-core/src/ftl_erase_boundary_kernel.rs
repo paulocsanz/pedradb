@@ -47,6 +47,7 @@ pub struct FlashAlignedExtent {
 }
 
 /// Error returned on invalid flash geometry or unaligned extent operations.
+/// Error returned on invalid flash geometry or unaligned extent operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FtlAlignmentViolation {
     /// Offset is not aligned to the flash erase block boundary.
@@ -55,9 +56,31 @@ pub enum FtlAlignmentViolation {
     SizeMisaligned { size: u64, erase_block_size: u64 },
     /// Payload exceeds allocated extent size.
     PayloadOverflow { payload: u64, extent_size: u64 },
+    /// Raw payload bytes cannot be zero.
+    ZeroRawBytes,
 }
 
+impl std::fmt::Display for FtlAlignmentViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OffsetMisaligned { offset, erase_block_size } => {
+                write!(f, "Offset {offset} misaligned to erase block size {erase_block_size}")
+            }
+            Self::SizeMisaligned { size, erase_block_size } => {
+                write!(f, "Size {size} misaligned to erase block size {erase_block_size}")
+            }
+            Self::PayloadOverflow { payload, extent_size } => {
+                write!(f, "Payload {payload} exceeds extent size {extent_size}")
+            }
+            Self::ZeroRawBytes => write!(f, "Raw payload bytes cannot be zero"),
+        }
+    }
+}
+
+impl std::error::Error for FtlAlignmentViolation {}
+
 /// Planner and verifier for flash-friendly storage allocations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FtlEraseBoundaryPlanner {
     geometry: FlashGeometry,
 }
@@ -66,6 +89,14 @@ impl FtlEraseBoundaryPlanner {
     /// Creates a new planner for given SSD geometry.
     pub fn new(geometry: FlashGeometry) -> Self {
         Self { geometry }
+    }
+
+    /// Plans an aligned extent for a payload of `raw_bytes` starting at `offset`, rejecting zero bytes.
+    pub fn try_plan_aligned_extent(&self, offset: u64, raw_bytes: u64) -> Result<FlashAlignedExtent, FtlAlignmentViolation> {
+        if raw_bytes == 0 {
+            return Err(FtlAlignmentViolation::ZeroRawBytes);
+        }
+        self.plan_aligned_extent(offset, raw_bytes)
     }
 
     /// Flash erase block size in bytes.
@@ -121,3 +152,38 @@ impl FtlEraseBoundaryPlanner {
         Ok(reclaimed_blocks)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ftl_erase_boundary_bounds() {
+        let planner = FtlEraseBoundaryPlanner::new(FlashGeometry::EraseBlock4MiB);
+        assert_eq!(
+            planner.try_plan_aligned_extent(0, 0),
+            Err(FtlAlignmentViolation::ZeroRawBytes)
+        );
+
+        let extent = planner.try_plan_aligned_extent(0, 1024).expect("valid plan");
+        assert_eq!(extent.start_offset, 0);
+        assert_eq!(extent.aligned_size, 4 * 1024 * 1024);
+        assert_eq!(extent.payload_size, 1024);
+
+        let reclaimed = planner.verify_clean_discard(extent).expect("clean discard");
+        assert_eq!(reclaimed, 1);
+    }
+
+    #[test]
+    fn test_ftl_alignment_violation_display() {
+        let err = FtlAlignmentViolation::ZeroRawBytes;
+        assert_eq!(format!("{err}"), "Raw payload bytes cannot be zero");
+
+        let err2 = FtlAlignmentViolation::OffsetMisaligned {
+            offset: 123,
+            erase_block_size: 4096,
+        };
+        assert_eq!(format!("{err2}"), "Offset 123 misaligned to erase block size 4096");
+    }
+}
+

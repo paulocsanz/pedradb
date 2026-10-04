@@ -15,7 +15,7 @@
 //!
 //! Single artifact (Aeneas-paid): the rustc body this crate links IS
 //! the proof term — the Lean side composes the fate atoms over the
-//! Charon+Aeneas extract (`./scripts/aeneas_write_ack.sh`).
+//! Charon+Aeneas extract (`cargo xtask aeneas write_ack`).
 
 #![forbid(unsafe_code)]
 

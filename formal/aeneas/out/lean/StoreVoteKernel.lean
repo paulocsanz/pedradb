@@ -22,10 +22,11 @@ namespace pedra_aeneas_store_vote_kernel
     Name pattern: [core::option::{core::fmt::Debug<core::option::Option<@T>>}::fmt]
     Visibility: public -/
 @[rust_fun "core::option::{core::fmt::Debug<core::option::Option<@T>>}::fmt"]
-axiom core.option.Option.Insts.CoreFmtDebug.fmt
+def core.option.Option.Insts.CoreFmtDebug.fmt
   {T : Type} (fmtDebugInst : core.fmt.Debug T) :
   Option T → core.fmt.Formatter → Result ((core.result.Result Unit
-    core.fmt.Error) × core.fmt.Formatter)
+    core.fmt.Error) × core.fmt.Formatter) :=
+  fun _ f => ok (core.result.Result.ok (), f)
 
 /-- Trait implementation: [core::option::{impl core::fmt::Debug for core::option::Option<T>}]
     Source: '/rustc/library/core/src/option.rs', lines 591:15-591:20

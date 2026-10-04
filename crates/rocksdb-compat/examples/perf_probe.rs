@@ -28,6 +28,10 @@ static ALLOCS: AtomicU64 = AtomicU64::new(0);
 static ALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
 static LIVE_BYTES: AtomicU64 = AtomicU64::new(0);
 static FREES: AtomicU64 = AtomicU64::new(0);
+thread_local! {
+    static BIG_SITES: std::cell::RefCell<std::collections::HashMap<String, (u64, u64)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
 
 struct CountingAlloc;
 
@@ -36,6 +40,21 @@ unsafe impl GlobalAlloc for CountingAlloc {
         ALLOCS.fetch_add(1, Ordering::Relaxed);
         ALLOC_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
         LIVE_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
+        if layout.size() >= 1 << 20 {
+            BIG_SITES.with(|sites| {
+                let bt = std::backtrace::Backtrace::force_capture();
+                let key = format!("{:?}", bt)
+                    .lines()
+                    .filter(|l| l.contains("pedradb") || l.contains("rocksdb_compat"))
+                    .take(6)
+                    .collect::<Vec<_>>()
+                    .join("|");
+                let mut g = sites.borrow_mut();
+                let e = g.entry(key).or_insert((0u64, 0u64));
+                e.0 += 1;
+                e.1 += layout.size() as u64;
+            });
+        }
         unsafe { System.alloc(layout) }
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
@@ -118,6 +137,7 @@ fn main() {
     let a0 = ALLOCS.load(Ordering::Relaxed);
     let t_all = Instant::now();
     let rss_probe = |tag: &str| {
+        // macOS: phys_footprint is the honest anon+compressed figure.
         let out = std::process::Command::new("ps")
             .args(["-o", "rss=", "-p", &std::process::id().to_string()])
             .output();
@@ -132,9 +152,8 @@ fn main() {
         }
     };
     let sample_every = (batches / 8).max(1);
-    let mut b_idx = 0u64;
     rss_probe("apply-start");
-    for _ in 0..batches {
+    for b_idx in 0..batches {
         let end = i + per_batch;
         let mut wb = WriteBatch::default();
         for j in i..end {
@@ -147,33 +166,22 @@ fn main() {
         batch_us.push(t.elapsed().as_secs_f64() * 1e6);
         i = end;
         if b_idx % sample_every == 0 {
-            rss_probe(&format!("apply-{i}"));
+            rss_probe(&format!("apply-{}", i));
         }
-        b_idx += 1;
     }
     rss_probe("apply-end");
+    BIG_SITES.with(|sites| {
+        let g = sites.borrow();
+        let mut rows: Vec<_> = g.iter().collect();
+        rows.sort_by_key(|(_, (_, b))| *b);
+        rows.reverse();
+        eprintln!("== BIG ALLOC SITES (>=1MiB) ==");
+        for (k, (n, b)) in rows.iter().take(8) {
+            eprintln!("  {b:>12} bytes x{n}: {k}");
+        }
+    });
     let apply_total_s = t_all.elapsed().as_secs_f64();
     let apply_allocs = ALLOCS.load(Ordering::Relaxed) - a0;
-    // RFC-0306 attribution: where does the wall live when median ≪ wall?
-    // Histogram the batch-time tail (chunk boundaries vs uniform slowness).
-    {
-        let mut sorted = batch_us.clone();
-        sorted.sort_by(|a, b| a.total_cmp(b));
-        let sum: f64 = batch_us.iter().sum();
-        let n_slow_1ms = batch_us.iter().filter(|t| **t > 1_000.0).count();
-        let slow_sum: f64 = batch_us.iter().filter(|t| **t > 1_000.0).sum();
-        let p999 = sorted[(sorted.len() as f64 * 0.999) as usize];
-        println!(
-            "  batch-tail : mean {:.1}µs | p99 {:.1} | p999 {:.1} | max {:.1} | >1ms: {} batches = {:.1}s of {:.1}s total",
-            sum / batch_us.len() as f64,
-            sorted[(sorted.len() as f64 * 0.99) as usize],
-            p999,
-            sorted[sorted.len() - 1],
-            n_slow_1ms,
-            slow_sum / 1e6,
-            sum / 1e6
-        );
-    }
 
     // --- Settle so the envelope fast path arms ---
     db.flush().unwrap();
@@ -212,9 +220,6 @@ fn main() {
         .collect();
     let mut inside_ns = Vec::new();
     let a2 = ALLOCS.load(Ordering::Relaxed);
-    let in_blocks0 = rocksdb_compat::probe_counters().blocks_decoded;
-    let in_tables0 = db.lookup_tables_probed();
-    let in_parts0 = pedradb_core::bloom::filter_part_load_count();
     for rep in 0..(3 * mul.max(1)) {
         let t = Instant::now();
         for k in &inside_keys {
@@ -225,16 +230,6 @@ fn main() {
         }
     }
     let inside_allocs = ALLOCS.load(Ordering::Relaxed) - a2;
-    let in_ops = 20_000u64 * (3 * mul.max(1)) as u64;
-    let in_blocks = rocksdb_compat::probe_counters().blocks_decoded - in_blocks0;
-    let in_tables = db.lookup_tables_probed() - in_tables0;
-    let in_parts = pedradb_core::bloom::filter_part_load_count() - in_parts0;
-    println!(
-        "  miss-in x  : blocks/get {:.3} | tables/get {:.3} | part-loads/get {:.3}",
-        in_blocks as f64 / in_ops as f64,
-        in_tables as f64 / in_ops as f64,
-        in_parts as f64 / in_ops as f64
-    );
 
     // --- Phase 4: warm hit (µs/op) ---
     let hit_keys: Vec<String> = (0..20_000u64)
@@ -272,20 +267,6 @@ fn main() {
         median(&mut hit_us), per_op(hit_allocs, 20_000 * 3),
         blocks_decoded as f64 / gets as f64, tables_probed as f64 / gets as f64,
         crc_skipped as f64 / gets as f64);
-    {
-        let bounds = pedradb_core::bulk_boundary_diag_take();
-        if !bounds.is_empty() {
-            let sorted = bounds.iter().filter(|(s, _)| *s).count();
-            let ns: u64 = bounds.iter().map(|(_, n)| n).sum();
-            println!(
-                "  boundary  : {} chunks | sorted {} | sort+park total {:.1} ms | max {:.1} ms",
-                bounds.len(),
-                sorted,
-                ns as f64 / 1e6,
-                bounds.iter().map(|(_, n)| *n).max().unwrap_or(0) as f64 / 1e6
-            );
-        }
-    }
     if std::env::var_os("PEDRA_HYDRATE_DIAG").is_some() {
         println!("  {}", pedradb_core::write_diag_kernel::latched_bulk_diag_line());
     }
@@ -301,46 +282,6 @@ fn main() {
         miss_wall
     );
 
-    // RFC-0308 Pilar E: cold-reopen attribution — first 100 gets after a
-    // fresh open, with part-loads/tables/blocks deltas (PEDRA_PROBE_COLD=1).
-    if std::env::var_os("PEDRA_PROBE_COLD").is_some() {
-        drop(db);
-        let mut opts2 = Options::new();
-        opts2.create_if_missing(true);
-        let mut data_opts2 = Options::default();
-        data_opts2.set_write_buffer_size(256 << 20);
-        let db2 = DB::open_cf_descriptors(
-            &opts2,
-            &dir,
-            [
-                ColumnFamilyDescriptor::new("data", data_opts2),
-                ColumnFamilyDescriptor::new("meta", Options::default()),
-            ],
-        )
-        .unwrap();
-        let cold0 = pedradb_core::bloom::filter_part_load_count();
-        let ct0 = db2.lookup_tables_probed();
-        let cb0 = rocksdb_compat::probe_counters().blocks_decoded;
-        let t0 = std::time::Instant::now();
-        let mut hit_n = 0usize;
-        for p in 0..100u64 {
-            let k = key((p * 7_919_927) % n);
-            if db2.get_named("data", &k).unwrap().is_some() {
-                hit_n += 1;
-            }
-        }
-        let cold_us = t0.elapsed().as_secs_f64() / 100.0 * 1e6;
-        println!(
-            "  cold-100   : {:.2} us/get | hits {hit_n}/100 | part-loads/get {:.3} | tables/get {:.3} | blocks/get {:.3}",
-            cold_us,
-            (pedradb_core::bloom::filter_part_load_count() - cold0) as f64 / 100.0,
-            (db2.lookup_tables_probed() - ct0) as f64 / 100.0,
-            (rocksdb_compat::probe_counters().blocks_decoded - cb0) as f64 / 100.0,
-        );
-        let _ = db2;
-        let _ = std::fs::remove_dir_all(&dir);
-        return;
-    }
     drop(db);
     let _ = std::fs::remove_dir_all(&dir);
     let _ = Arc::new(0u8); // silence unused-import noise in some toolchains

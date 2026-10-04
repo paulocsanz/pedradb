@@ -122,6 +122,9 @@ fn fdatasync_file_inner(file: &File) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
+        let fd = file.as_raw_fd();
+        pedradb_spec::syscall_glue_kernel::verify_fdatasync_pre(fd)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
         // Apple: `libc` / rustix omit `fdatasync` (they want F_FULLFSYNC).
         // libSystem and Linux both export the POSIX symbol.
         // SAFETY: signature is POSIX `int fdatasync(int fd)` / libSystem.
@@ -133,7 +136,9 @@ fn fdatasync_file_inner(file: &File) -> io::Result<()> {
         // - `file` is an open `std::fs::File`; `as_raw_fd()` is not stored.
         // - The linked symbol matches the extern signature above.
         // - Non-zero `rc` leaves errno on this thread for `last_os_error`.
-        let rc = unsafe { fdatasync(file.as_raw_fd()) };
+        let rc = unsafe { fdatasync(fd) };
+        pedradb_spec::syscall_glue_kernel::verify_fdatasync_post(rc)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
         posix_rc_to_io(rc)
     }
     #[cfg(not(unix))]
@@ -164,6 +169,12 @@ fn fdatasync_file_inner(file: &File) -> io::Result<()> {
 pub fn preallocate_file(file: &File, len: u64) -> io::Result<()> {
     if len == 0 {
         return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        pedradb_spec::syscall_glue_kernel::verify_preallocate_pre(file.as_raw_fd(), 0, len)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
     }
     #[cfg(all(target_os = "macos", not(miri)))]
     {
@@ -250,12 +261,17 @@ pub fn fsync_file(file: &File) -> io::Result<()> {
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         use std::os::fd::AsRawFd;
+        let fd = file.as_raw_fd();
+        pedradb_spec::syscall_glue_kernel::verify_fsync_pre(fd)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
         // SAFETY: signature is POSIX `int fsync(int fd)`.
         extern "C" {
             fn fsync(fd: i32) -> i32;
         }
         // SAFETY: `file` is an open `std::fs::File`; `as_raw_fd()` is not stored.
-        let rc = unsafe { fsync(file.as_raw_fd()) };
+        let rc = unsafe { fsync(fd) };
+        pedradb_spec::syscall_glue_kernel::verify_fsync_post(rc)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
         posix_rc_to_io(rc)
     }
     #[cfg(not(all(unix, not(target_os = "macos"))))]
@@ -285,6 +301,12 @@ pub fn sync_dir_fd(dir: &File) -> io::Result<()> {
 /// # Errors
 /// Underlying I/O on Linux when the hint is rejected.
 pub fn advise_file(file: &File, offset: u64, len: u64, kind: FileAdvise) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        pedradb_spec::syscall_glue_kernel::verify_fadvise_pre(file.as_raw_fd(), offset, len)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
+    }
     #[cfg(target_os = "linux")]
     {
         use std::os::fd::AsRawFd;
@@ -389,35 +411,6 @@ pub fn filesystem_available_bytes(path: &Path) -> io::Result<u64> {
 
 /// Total physical RAM bytes available on the machine, or `None` if unsupported/error.
 #[must_use]
-/// RFC-0306: the memory ceiling this process may actually use — the
-/// cgroup limit when one exists (Docker/K8s), else host physical RAM.
-/// `sysconf(_SC_PHYS_PAGES)` reports the HOST: a container budgeted at
-/// 47 GiB on a 1 TiB host resolved its auto RAM budget from the host and
-/// the 250M hydrate OOM'd at the container wall with backpressure never
-/// armed.
-#[must_use]
-pub fn effective_memory_limit_bytes() -> Option<u64> {
-    let host = total_physical_memory_bytes();
-    // cgroup v2
-    if let Ok(txt) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
-        if let Ok(v) = txt.trim().parse::<u64>() {
-            if v > 0 && v != u64::MAX {
-                return Some(host.map_or(v, |h| h.min(v)));
-            }
-        }
-    }
-    // cgroup v1
-    if let Ok(txt) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes") {
-        if let Ok(v) = txt.trim().parse::<u64>() {
-            // v1 reports a huge sentinel when unlimited.
-            if v > 0 && v < (1u64 << 60) {
-                return Some(host.map_or(v, |h| h.min(v)));
-            }
-        }
-    }
-    host
-}
-
 pub fn total_physical_memory_bytes() -> Option<u64> {
     #[cfg(all(unix, not(miri)))]
     {
@@ -480,6 +473,8 @@ pub fn mapped_pwrite(file: &File, buf: &[u8], at: u64) -> io::Result<()> {
     use std::os::unix::fs::MetadataExt;
     use std::sync::atomic::Ordering;
     let fd = file.as_raw_fd();
+    pedradb_spec::syscall_glue_kernel::verify_pwrite_pre(fd, buf.len(), at)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
     let need = at.saturating_add(buf.len() as u64);
     let lock = maps_rwlock();
 

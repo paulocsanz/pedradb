@@ -32,6 +32,22 @@ pub struct AdmissionTask {
     pub cost_units: usize,
 }
 
+impl AdmissionTask {
+    pub fn try_new(task_id: u64, priority: PriorityLevel, cost_units: usize) -> Result<Self, PriorityInversionViolation> {
+        if task_id == 0 {
+            return Err(PriorityInversionViolation::ZeroTaskId);
+        }
+        if cost_units == 0 {
+            return Err(PriorityInversionViolation::ZeroCostUnits);
+        }
+        Ok(Self {
+            task_id,
+            priority,
+            cost_units,
+        })
+    }
+}
+
 /// Violations resulting from priority inversion or unbounded maintenance head-of-line blocking.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PriorityInversionViolation {
@@ -46,7 +62,28 @@ pub enum PriorityInversionViolation {
     },
     /// Queue is empty.
     NoTasksPending,
+    ZeroTaskId,
+    ZeroCostUnits,
+    DuplicateTaskId {
+        task_id: u64,
+    },
 }
+
+impl std::fmt::Display for PriorityInversionViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PriorityInversionDetected { client_task_id, background_tasks_serviced, max_allowed_bypass } => {
+                write!(f, "Priority inversion detected: client {client_task_id} waited through {background_tasks_serviced} tasks (max {max_allowed_bypass})")
+            }
+            Self::NoTasksPending => write!(f, "No tasks pending in queue"),
+            Self::ZeroTaskId => write!(f, "Task ID cannot be 0"),
+            Self::ZeroCostUnits => write!(f, "Task cost units cannot be 0"),
+            Self::DuplicateTaskId { task_id } => write!(f, "Duplicate task ID: {task_id}"),
+        }
+    }
+}
+
+impl std::error::Error for PriorityInversionViolation {}
 
 /// Dual-lane priority admission engine.
 #[derive(Clone, Debug, Default)]
@@ -68,6 +105,23 @@ impl PriorityAdmissionEngine {
             low_priority_queue: VecDeque::new(),
             max_background_burst_with_client_pending: max_background_burst,
         }
+    }
+
+    /// Enqueues a task safely, validating task id and cost units.
+    pub fn try_submit_task(&mut self, task: AdmissionTask) -> Result<(), PriorityInversionViolation> {
+        if task.task_id == 0 {
+            return Err(PriorityInversionViolation::ZeroTaskId);
+        }
+        if task.cost_units == 0 {
+            return Err(PriorityInversionViolation::ZeroCostUnits);
+        }
+        if self.high_priority_queue.iter().any(|t| t.task_id == task.task_id)
+            || self.low_priority_queue.iter().any(|t| t.task_id == task.task_id)
+        {
+            return Err(PriorityInversionViolation::DuplicateTaskId { task_id: task.task_id });
+        }
+        self.submit_task(task);
+        Ok(())
     }
 
     /// Enqueues a task according to its priority level.
@@ -131,5 +185,35 @@ impl PriorityAdmissionEngine {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_priority_inversion_freedom_structural_invariants_red_to_green() {
+        assert_eq!(
+            AdmissionTask::try_new(0, PriorityLevel::InteractiveClientWrite, 10),
+            Err(PriorityInversionViolation::ZeroTaskId)
+        );
+
+        assert_eq!(
+            AdmissionTask::try_new(1, PriorityLevel::InteractiveClientWrite, 0),
+            Err(PriorityInversionViolation::ZeroCostUnits)
+        );
+
+        let mut engine = PriorityAdmissionEngine::new(0);
+        let task1 = AdmissionTask::try_new(100, PriorityLevel::InteractiveClientWrite, 5).unwrap();
+        assert!(engine.try_submit_task(task1.clone()).is_ok());
+
+        assert_eq!(
+            engine.try_submit_task(task1),
+            Err(PriorityInversionViolation::DuplicateTaskId { task_id: 100 })
+        );
+
+        let disp = format!("{}", PriorityInversionViolation::ZeroTaskId);
+        assert!(!disp.is_empty());
     }
 }

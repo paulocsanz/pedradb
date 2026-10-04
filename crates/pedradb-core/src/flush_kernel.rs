@@ -3,7 +3,7 @@
 //! **Single artifact:** this file is what `rustc` links *and* what Verus
 //! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
 //!
-//!   ./scripts/verus_flush_decision.sh
+//!   cargo xtask verus flush_decision
 //!
 //! Production [`crate::Db::flush`] and [`crate::Db::try_rotate_wal`] route
 //! their decisions through this kernel. Data-fate: the WAL may only be

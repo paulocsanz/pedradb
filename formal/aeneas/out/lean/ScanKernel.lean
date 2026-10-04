@@ -145,6 +145,20 @@ axiom core.slice.iter.Iter.Insts.CoreIterTraitsIteratorIteratorSharedAT.any
   core.ops.function.FnMut F T Bool) :
   core.slice.iter.Iter T → F → Result (Bool × (core.slice.iter.Iter T))
 
+/-- [crc32c::crc32c]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crc32c-0.6.8/src/lib.rs', lines 43:0-43:33
+    Name pattern: [crc32c::crc32c]
+    Visibility: public -/
+@[rust_fun "crc32c::crc32c"]
+axiom crc32c.crc32c : Slice Std.U8 → Result Std.U32
+
+/-- [crc32c::crc32c_append]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crc32c-0.6.8/src/lib.rs', lines 49:0-49:50
+    Name pattern: [crc32c::crc32c_append]
+    Visibility: public -/
+@[rust_fun "crc32c::crc32c_append"]
+axiom crc32c.crc32c_append : Std.U32 → Slice Std.U8 → Result Std.U32
+
 /-- [pedra_aeneas_scan_kernel::scan_kernel::tombstone_reaches_window]:
     Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 29:0-45:1
     Visibility: public -/
@@ -225,7 +239,7 @@ def scan_kernel.point_bounds_overlap
       else ok false
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::point_bounds_overlap_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 85:0-95:1
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 86:0-96:1
     Visibility: public -/
 def scan_kernel.point_bounds_overlap_as_is
   (smallest : Option (Slice Std.U8)) (largest : Option (Slice Std.U8))
@@ -243,7 +257,7 @@ def scan_kernel.point_bounds_overlap_as_is
   else scan_kernel.point_bounds_overlap smallest largest start end1
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::key_in_window]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 100:0-112:1
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 101:0-113:1
     Visibility: public -/
 def scan_kernel.key_in_window
   (key : Slice Std.U8) (start : core.ops.range.Bound (Slice Std.U8))
@@ -273,7 +287,7 @@ def scan_kernel.key_in_window
   else ok false
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::key_in_window_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 116:0-126:1
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 118:0-124:1
     Visibility: public -/
 def scan_kernel.key_in_window_as_is
   (key : Slice Std.U8) (start : core.ops.range.Bound (Slice Std.U8))
@@ -290,25 +304,22 @@ def scan_kernel.key_in_window_as_is
   | core.ops.range.Bound.Unbounded => ok true
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::scan_reads_file::closure]
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 147:13-147:85 -/
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 145:13-145:85 -/
 def scan_kernel.scan_reads_file.closure :=
   core.ops.range.Bound (Slice Std.U8) × core.ops.range.Bound (Slice Std.U8)
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::scan_reads_file::{impl core::ops::function::FnMut<(&'_ (&'_ [u8], &'_ [u8]),), bool> for pedra_aeneas_scan_kernel::scan_kernel::scan_reads_file::closure<'_0, '_1, '_2, '_3>}::call_mut]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 147:13-147:85 -/
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 145:13-145:85 -/
 def
   scan_kernel.scan_reads_file.closure.Insts.CoreOpsFunctionFnMutTupleSharedPairSharedSliceU8SharedSliceU8Bool.call_mut
   (c : scan_kernel.scan_reads_file.closure)
   (tupled_args : ((Slice Std.U8) × (Slice Std.U8))) :
   Result (Bool × scan_kernel.scan_reads_file.closure)
   := do
-  let (t_start, t_end) := tupled_args
-  let (start, end1) := c
-  let b ← scan_kernel.tombstone_reaches_window t_start t_end start end1
-  ok (b, c)
+  sorry
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::scan_reads_file::{impl core::ops::function::FnOnce<(&'_ (&'_ [u8], &'_ [u8]),), bool> for pedra_aeneas_scan_kernel::scan_kernel::scan_reads_file::closure<'_0, '_1, '_2, '_3>}::call_once]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 147:13-147:85 -/
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 145:13-145:85 -/
 def
   scan_kernel.scan_reads_file.closure.Insts.CoreOpsFunctionFnOnceTupleSharedPairSharedSliceU8SharedSliceU8Bool.call_once
   (c : scan_kernel.scan_reads_file.closure)
@@ -321,7 +332,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_scan_kernel::scan_kernel::scan_reads_file::{impl core::ops::function::FnOnce<(&'_ (&'_ [u8], &'_ [u8]),), bool> for pedra_aeneas_scan_kernel::scan_kernel::scan_reads_file::closure<'_0, '_1, '_2, '_3>}]
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 147:13-147:85 -/
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 145:13-145:85 -/
 @[reducible]
 def
   scan_kernel.scan_reads_file.closure.Insts.CoreOpsFunctionFnOnceTupleSharedPairSharedSliceU8SharedSliceU8Bool
@@ -332,7 +343,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_scan_kernel::scan_kernel::scan_reads_file::{impl core::ops::function::FnMut<(&'_ (&'_ [u8], &'_ [u8]),), bool> for pedra_aeneas_scan_kernel::scan_kernel::scan_reads_file::closure<'_0, '_1, '_2, '_3>}]
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 147:13-147:85 -/
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 145:13-145:85 -/
 @[reducible]
 def
   scan_kernel.scan_reads_file.closure.Insts.CoreOpsFunctionFnMutTupleSharedPairSharedSliceU8SharedSliceU8Bool
@@ -345,7 +356,7 @@ def
 }
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::scan_reads_file]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 135:0-148:1
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 133:0-146:1
     Visibility: public -/
 def scan_kernel.scan_reads_file
   (smallest : Option (Slice Std.U8)) (largest : Option (Slice Std.U8))
@@ -366,7 +377,7 @@ def scan_kernel.scan_reads_file
     ok b1
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::scan_reads_file_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 152:0-160:1
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 150:0-158:1
     Visibility: public -/
 def scan_kernel.scan_reads_file_as_is
   (smallest : Option (Slice Std.U8)) (largest : Option (Slice Std.U8))
@@ -378,19 +389,108 @@ def scan_kernel.scan_reads_file_as_is
   scan_kernel.point_bounds_overlap smallest largest start end1
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::SST_LEGACY_NO_CRC_MAX]
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 163:0-163:44
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 161:0-161:44
     Visibility: public -/
 @[global_simps, irreducible]
 def scan_kernel.SST_LEGACY_NO_CRC_MAX : Std.Usize := 32#usize
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate]
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 167:0-174:1
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 165:0-172:1
     Visibility: public -/
 @[discriminant isize]
 inductive scan_kernel.SstCrcFate where
 | StripTrailer : scan_kernel.SstCrcFate
 | WholeBuffer : scan_kernel.SstCrcFate
 | Reject : scan_kernel.SstCrcFate
+
+/-- [pedra_aeneas_scan_kernel::scan_kernel::{impl core::clone::Clone for pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate}::clone]:
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 164:9-164:14
+    Visibility: public -/
+def scan_kernel.SstCrcFate.Insts.CoreCloneClone.clone
+  (self : scan_kernel.SstCrcFate) : Result scan_kernel.SstCrcFate := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_scan_kernel::scan_kernel::{impl core::clone::Clone for pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate}]
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 164:9-164:14 -/
+@[reducible]
+def scan_kernel.SstCrcFate.Insts.CoreCloneClone : core.clone.Clone
+  scan_kernel.SstCrcFate := {
+  clone := scan_kernel.SstCrcFate.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_scan_kernel::scan_kernel::{impl core::marker::Copy for pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate}]
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 164:16-164:20 -/
+@[reducible]
+def scan_kernel.SstCrcFate.Insts.CoreMarkerCopy : core.marker.Copy
+  scan_kernel.SstCrcFate := {
+  cloneInst := scan_kernel.SstCrcFate.Insts.CoreCloneClone
+}
+
+/-- [pedra_aeneas_scan_kernel::scan_kernel::{impl core::fmt::Debug for pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate}::fmt]:
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 164:22-164:27
+    Visibility: public -/
+def scan_kernel.SstCrcFate.Insts.CoreFmtDebug.fmt
+  (self : scan_kernel.SstCrcFate) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | scan_kernel.SstCrcFate.StripTrailer =>
+    core.fmt.Formatter.write_str f (toStr "StripTrailer")
+  | scan_kernel.SstCrcFate.WholeBuffer =>
+    core.fmt.Formatter.write_str f (toStr "WholeBuffer")
+  | scan_kernel.SstCrcFate.Reject =>
+    core.fmt.Formatter.write_str f (toStr "Reject")
+
+/-- Trait implementation: [pedra_aeneas_scan_kernel::scan_kernel::{impl core::fmt::Debug for pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate}]
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 164:22-164:27 -/
+@[reducible]
+def scan_kernel.SstCrcFate.Insts.CoreFmtDebug : core.fmt.Debug
+  scan_kernel.SstCrcFate := {
+  fmt := scan_kernel.SstCrcFate.Insts.CoreFmtDebug.fmt
+}
+
+/-- Trait implementation: [pedra_aeneas_scan_kernel::scan_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate}]
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 164:29-164:38 -/
+@[reducible]
+def scan_kernel.SstCrcFate.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq scan_kernel.SstCrcFate := {
+}
+
+/-- [pedra_aeneas_scan_kernel::scan_kernel::{impl core::cmp::PartialEq<pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate> for pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate}::eq]:
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 164:29-164:38
+    Visibility: public -/
+def scan_kernel.SstCrcFate.Insts.CoreCmpPartialEqSstCrcFate.eq
+  (self : scan_kernel.SstCrcFate) (other : scan_kernel.SstCrcFate) :
+  Result Bool
+  := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_scan_kernel::scan_kernel::{impl core::cmp::PartialEq<pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate> for pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate}]
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 164:29-164:38 -/
+@[reducible]
+def scan_kernel.SstCrcFate.Insts.CoreCmpPartialEqSstCrcFate :
+  core.cmp.PartialEq scan_kernel.SstCrcFate scan_kernel.SstCrcFate := {
+  eq := scan_kernel.SstCrcFate.Insts.CoreCmpPartialEqSstCrcFate.eq
+}
+
+/-- [pedra_aeneas_scan_kernel::scan_kernel::{impl core::cmp::Eq for pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate}::assert_fields_are_eq]:
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 164:40-164:42
+    Visibility: public -/
+def scan_kernel.SstCrcFate.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : scan_kernel.SstCrcFate) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_scan_kernel::scan_kernel::{impl core::cmp::Eq for pedra_aeneas_scan_kernel::scan_kernel::SstCrcFate}]
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 164:40-164:42 -/
+@[reducible]
+def scan_kernel.SstCrcFate.Insts.CoreCmpEq : core.cmp.Eq scan_kernel.SstCrcFate
+  := {
+  partialEqInst := scan_kernel.SstCrcFate.Insts.CoreCmpPartialEqSstCrcFate
+  assert_fields_are_eq :=
+    scan_kernel.SstCrcFate.Insts.CoreCmpEq.assert_fields_are_eq
+}
 
 /-- [pedra_aeneas_scan_kernel::wal::crc::crc_match_ok]:
     Source: 'src/../../../../crates/pedradb-core/src/wal/crc_kernel.rs', lines 80:0-82:1
@@ -400,7 +500,7 @@ def wal.crc.crc_match_ok
   ok (stored = computed)
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::sst_crc_fate]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 180:0-188:1
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 178:0-186:1
     Visibility: public -/
 def scan_kernel.sst_crc_fate
   (stored : Std.U32) (computed : Std.U32) (buf_len : Std.Usize) :
@@ -415,7 +515,7 @@ def scan_kernel.sst_crc_fate
     else ok scan_kernel.SstCrcFate.Reject
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::sst_crc_fate_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 192:0-194:1
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 190:0-192:1
     Visibility: public -/
 def scan_kernel.sst_crc_fate_as_is
   (_stored : Std.U32) (_computed : Std.U32) (_buf_len : Std.Usize) :
@@ -424,29 +524,88 @@ def scan_kernel.sst_crc_fate_as_is
   ok scan_kernel.SstCrcFate.StripTrailer
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::sst_block_crc_ok]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 198:0-200:1
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 196:0-198:1
     Visibility: public -/
 def scan_kernel.sst_block_crc_ok
   (stored : Std.U32) (computed : Std.U32) : Result Bool := do
   wal.crc.crc_match_ok stored computed
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::sst_block_crc_ok_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 204:0-206:1
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 202:0-204:1
     Visibility: public -/
 def scan_kernel.sst_block_crc_ok_as_is
   (_stored : Std.U32) (_computed : Std.U32) : Result Bool := do
   ok true
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::zero_glue_admitted]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 211:0-213:1
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 209:0-211:1
     Visibility: public -/
 def scan_kernel.zero_glue_admitted : Result Bool := do
   ok false
 
 /-- [pedra_aeneas_scan_kernel::scan_kernel::zero_glue_admitted_as_is]:
-    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 217:0-219:1
+    Source: 'src/../../../../crates/pedradb-core/src/sst/scan_kernel.rs', lines 215:0-217:1
     Visibility: public -/
 def scan_kernel.zero_glue_admitted_as_is : Result Bool := do
+  ok true
+
+/-- [pedra_aeneas_scan_kernel::wal::crc::MASK_DELTA]
+    Source: 'src/../../../../crates/pedradb-core/src/wal/crc_kernel.rs', lines 22:0-22:40
+    Visibility: public -/
+@[global_simps, irreducible] def wal.crc.MASK_DELTA : Std.U32 := 2726488792#u32
+
+/-- [pedra_aeneas_scan_kernel::wal::crc::mask]:
+    Source: 'src/../../../../crates/pedradb-core/src/wal/crc_kernel.rs', lines 29:0-31:1
+    Visibility: public -/
+def wal.crc.mask (crc : Std.U32) : Result Std.U32 := do
+  let i ← lift (core.num.U32.rotate_right crc 15#u32)
+  ok (core.num.U32.wrapping_add i wal.crc.MASK_DELTA)
+
+/-- [pedra_aeneas_scan_kernel::wal::crc::unmask]:
+    Source: 'src/../../../../crates/pedradb-core/src/wal/crc_kernel.rs', lines 36:0-38:1
+    Visibility: public -/
+def wal.crc.unmask (masked_crc : Std.U32) : Result Std.U32 := do
+  let i ← lift (core.num.U32.wrapping_sub masked_crc wal.crc.MASK_DELTA)
+  ok (core.num.U32.rotate_left i 15#u32)
+
+/-- [pedra_aeneas_scan_kernel::wal::crc::crc32c]:
+    Source: 'src/../../../../crates/pedradb-core/src/wal/crc_kernel.rs', lines 44:0-46:1
+    Visibility: public -/
+def wal.crc.crc32c (data : Slice Std.U8) : Result Std.U32 := do
+  crc32c.crc32c data
+
+/-- [pedra_aeneas_scan_kernel::wal::crc::record_checksum]:
+    Source: 'src/../../../../crates/pedradb-core/src/wal/crc_kernel.rs', lines 56:0-61:1
+    Visibility: public -/
+def wal.crc.record_checksum
+  (record_type : Std.U8) (length : Std.U16) (data : Slice Std.U8) :
+  Result Std.U32
+  := do
+  let a ← lift (core.num.U16.to_le_bytes length)
+  let s ← lift (Array.to_slice a)
+  let crc ← crc32c.crc32c_append 0#u32 s
+  let s1 ← lift (Array.to_slice (Array.make 1#usize [ record_type ]))
+  let crc1 ← crc32c.crc32c_append crc s1
+  let crc2 ← crc32c.crc32c_append crc1 data
+  wal.crc.mask crc2
+
+/-- [pedra_aeneas_scan_kernel::wal::crc::crc_match_ok_as_is]:
+    Source: 'src/../../../../crates/pedradb-core/src/wal/crc_kernel.rs', lines 87:0-89:1
+    Visibility: public -/
+def wal.crc.crc_match_ok_as_is
+  (_stored : Std.U32) (_computed : Std.U32) : Result Bool := do
+  ok true
+
+/-- [pedra_aeneas_scan_kernel::wal::crc::crc_collision_admitted]:
+    Source: 'src/../../../../crates/pedradb-core/src/wal/crc_kernel.rs', lines 95:0-97:1
+    Visibility: public -/
+def wal.crc.crc_collision_admitted : Result Bool := do
+  ok false
+
+/-- [pedra_aeneas_scan_kernel::wal::crc::crc_collision_admitted_as_is]:
+    Source: 'src/../../../../crates/pedradb-core/src/wal/crc_kernel.rs', lines 102:0-104:1
+    Visibility: public -/
+def wal.crc.crc_collision_admitted_as_is : Result Bool := do
   ok true
 
 end pedra_aeneas_scan_kernel

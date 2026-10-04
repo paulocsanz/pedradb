@@ -15,7 +15,7 @@ use pedradb_core::parallel_subcompaction_slice_kernel::{
     SubCompactionSlice,
 };
 use pedradb_core::range_tombstone_bloom_dual_kernel::{
-    PruneDecision, RangeTombstoneBloomDualFilter, RangeTombstoneSpan,
+    PruneDecision, RangeTombstoneBloomDualFilter, RangeTombstoneError, RangeTombstoneSpan,
 };
 use pedradb_core::readahead_consumption_feedback_kernel::{
     AdaptiveReadaheadController, ReadaheadFeedbackPolicy,
@@ -58,6 +58,45 @@ fn test_range_tombstone_bloom_dual_pruning() {
         PruneDecision::InspectRangeTombstoneHit { tombstone_seq: 200 }
     );
 }
+
+#[test]
+fn test_range_tombstone_dual_hit_and_try_new_validation_red() {
+    let tombstones = vec![
+        RangeTombstoneSpan::new(b"key_10".to_vec(), b"key_50".to_vec(), 100),
+    ];
+
+    // 1. Dual hit: point bloom matches AND covering range tombstone exists
+    let dec = RangeTombstoneBloomDualFilter::evaluate(true, &tombstones, b"key_25", 150);
+    assert_eq!(
+        dec,
+        PruneDecision::InspectDualHit { tombstone_seq: 100 },
+        "When both bloom and range tombstone match, InspectDualHit must be returned"
+    );
+
+    // 2. try_new validation: inverted bounds
+    let err_inverted = RangeTombstoneSpan::try_new(b"key_50".to_vec(), b"key_10".to_vec(), 100);
+    assert!(matches!(err_inverted, Err(RangeTombstoneError::InvertedBounds { .. })));
+
+    // 3. try_new validation: empty range
+    let err_empty = RangeTombstoneSpan::try_new(b"key_10".to_vec(), b"key_10".to_vec(), 100);
+    assert!(matches!(err_empty, Err(RangeTombstoneError::EmptyRange { .. })));
+
+    // 4. try_new validation: zero sequence
+    let err_zero = RangeTombstoneSpan::try_new(b"key_10".to_vec(), b"key_50".to_vec(), 0);
+    assert!(matches!(err_zero, Err(RangeTombstoneError::ZeroSequenceNumber)));
+
+    // 5. evaluate_checked: rejects corrupted tombstones
+    let bad_tombstones = vec![
+        RangeTombstoneSpan {
+            start_key: b"key_50".to_vec(),
+            end_key: b"key_10".to_vec(),
+            sequence_number: 100,
+        },
+    ];
+    let err_eval = RangeTombstoneBloomDualFilter::evaluate_checked(false, &bad_tombstones, b"key_25", 150);
+    assert!(matches!(err_eval, Err(RangeTombstoneError::InvertedBounds { .. })));
+}
+
 
 #[test]
 fn test_parallel_subcompaction_slice_equivalence() {
@@ -154,6 +193,79 @@ fn test_parallel_subcompaction_slice_equivalence() {
         ParallelSubCompactionVerifier::verify_outputs(&slices, &inverted_outputs),
         Err(SubCompactionGeometryError::InterPartitionKeyInversion { .. })
     ));
+}
+
+#[test]
+fn test_subcompaction_inverted_bounds_and_unknown_partition_red() {
+    // 1. Inverted slice bounds (start >= end) must be rejected
+    let bad_slice = vec![
+        SubCompactionSlice {
+            partition_id: 0,
+            start_bound: Some(b"key_50".to_vec()),
+            end_bound: Some(b"key_20".to_vec()), // 50 > 20!
+        },
+    ];
+    let err_slice = ParallelSubCompactionVerifier::verify_slice_geometry(&bad_slice);
+    assert_eq!(
+        err_slice,
+        Err(SubCompactionGeometryError::InvertedSliceBounds { partition_id: 0 })
+    );
+
+    // 2. Output with unknown partition_id not present in slices must be rejected
+    let valid_slices = vec![
+        SubCompactionSlice {
+            partition_id: 0,
+            start_bound: None,
+            end_bound: None,
+        },
+    ];
+    let unknown_out = vec![
+        SubCompactedSstOutput {
+            partition_id: 999, // Unknown partition!
+            min_key: b"a".to_vec(),
+            max_key: b"b".to_vec(),
+            record_count: 10,
+        },
+    ];
+    let err_unknown = ParallelSubCompactionVerifier::verify_outputs(&valid_slices, &unknown_out);
+    assert_eq!(
+        err_unknown,
+        Err(SubCompactionGeometryError::UnknownPartitionId { partition_id: 999 })
+    );
+
+    // 3. Output with inverted file keys (min_key > max_key) must be rejected
+    let inverted_keys = vec![
+        SubCompactedSstOutput {
+            partition_id: 0,
+            min_key: b"z".to_vec(),
+            max_key: b"a".to_vec(), // Inverted!
+            record_count: 10,
+        },
+    ];
+    let err_inv = ParallelSubCompactionVerifier::verify_outputs(&valid_slices, &inverted_keys);
+    assert_eq!(
+        err_inv,
+        Err(SubCompactionGeometryError::InvertedFileKeys {
+            partition_id: 0,
+            min_key: b"z".to_vec(),
+            max_key: b"a".to_vec(),
+        })
+    );
+
+    // 4. Output with record_count == 0 must be rejected
+    let empty_out = vec![
+        SubCompactedSstOutput {
+            partition_id: 0,
+            min_key: b"a".to_vec(),
+            max_key: b"b".to_vec(),
+            record_count: 0, // Empty!
+        },
+    ];
+    let err_empty = ParallelSubCompactionVerifier::verify_outputs(&valid_slices, &empty_out);
+    assert_eq!(
+        err_empty,
+        Err(SubCompactionGeometryError::EmptyOutputFile { partition_id: 0 })
+    );
 }
 
 #[test]

@@ -171,3 +171,16 @@ theorem recovery_failed_install_and_active_gen_never_rewrite :
   have := recovery_first_install_failed_refuses act hinst
   have ⟨hactive, _⟩ := (recovery_blob_gc_rewrite_iff true bytes).mp hgc
   cases hactive
+
+/-- RFC-0258: recovery spine anti-vacuity tooth — the swallow-damage mutant
+    `reopen_outcome_as_is` (aliased `reopen_outcome_as_is_silent`) diverges
+    from the recovery spine on any damaged WAL, proving that the composed
+    recovery guarantee is non-vacuous. -/
+theorem recovery_spine_anti_vacuity_reopen_outcome_as_is :
+    ∀ (d : ReopenDamage) (h : d ≠ ReopenDamage.None),
+      reopen_outcome d false false = ok ReopenOutcome.RefuseOpen ∧
+        reopen_outcome_as_is_silent d false false = ok ReopenOutcome.ServeAll :=
+  as_is_swallows_damage
+
+/-- Atom alias for catalog:dictionary_link / reopen_outcome_as_is. -/
+def reopen_outcome_as_is := reopen_outcome_as_is_silent

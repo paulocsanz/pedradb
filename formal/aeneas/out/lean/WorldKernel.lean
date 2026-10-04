@@ -177,10 +177,12 @@ def Pair.Insts.CoreCmpPartialEqPair {U : Type} {T : Type} (cmpPartialEqInst :
     Source: '/rustc/library/core/src/tuple.rs', lines 44:12-44:60
     Name pattern: [core::cmp::Eq<(@U, @T)>] -/
 @[reducible, rust_trait_impl "core::cmp::Eq<(@U, @T)>"]
-def Pair.Insts.CoreCmpEq {U : Type} {T : Type} (cmpEqInst : core.cmp.Eq U)
+impl_def Pair.Insts.CoreCmpEq {U : Type} {T : Type} (cmpEqInst : core.cmp.Eq U)
   (cmpEqInst1 : core.cmp.Eq T) : core.cmp.Eq (U × T) := {
   partialEqInst := Pair.Insts.CoreCmpPartialEqPair cmpEqInst.partialEqInst
     cmpEqInst1.partialEqInst
+  assert_fields_are_eq := core.cmp.Eq.assert_fields_are_eq.default
+    (Pair.Insts.CoreCmpEq cmpEqInst cmpEqInst1)
 }
 
 /-- [std::collections::hash::map::HashMap]
@@ -315,6 +317,38 @@ structure TrajectorySample where
   snapshot_index : Std.U64
   applied_index : Std.U64
 
+/-- [pedra_aeneas_world_kernel::{impl core::fmt::Debug for pedra_aeneas_world_kernel::TrajectorySample}::fmt]:
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 23:9-23:14
+    Visibility: public -/
+def TrajectorySample.Insts.CoreFmtDebug.fmt
+  (self : TrajectorySample) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  let dyn := Dyn.mk _ core.fmt.DebugU32 self.step
+  let dyn1 := Dyn.mk _ core.fmt.DebugU64 self.node
+  let dyn2 := Dyn.mk _ core.fmt.DebugU64 self.range
+  let dyn3 := Dyn.mk _ core.fmt.DebugU64 self.term
+  let dyn4 := Dyn.mk _ core.fmt.DebugU64 self.snapshot_index
+  let dyn5 :=
+    Dyn.mk _ (core.fmt.DebugShared core.fmt.DebugU64) self.applied_index
+  let values :=
+    Array.to_slice (Array.make 6#usize [ dyn, dyn1, dyn2, dyn3, dyn4, dyn5 ])
+  let s ←
+    lift (Array.to_slice
+      (Array.make 6#usize [
+        toStr "step", toStr "node", toStr "range", toStr "term", toStr
+        "snapshot_index", toStr "applied_index"
+        ]))
+  core.fmt.Formatter.debug_struct_fields_finish f (toStr "TrajectorySample") s
+    values
+
+/-- Trait implementation: [pedra_aeneas_world_kernel::{impl core::fmt::Debug for pedra_aeneas_world_kernel::TrajectorySample}]
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 23:9-23:14 -/
+@[reducible]
+def TrajectorySample.Insts.CoreFmtDebug : core.fmt.Debug TrajectorySample := {
+  fmt := TrajectorySample.Insts.CoreFmtDebug.fmt
+}
+
 /-- [pedra_aeneas_world_kernel::{impl core::clone::Clone for pedra_aeneas_world_kernel::TrajectorySample}::clone]:
     Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 23:16-23:21
     Visibility: public -/
@@ -336,6 +370,65 @@ def TrajectorySample.Insts.CoreCloneClone.clone
       applied_index := i5
     }
 
+/-- Trait implementation: [pedra_aeneas_world_kernel::{impl core::clone::Clone for pedra_aeneas_world_kernel::TrajectorySample}]
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 23:16-23:21 -/
+@[reducible]
+def TrajectorySample.Insts.CoreCloneClone : core.clone.Clone TrajectorySample
+  := {
+  clone := TrajectorySample.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_world_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_world_kernel::TrajectorySample}]
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 23:23-23:32 -/
+@[reducible]
+def TrajectorySample.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq TrajectorySample := {
+}
+
+/-- [pedra_aeneas_world_kernel::{impl core::cmp::PartialEq<pedra_aeneas_world_kernel::TrajectorySample> for pedra_aeneas_world_kernel::TrajectorySample}::eq]:
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 23:23-23:32
+    Visibility: public -/
+def TrajectorySample.Insts.CoreCmpPartialEqTrajectorySample.eq
+  (self : TrajectorySample) (other : TrajectorySample) : Result Bool := do
+  if self.step = other.step
+  then
+    if self.node = other.node
+    then
+      if self.range = other.range
+      then
+        if self.term = other.term
+        then
+          if self.snapshot_index = other.snapshot_index
+          then ok (self.applied_index = other.applied_index)
+          else ok false
+        else ok false
+      else ok false
+    else ok false
+  else ok false
+
+/-- Trait implementation: [pedra_aeneas_world_kernel::{impl core::cmp::PartialEq<pedra_aeneas_world_kernel::TrajectorySample> for pedra_aeneas_world_kernel::TrajectorySample}]
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 23:23-23:32 -/
+@[reducible]
+def TrajectorySample.Insts.CoreCmpPartialEqTrajectorySample :
+  core.cmp.PartialEq TrajectorySample TrajectorySample := {
+  eq := TrajectorySample.Insts.CoreCmpPartialEqTrajectorySample.eq
+}
+
+/-- [pedra_aeneas_world_kernel::{impl core::cmp::Eq for pedra_aeneas_world_kernel::TrajectorySample}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 23:34-23:36
+    Visibility: public -/
+def TrajectorySample.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : TrajectorySample) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_world_kernel::{impl core::cmp::Eq for pedra_aeneas_world_kernel::TrajectorySample}]
+    Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 23:34-23:36 -/
+@[reducible]
+def TrajectorySample.Insts.CoreCmpEq : core.cmp.Eq TrajectorySample := {
+  partialEqInst := TrajectorySample.Insts.CoreCmpPartialEqTrajectorySample
+  assert_fields_are_eq := TrajectorySample.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
 /-- [pedra_aeneas_world_kernel::trajectory_violation]:
     Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 42:0-55:1
     Visibility: public -/
@@ -343,15 +436,7 @@ def trajectory_violation
   (prev : TrajectorySample) (cur : TrajectorySample) :
   Result (Option Str)
   := do
-  if cur.term < prev.term
-  then ok (some (toStr "term"))
-  else
-    if cur.snapshot_index < prev.snapshot_index
-    then ok (some (toStr "snapshot_index"))
-    else
-      if cur.applied_index < prev.applied_index
-      then ok (some (toStr "applied_index"))
-      else ok none
+  sorry
 
 /-- [pedra_aeneas_world_kernel::trajectory_violation_as_is]:
     Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 61:0-70:1
@@ -360,120 +445,20 @@ def trajectory_violation_as_is
   (prev : TrajectorySample) (cur : TrajectorySample) :
   Result (Option Str)
   := do
-  if cur.term < prev.term
-  then ok (some (toStr "term"))
-  else ok none
+  sorry
 
 /-- [pedra_aeneas_world_kernel::check_trajectory]:
     Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 78:0-110:1
     Visibility: public -/
-axiom str_to_string : Str → Result String
-
-@[rust_loop_body]
-def find_prev_loop.body
-  (samples : Slice TrajectorySample) (s : TrajectorySample) (j : Std.Usize) :
-  Result (ControlFlow Std.Usize (Option TrajectorySample))
-  := do
-  if j > 0#usize
-  then
-    let j1 ← j - 1#usize
-    let p ← Slice.index_usize samples j1
-    if p.node = s.node
-    then
-      if p.range = s.range
-      then ok (done (some p))
-      else ok (cont j1)
-    else ok (cont j1)
-  else ok (done none)
-
-@[rust_loop]
-def find_prev_loop
-  (samples : Slice TrajectorySample) (s : TrajectorySample) (j : Std.Usize) :
-  Result (Option TrajectorySample)
-  := do
-  loop (fun j1 => find_prev_loop.body samples s j1) j
-
-@[rust_loop_body]
-def check_trajectory_loop.body
-  (samples : Slice TrajectorySample) (out : alloc.vec.Vec String)
-  (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec String) × Std.Usize)
-    (alloc.vec.Vec String))
-  := do
-  let n := Slice.len samples
-  if i < n
-  then
-    let s ← Slice.index_usize samples i
-    let o ← find_prev_loop samples s i
-    let out1 ←
-      match o with
-      | none => ok out
-      | some p =>
-        let w ← trajectory_violation p s
-        match w with
-        | none => ok out
-        | some what =>
-          let msg ← str_to_string what
-          alloc.vec.Vec.push out msg
-    let i1 ← i + 1#usize
-    ok (cont (out1, i1))
-  else ok (done out)
-
-@[rust_loop]
-def check_trajectory_loop
-  (samples : Slice TrajectorySample) (out : alloc.vec.Vec String)
-  (i : Std.Usize) : Result (alloc.vec.Vec String)
-  := do
-  loop
-    (fun (out1, i1) => check_trajectory_loop.body samples out1 i1)
-    (out, i)
-
 def check_trajectory
   (samples : Slice TrajectorySample) : Result (alloc.vec.Vec String) := do
-  let out0 := alloc.vec.Vec.new String
-  check_trajectory_loop samples out0 0#usize
+  sorry
 
 /-- [pedra_aeneas_world_kernel::check_trajectory_as_is]:
     Source: '../../../crates/pedradb-world/src/world_kernel.rs', lines 115:0-147:1
     Visibility: public -/
-@[rust_loop_body]
-def check_trajectory_as_is_loop.body
-  (samples : Slice TrajectorySample) (out : alloc.vec.Vec String)
-  (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec String) × Std.Usize)
-    (alloc.vec.Vec String))
-  := do
-  let n := Slice.len samples
-  if i < n
-  then
-    let s ← Slice.index_usize samples i
-    let o ← find_prev_loop samples s i
-    let out1 ←
-      match o with
-      | none => ok out
-      | some p =>
-        let w ← trajectory_violation_as_is p s
-        match w with
-        | none => ok out
-        | some what =>
-          let msg ← str_to_string what
-          alloc.vec.Vec.push out msg
-    let i1 ← i + 1#usize
-    ok (cont (out1, i1))
-  else ok (done out)
-
-@[rust_loop]
-def check_trajectory_as_is_loop
-  (samples : Slice TrajectorySample) (out : alloc.vec.Vec String)
-  (i : Std.Usize) : Result (alloc.vec.Vec String)
-  := do
-  loop
-    (fun (out1, i1) => check_trajectory_as_is_loop.body samples out1 i1)
-    (out, i)
-
 def check_trajectory_as_is
   (samples : Slice TrajectorySample) : Result (alloc.vec.Vec String) := do
-  let out0 := alloc.vec.Vec.new String
-  check_trajectory_as_is_loop samples out0 0#usize
+  sorry
 
 end pedra_aeneas_world_kernel

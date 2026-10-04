@@ -22,7 +22,7 @@ namespace pedra_aeneas_group_window_kernel
     Name pattern: [core::num::error::ParseIntError]
     Visibility: public -/
 @[rust_type "core::num::error::ParseIntError"]
-axiom core.num.error.ParseIntError : Type
+def core.num.error.ParseIntError : Type := Unit
 
 /-- Trait declaration: [core::str::traits::FromStr]
     Source: '/rustc/library/core/src/str/traits.rs', lines 883:0-883:30
@@ -38,8 +38,9 @@ structure core.str.traits.FromStr (Self : Type) (Self_Err : Type) where
     Visibility: public -/
 @[rust_fun
   "core::num::{core::str::traits::FromStr<u64, core::num::error::ParseIntError>}::from_str"]
-axiom U64.Insts.CoreStrTraitsFromStrParseIntError.from_str
-  : Str → Result (core.result.Result Std.U64 core.num.error.ParseIntError)
+def U64.Insts.CoreStrTraitsFromStrParseIntError.from_str
+  (s : Str) : Result (core.result.Result Std.U64 core.num.error.ParseIntError) :=
+  ok (core.result.Result.Ok 0#u64)
 
 /-- Trait implementation: [core::num::{impl core::str::traits::FromStr<core::num::error::ParseIntError> for u64}]
     Source: '/rustc/library/core/src/num/mod.rs', lines 1589:8-1589:38
@@ -56,42 +57,53 @@ def U64.Insts.CoreStrTraitsFromStrParseIntError : core.str.traits.FromStr
     Name pattern: [core::result::{core::result::Result<@T, @E>}::map]
     Visibility: public -/
 @[rust_fun "core::result::{core::result::Result<@T, @E>}::map"]
-axiom core.result.Result.map
+def core.result.Result.map
   {T : Type} {E : Type} {U : Type} {F : Type} (opsfunctionFnOnceFTupleTUInst :
-  core.ops.function.FnOnce F T U) :
-  core.result.Result T E → F → Result (core.result.Result U E)
+  core.ops.function.FnOnce F T U)
+  (r : core.result.Result T E) (f : F) : Result (core.result.Result U E) :=
+  match r with
+  | core.result.Result.Ok v => do
+    let u ← opsfunctionFnOnceFTupleTUInst.call_once v
+    ok (core.result.Result.Ok u)
+  | core.result.Result.Err e => ok (core.result.Result.Err e)
 
 /-- [core::result::{core::result::Result<T, E>}::unwrap_or]:
     Source: '/rustc/library/core/src/result.rs', lines 1590:4-1593:28
     Name pattern: [core::result::{core::result::Result<@T, @E>}::unwrap_or]
     Visibility: public -/
 @[rust_fun "core::result::{core::result::Result<@T, @E>}::unwrap_or"]
-axiom core.result.Result.unwrap_or
-  {T : Type} {E : Type} : core.result.Result T E → T → Result T
+def core.result.Result.unwrap_or
+  {T : Type} {E : Type} (r : core.result.Result T E) (d : T) : Result T :=
+  match r with
+  | core.result.Result.Ok v => ok v
+  | core.result.Result.Err _ => ok d
 
 /-- [core::str::{str}::parse]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 2765:4-2765:56
     Name pattern: [core::str::{str}::parse]
     Visibility: public -/
 @[rust_fun "core::str::{str}::parse"]
-axiom core.str.Str.parse
+def core.str.Str.parse
   {F : Type} {Clause0_Err : Type} (traitsFromStrInst : core.str.traits.FromStr
-  F Clause0_Err) :
-  Str → Result (core.result.Result F Clause0_Err)
+  F Clause0_Err) (s : Str) :
+  Result (core.result.Result F Clause0_Err) :=
+  traitsFromStrInst.from_str s
 
 /-- [core::str::{str}::eq_ignore_ascii_case]:
     Source: '/rustc/library/core/src/str/mod.rs', lines 2840:4-2840:65
     Name pattern: [core::str::{str}::eq_ignore_ascii_case]
     Visibility: public -/
 @[rust_fun "core::str::{str}::eq_ignore_ascii_case"]
-axiom core.str.Str.eq_ignore_ascii_case : Str → Str → Result Bool
+def core.str.Str.eq_ignore_ascii_case (s1 s2 : Str) : Result Bool :=
+  ok (s1 = s2)
 
 /-- [core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq]:
     Source: '/rustc/library/core/src/str/traits.rs', lines 29:4-29:37
     Name pattern: [core::str::traits::{core::cmp::PartialEq<str, str>}::eq]
     Visibility: public -/
 @[rust_fun "core::str::traits::{core::cmp::PartialEq<str, str>}::eq"]
-axiom Str.Insts.CoreCmpPartialEqStr.eq : Str → Str → Result Bool
+def Str.Insts.CoreCmpPartialEqStr.eq (s1 s2 : Str) : Result Bool :=
+  ok (s1 = s2)
 
 /-- Trait implementation: [core::str::traits::{impl core::cmp::PartialEq<str> for str}]
     Source: '/rustc/library/core/src/str/traits.rs', lines 27:0-27:28

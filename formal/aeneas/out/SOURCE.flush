@@ -1,4 +1,4 @@
 path=crates/pedradb-core/src/flush_kernel.rs
-sha256=32fa3098d6b247e275401bef320d15950893715ceb221379d9fbc0fb0c5fc0f2
+sha256=b3ba74ccd675b7e1245b9320478004e2351809cbdf91dd340eda35f18813277a
 aeneas=f5a4c58-dirty
 charon=0.1.232

@@ -11,6 +11,17 @@ pub mod error {
     pub type Result<T> = std::result::Result<T, CoreError>;
 }
 
+pub mod mutation_switch_kernel {
+    pub const MUTANT_INVERT_COMPARATOR: u32 = 1004;
+}
+
+#[macro_export]
+macro_rules! mutate_switch {
+    ($id:expr, $baseline:expr, $mutant:expr) => {
+        $baseline
+    };
+}
+
 #[path = "../../../../crates/pedradb-core/src/key_kernel.rs"]
 pub mod key;
 

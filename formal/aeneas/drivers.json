@@ -1,0 +1,446 @@
+{
+  "ae": {
+    "base": "ae_kernel",
+    "crate": "formal/aeneas/ae-kernel",
+    "kernel": "crates/pedradb-raft/src/ae_kernel.rs",
+    "sid": "ae"
+  },
+  "apply": {
+    "base": "apply_kernel",
+    "crate": "formal/aeneas/apply-kernel",
+    "kernel": "crates/pedradb-raft/src/apply_kernel.rs",
+    "sid": "apply"
+  },
+  "auth": {
+    "base": "auth_kernel",
+    "crate": "formal/aeneas/auth-kernel",
+    "kernel": "crates/pedradb-http/src/auth_kernel.rs",
+    "sid": "auth"
+  },
+  "c1_modelo": {
+    "base": "c1_modelo_kernel",
+    "crate": "formal/aeneas/c1-modelo-kernel",
+    "kernel": "crates/pedradb-raft/src/c1_modelo_kernel.rs",
+    "sid": "c1_modelo"
+  },
+  "cf": {
+    "base": "cf_kernel",
+    "crate": "formal/aeneas/cf-kernel",
+    "kernel": "crates/pedradb-core/src/cf_kernel.rs",
+    "sid": "cf"
+  },
+  "changelog": {
+    "base": "changelog_kernel",
+    "crate": "formal/aeneas/changelog-kernel",
+    "kernel": "crates/pedradb-core/src/changelog_kernel.rs",
+    "sid": "changelog"
+  },
+  "children": {
+    "base": "children_kernel",
+    "crate": "formal/aeneas/children-kernel",
+    "kernel": "crates/montanha-fdb-recipes/src/children_kernel.rs",
+    "sid": "children"
+  },
+  "cl": {
+    "base": "cl_kernel",
+    "crate": "formal/aeneas/cl-kernel",
+    "kernel": "crates/pedradb-http/src/cl_kernel.rs",
+    "sid": "cl"
+  },
+  "client_axis": {
+    "base": "client_axis_kernel",
+    "crate": "formal/aeneas/client-axis-kernel",
+    "kernel": "crates/pedradb-core/src/client_axis_kernel.rs",
+    "sid": "client_axis"
+  },
+  "commit": {
+    "base": "commit_kernel",
+    "crate": "formal/aeneas/commit-kernel",
+    "kernel": "crates/pedradb-raft/src/commit_kernel.rs",
+    "sid": "commit"
+  },
+  "compact": {
+    "base": "compact_kernel",
+    "crate": "formal/aeneas/compact-kernel",
+    "kernel": "crates/pedradb-core/src/compact_kernel.rs",
+    "sid": "compact"
+  },
+  "cqe": {
+    "base": "cqe_kernel",
+    "crate": "formal/aeneas/cqe-kernel",
+    "kernel": "crates/pedradb-io-uring/src/cqe_kernel.rs",
+    "sid": "cqe"
+  },
+  "crc": {
+    "base": "crc_kernel",
+    "crate": "formal/aeneas/crc-kernel",
+    "kernel": "crates/pedradb-core/src/wal/crc_kernel.rs",
+    "sid": "crc"
+  },
+  "cursor": {
+    "base": "cursor_kernel",
+    "crate": "formal/aeneas/cursor-kernel",
+    "kernel": "crates/pedradb-stream/src/cursor_kernel.rs",
+    "sid": "cursor"
+  },
+  "d1_modelo": {
+    "base": "d1_modelo_kernel",
+    "crate": "formal/aeneas/d1-modelo-kernel",
+    "kernel": "crates/pedradb-core/src/d1_modelo_kernel.rs",
+    "sid": "d1_modelo"
+  },
+  "dcs_apply": {
+    "base": "dcs_apply_kernel",
+    "crate": "formal/aeneas/dcs-apply-kernel",
+    "kernel": "crates/pedradb-dcs/src/apply_kernel.rs",
+    "sid": "dcs_apply"
+  },
+  "disk_pressure": {
+    "base": "disk_pressure_kernel",
+    "crate": "formal/aeneas/disk-pressure-kernel",
+    "kernel": "crates/pedradb-core/src/disk_pressure_kernel.rs",
+    "sid": "disk_pressure"
+  },
+  "durability_spine": {
+    "base": "durability_spine_kernel",
+    "crate": "formal/aeneas/durability-spine-kernel",
+    "kernel": "crates/pedradb-core/src/durability_spine_kernel.rs",
+    "sid": "durability_spine"
+  },
+  "env_crash": {
+    "base": "env_crash_kernel",
+    "crate": "formal/aeneas/env-crash-kernel",
+    "kernel": "crates/pedradb-core/src/env_crash_kernel.rs",
+    "sid": "env_crash"
+  },
+  "fail_closed": {
+    "base": "fail_closed_kernel",
+    "crate": "formal/aeneas/fail-closed-kernel",
+    "kernel": "crates/pedradb-http/src/fail_closed_kernel.rs",
+    "sid": "fail_closed"
+  },
+  "fields": {
+    "base": "fields_kernel",
+    "crate": "formal/aeneas/fields-kernel",
+    "kernel": "crates/montanha-fdb-recipes/src/fields_kernel.rs",
+    "sid": "fields"
+  },
+  "flush": {
+    "base": "flush_kernel",
+    "crate": "formal/aeneas/flush-kernel",
+    "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+    "sid": "flush"
+  },
+  "fold": {
+    "base": "fold_kernel",
+    "crate": "formal/aeneas/fold-kernel",
+    "kernel": "crates/pedradb-fold/src/fold_kernel.rs",
+    "sid": "fold"
+  },
+  "form": {
+    "base": "form_kernel",
+    "crate": "formal/aeneas/form-kernel",
+    "kernel": "crates/pedradb-http/src/form_kernel.rs",
+    "sid": "form"
+  },
+  "group_commit": {
+    "base": "group_commit_kernel",
+    "crate": "formal/aeneas/group-commit-kernel",
+    "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+    "sid": "group_commit"
+  },
+  "group_window": {
+    "base": "group_window_kernel",
+    "crate": "formal/aeneas/group-window-kernel",
+    "kernel": "crates/pedradb-core/src/group_window_kernel.rs",
+    "sid": "group_window"
+  },
+  "index_val": {
+    "base": "index_val_kernel",
+    "crate": "formal/aeneas/index-val-kernel",
+    "kernel": "crates/pedradb-store/src/index_val_kernel.rs",
+    "sid": "index_val"
+  },
+  "isolated": {
+    "base": "isolated_kernel",
+    "crate": "formal/aeneas/isolated-kernel",
+    "kernel": "crates/pedradb-fold/src/isolated_kernel.rs",
+    "sid": "isolated"
+  },
+  "iter": {
+    "base": "iter_kernel",
+    "crate": "formal/aeneas/iter-kernel",
+    "kernel": "crates/rocksdb-compat/src/iter_kernel.rs",
+    "sid": "iter"
+  },
+  "key": {
+    "base": "key_kernel",
+    "crate": "formal/aeneas/key-kernel",
+    "kernel": "crates/pedradb-core/src/key_kernel.rs",
+    "sid": "key"
+  },
+  "l28": {
+    "base": "l28_kernel",
+    "crate": "formal/aeneas/l28-kernel",
+    "kernel": "crates/pedradb-store/src/l28_kernel.rs",
+    "sid": "l28"
+  },
+  "lease": {
+    "base": "lease_kernel",
+    "crate": "formal/aeneas/lease-kernel",
+    "kernel": "crates/pedradb-dcs/src/lease_kernel.rs",
+    "sid": "lease"
+  },
+  "leftover_page": {
+    "base": "leftover_page_kernel",
+    "crate": "formal/aeneas/leftover-page-kernel",
+    "kernel": "crates/pedradb-core/src/leftover_page_kernel.rs",
+    "sid": "leftover_page"
+  },
+  "leveling": {
+    "base": "leveling_kernel",
+    "crate": "formal/aeneas/leveling-kernel",
+    "kernel": "crates/pedradb-core/src/leveling_kernel.rs",
+    "sid": "leveling"
+  },
+  "lookup": {
+    "base": "lookup_kernel",
+    "crate": "formal/aeneas/lookup-kernel",
+    "kernel": "crates/pedradb-core/src/lookup_kernel.rs",
+    "sid": "lookup"
+  },
+  "lsm_r1": {
+    "base": "lsm_r1_kernel",
+    "crate": "formal/aeneas/lsm-r1-kernel",
+    "kernel": "crates/pedradb-core/src/lsm_r1_kernel.rs",
+    "sid": "lsm_r1"
+  },
+  "manifest": {
+    "base": "manifest_kernel",
+    "crate": "formal/aeneas/manifest-kernel",
+    "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
+    "sid": "manifest"
+  },
+  "membership": {
+    "base": "membership_kernel",
+    "crate": "formal/aeneas/membership-kernel",
+    "kernel": "crates/pedradb-raft/src/membership_kernel.rs",
+    "sid": "membership"
+  },
+  "merge": {
+    "base": "merge_kernel",
+    "crate": "formal/aeneas/merge-kernel",
+    "kernel": "crates/pedradb-core/src/merge_kernel.rs",
+    "sid": "merge"
+  },
+  "pack": {
+    "base": "pack_kernel",
+    "crate": "formal/aeneas/pack-kernel",
+    "kernel": "crates/montanha-fdb-recipes/src/pack_kernel.rs",
+    "sid": "pack"
+  },
+  "path": {
+    "base": "path_kernel",
+    "crate": "formal/aeneas/path-kernel",
+    "kernel": "crates/pedradb-http/src/path_kernel.rs",
+    "sid": "path"
+  },
+  "pin": {
+    "base": "pin_kernel",
+    "crate": "formal/aeneas/pin-kernel",
+    "kernel": "crates/pedradb-journal/src/pin_kernel.rs",
+    "sid": "pin"
+  },
+  "prefix": {
+    "base": "prefix_kernel",
+    "crate": "formal/aeneas/prefix-kernel",
+    "kernel": "crates/pedradb-core/src/prefix_kernel.rs",
+    "sid": "prefix"
+  },
+  "probe_order": {
+    "base": "probe_order_kernel",
+    "crate": "formal/aeneas/probe-order-kernel",
+    "kernel": "crates/pedradb-core/src/probe_order_kernel.rs",
+    "sid": "probe_order"
+  },
+  "properties": {
+    "base": "properties_kernel",
+    "crate": "formal/aeneas/properties-kernel",
+    "kernel": "crates/pedradb-spec/src/properties_kernel.rs",
+    "sid": "properties"
+  },
+  "ratio_curve": {
+    "base": "ratio_curve_kernel",
+    "crate": "formal/aeneas/ratio-curve-kernel",
+    "kernel": "crates/pedradb-core/src/ratio_curve_kernel.rs",
+    "sid": "ratio_curve"
+  },
+  "reopen": {
+    "base": "reopen_kernel",
+    "crate": "formal/aeneas/reopen-kernel",
+    "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
+    "sid": "reopen"
+  },
+  "rpc_mode": {
+    "base": "rpc_mode_kernel",
+    "crate": "formal/aeneas/rpc-mode-kernel",
+    "kernel": "crates/pedradb-store/src/rpc_mode_kernel.rs",
+    "sid": "rpc_mode"
+  },
+  "scale": {
+    "base": "scale_kernel",
+    "crate": "formal/aeneas/scale-kernel",
+    "kernel": "crates/pedradb-core/src/scale_kernel.rs",
+    "sid": "scale"
+  },
+  "scan": {
+    "base": "scan_kernel",
+    "crate": "formal/aeneas/scan-kernel",
+    "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
+    "sid": "scan"
+  },
+  "scan_readahead": {
+    "base": "scan_readahead_kernel",
+    "crate": "formal/aeneas/scan-readahead-kernel",
+    "kernel": "crates/pedradb-core/src/scan_readahead_kernel.rs",
+    "sid": "scan_readahead"
+  },
+  "ship": {
+    "base": "ship_kernel",
+    "crate": "formal/aeneas/ship-kernel",
+    "kernel": "crates/pedradb-replicate/src/ship_kernel.rs",
+    "sid": "ship"
+  },
+  "si": {
+    "base": "si_kernel",
+    "crate": "formal/aeneas/si-kernel",
+    "kernel": "crates/pedradb-store/src/si_kernel.rs",
+    "sid": "si"
+  },
+  "snapshot": {
+    "base": "snapshot_kernel",
+    "crate": "formal/aeneas/snapshot-kernel",
+    "kernel": "crates/pedradb-store/src/snapshot_kernel.rs",
+    "sid": "snapshot"
+  },
+  "store_ae_ack": {
+    "base": "store_ae_ack_kernel",
+    "crate": "formal/aeneas/store-ae-ack-kernel",
+    "kernel": "crates/pedradb-store/src/ae_ack_kernel.rs",
+    "sid": "store_ae_ack"
+  },
+  "store_apply": {
+    "base": "store_apply_kernel",
+    "crate": "formal/aeneas/store-apply-kernel",
+    "kernel": "crates/pedradb-store/src/apply_kernel.rs",
+    "sid": "store_apply"
+  },
+  "store_commit": {
+    "base": "store_commit_kernel",
+    "crate": "formal/aeneas/store-commit-kernel",
+    "kernel": "crates/pedradb-store/src/commit_kernel.rs",
+    "sid": "store_commit"
+  },
+  "store_compact": {
+    "base": "store_compact_kernel",
+    "crate": "formal/aeneas/store-compact-kernel",
+    "kernel": "crates/pedradb-store/src/compact_kernel.rs",
+    "sid": "store_compact"
+  },
+  "store_membership": {
+    "base": "store_membership_kernel",
+    "crate": "formal/aeneas/store-membership-kernel",
+    "kernel": "crates/pedradb-store/src/membership_kernel.rs",
+    "sid": "store_membership"
+  },
+  "store_txn": {
+    "base": "store_txn_kernel",
+    "crate": "formal/aeneas/store-txn-kernel",
+    "kernel": "crates/pedradb-store/src/txn_kernel.rs",
+    "sid": "store_txn"
+  },
+  "store_vote": {
+    "base": "store_vote_kernel",
+    "crate": "formal/aeneas/store-vote-kernel",
+    "kernel": "crates/pedradb-store/src/vote_kernel.rs",
+    "sid": "store_vote"
+  },
+  "t1_modelo": {
+    "base": "t1_modelo_kernel",
+    "crate": "formal/aeneas/t1-modelo-kernel",
+    "kernel": "crates/pedradb-store/src/t1_modelo_kernel.rs",
+    "sid": "t1_modelo"
+  },
+  "tcg": {
+    "base": "tcg_kernel",
+    "crate": "formal/aeneas/tcg-kernel",
+    "kernel": "crates/pedradb-world/src/tcg_kernel.rs",
+    "sid": "tcg"
+  },
+  "tx_glue": {
+    "base": "tx_glue_kernel",
+    "crate": "formal/aeneas/tx-glue-kernel",
+    "kernel": "crates/pedradb-store/src/tx_glue_kernel.rs",
+    "sid": "tx_glue"
+  },
+  "txn": {
+    "base": "txn_kernel",
+    "crate": "formal/aeneas/txn-kernel",
+    "kernel": "crates/pedradb-store/src/txn_kernel.rs",
+    "sid": "txn"
+  },
+  "vlog_gc": {
+    "base": "vlog_gc_kernel",
+    "crate": "formal/aeneas/vlog-gc-kernel",
+    "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
+    "sid": "vlog_gc"
+  },
+  "vote": {
+    "base": "vote_kernel",
+    "crate": "formal/aeneas/vote-kernel",
+    "kernel": "crates/pedradb-raft/src/vote_kernel.rs",
+    "sid": "vote"
+  },
+  "wal_recover": {
+    "base": "wal_recover_kernel",
+    "crate": "formal/aeneas/wal-recover-kernel",
+    "kernel": "crates/pedradb-core/src/wal/recover_kernel.rs",
+    "sid": "wal_recover"
+  },
+  "wal_state": {
+    "base": "wal_state_kernel",
+    "crate": "formal/aeneas/wal-state-kernel",
+    "kernel": "crates/pedradb-core/src/wal/wal_state_kernel.rs",
+    "sid": "wal_state"
+  },
+  "wal_ticket": {
+    "base": "wal_ticket_kernel",
+    "crate": "formal/aeneas/wal-ticket-kernel",
+    "kernel": "crates/pedradb-core/src/wal_ticket_kernel.rs",
+    "sid": "wal_ticket"
+  },
+  "world": {
+    "base": "world_kernel",
+    "crate": "formal/aeneas/world-kernel",
+    "kernel": "crates/pedradb-world/src/world_kernel.rs",
+    "sid": "world"
+  },
+  "write_ack": {
+    "base": "write_ack_kernel",
+    "crate": "formal/aeneas/write-ack-kernel",
+    "kernel": "crates/pedradb-core/src/write_ack_kernel.rs",
+    "sid": "write_ack"
+  },
+  "write_admission": {
+    "base": "write_admission_kernel",
+    "crate": "formal/aeneas/write-admission-kernel",
+    "kernel": "crates/pedradb-core/src/write_admission_kernel.rs",
+    "sid": "write_admission"
+  },
+  "write_cycle": {
+    "base": "write_cycle_kernel",
+    "crate": "formal/aeneas/write-cycle-kernel",
+    "kernel": "crates/pedradb-core/src/write_cycle_kernel.rs",
+    "sid": "write_cycle"
+  }
+}

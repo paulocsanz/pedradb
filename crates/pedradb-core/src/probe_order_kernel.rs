@@ -4,7 +4,7 @@
 //! *and* what Verus proves (`cfg(verus_keep_ghost)`). Slice covering walk
 //! stays rustc. No twin-cópia.
 //!
-//!   ./scripts/verus_probe_order.sh
+//!   cargo xtask verus probe_order
 //!
 //! Spec S: the tables probed for a point lookup must be visited newest-first
 //! among the candidates whose `[lo, hi]` covers the key. The engine's

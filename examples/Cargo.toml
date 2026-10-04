@@ -64,3 +64,6 @@ path = "backup.rs"
 [[example]]
 name = "rocksdb_dropin"
 path = "rocksdb_dropin.rs"
+
+[lints]
+workspace = true

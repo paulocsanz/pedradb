@@ -2,10 +2,10 @@
 //! the SST-inventory reopen path).
 //!
 //! **Term:** this file is what `rustc` links. Aeneas extracts that body
-//! (`scripts/aeneas_manifest.sh`). A Verus stand-in of ManifestObs billed as
+//! (`cargo xtask aeneas manifest`). A Verus stand-in of ManifestObs billed as
 //! last-wins of a cfg-split file is a model twin (deleted).
 //!
-//!   ./scripts/aeneas_manifest.sh --required
+//!   cargo xtask aeneas manifest --required
 //!
 //! Production `recover_ssts` (called by [`crate::Db::open_with_env`])
 //! routes every decision through this kernel: given what `manifest::load`

@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
+use std::fmt;
 
 /// Two-phase commit decision outcome.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,7 +64,39 @@ pub enum TwoPcDivergenceViolation {
         /// Shard that committed illegally.
         shard_id: usize,
     },
+    /// Empty participant set provided for 2PC transaction.
+    EmptyParticipantSet,
+    /// Shard ID 0 is reserved for coordinator.
+    ZeroShardIdReservedForCoordinator,
 }
+
+impl fmt::Display for TwoPcDivergenceViolation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AtomicDecisionDivergence {
+                committed_shard,
+                aborted_shard,
+            } => write!(
+                f,
+                "2PC decision divergence: shard {committed_shard} committed while shard {aborted_shard} aborted"
+            ),
+            Self::SpontaneousCommitWithoutQuorum { shard_id } => write!(
+                f,
+                "spontaneous commit without quorum on shard {shard_id}"
+            ),
+            Self::EmptyParticipantSet => write!(
+                f,
+                "participant set cannot be empty in distributed 2PC transaction"
+            ),
+            Self::ZeroShardIdReservedForCoordinator => write!(
+                f,
+                "shard ID 0 is reserved for the transaction coordinator"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TwoPcDivergenceViolation {}
 
 /// Verification engine for 2PC distributed recovery confluence.
 pub struct TwoPcConfluenceEngine;
@@ -72,11 +105,18 @@ impl TwoPcConfluenceEngine {
     /// Simulates and verifies crash-recovery reconciliation across coordinator and participant shards.
     ///
     /// # Errors
-    /// Returns `TwoPcDivergenceViolation` if shards converge to opposing outcomes.
+    /// Returns `TwoPcDivergenceViolation` if shards converge to opposing outcomes or inputs violate invariants.
     pub fn recover_and_verify(
         coordinator_durable_state: CoordinatorState,
         participant_states: &BTreeMap<usize, ParticipantState>,
     ) -> Result<TwoPcDecision, TwoPcDivergenceViolation> {
+        if participant_states.is_empty() {
+            return Err(TwoPcDivergenceViolation::EmptyParticipantSet);
+        }
+        if participant_states.contains_key(&0) {
+            return Err(TwoPcDivergenceViolation::ZeroShardIdReservedForCoordinator);
+        }
+
         // Step 1: The coordinator's durable disk state dictates the true global decision
         let global_decision = match coordinator_durable_state {
             CoordinatorState::CommittedDurable => TwoPcDecision::Commit,
@@ -137,3 +177,62 @@ impl TwoPcConfluenceEngine {
         Ok(global_decision)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_twopc_confluence_structural_invariants_red_to_green() {
+        // 1. Error Display & std::error::Error conformance
+        let errs: Vec<TwoPcDivergenceViolation> = vec![
+            TwoPcDivergenceViolation::AtomicDecisionDivergence {
+                committed_shard: 0,
+                aborted_shard: 2,
+            },
+            TwoPcDivergenceViolation::SpontaneousCommitWithoutQuorum { shard_id: 1 },
+            TwoPcDivergenceViolation::EmptyParticipantSet,
+            TwoPcDivergenceViolation::ZeroShardIdReservedForCoordinator,
+        ];
+        for err in &errs {
+            let msg = format!("{err}");
+            assert!(!msg.is_empty());
+            let dyn_err: &dyn std::error::Error = err;
+            assert_eq!(dyn_err.to_string(), msg);
+        }
+
+        // 2. Empty participant set rejection
+        let empty_parts = BTreeMap::new();
+        assert_eq!(
+            TwoPcConfluenceEngine::recover_and_verify(
+                CoordinatorState::CommittedDurable,
+                &empty_parts
+            ),
+            Err(TwoPcDivergenceViolation::EmptyParticipantSet)
+        );
+
+        // 3. Shard ID 0 rejection (reserved for coordinator)
+        let mut zero_part = BTreeMap::new();
+        zero_part.insert(0, ParticipantState::PreparedDurable);
+        assert_eq!(
+            TwoPcConfluenceEngine::recover_and_verify(
+                CoordinatorState::CommittedDurable,
+                &zero_part
+            ),
+            Err(TwoPcDivergenceViolation::ZeroShardIdReservedForCoordinator)
+        );
+
+        // 4. Valid confluence
+        let mut valid_parts = BTreeMap::new();
+        valid_parts.insert(1, ParticipantState::PreparedDurable);
+        valid_parts.insert(2, ParticipantState::CommittedDurable);
+        assert_eq!(
+            TwoPcConfluenceEngine::recover_and_verify(
+                CoordinatorState::CommittedDurable,
+                &valid_parts
+            ),
+            Ok(TwoPcDecision::Commit)
+        );
+    }
+}
+

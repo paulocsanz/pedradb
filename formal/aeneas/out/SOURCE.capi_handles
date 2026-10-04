@@ -1,0 +1,4 @@
+path=crates/pedradb-capi/src/handles_kernel.rs
+sha256=fe98991eae7889acba77e714251552abf4f7f932d9684fad11914d00f9cecfc5
+aeneas=f5a4c58-dirty
+charon=0.1.232

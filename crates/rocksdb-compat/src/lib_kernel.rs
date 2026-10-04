@@ -1396,6 +1396,76 @@ fn encoded_succ(enc: &[u8]) -> Option<Vec<u8>> {
 static DEFAULT_CF_ARC: std::sync::LazyLock<Arc<str>> =
     std::sync::LazyLock::new(|| DEFAULT_CF.into());
 
+/// RFC-0306 P1: batch staging slabs. `put_cf` used to pay two
+/// allocations per op (`Bytes::copy_from_slice` of key and value — 2048
+/// per hydrate batch on the single client thread). These thread-local
+/// `BytesMut` slabs keep their capacity across batches: each op copies
+/// into the slab and takes a refcounted view (`split_to().freeze()`), and
+/// the slab rolls over to a fresh one only when its remaining capacity
+/// runs low — the previous allocation lives on through the outstanding
+/// views, so nothing is ever copied at rollover. This is the fix for the
+/// aa6d24e regression: that arena was per-batch and regrew from zero
+/// every apply (~18 reallocs of accumulated large blocks); here growth
+/// never happens under live views and rollover is one fresh allocation
+/// per ~8 MiB staged. `PEDRA_ARENA_DISABLE=1` restores the per-op path
+/// for A/B.
+const ARENA_SLAB_CAP: usize = 8 << 20;
+const ARENA_SLAB_KEEP: usize = 64 << 10;
+
+thread_local! {
+    static ARENA_KEY_SLAB: std::cell::RefCell<bytes::BytesMut> =
+        std::cell::RefCell::new(bytes::BytesMut::with_capacity(ARENA_SLAB_CAP));
+    static ARENA_VAL_SLAB: std::cell::RefCell<bytes::BytesMut> =
+        std::cell::RefCell::new(bytes::BytesMut::with_capacity(ARENA_SLAB_CAP));
+}
+
+fn arena_enabled() -> bool {
+    thread_local! {
+        static ON: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    }
+    ON.with(|c| {
+        if let Some(on) = c.get() {
+            return on;
+        }
+        let on = std::env::var_os("PEDRA_ARENA_DISABLE").is_none_or(|v| v != "1");
+        c.set(Some(on));
+        on
+    })
+}
+
+/// Copy `src` into `slab` and return an owned view of the copy.
+fn arena_view(slab: &mut bytes::BytesMut, src: &[u8]) -> bytes::Bytes {
+    if slab.capacity() < src.len().saturating_add(ARENA_SLAB_KEEP).min(ARENA_SLAB_CAP) {
+        *slab = bytes::BytesMut::with_capacity(ARENA_SLAB_CAP);
+    }
+    slab.extend_from_slice(src);
+    let n = src.len();
+    slab.split_to(n).freeze()
+}
+
+/// Stage `src` through the thread-local key slab (or a plain copy when
+/// the arena is disabled).
+fn arena_key(src: &[u8]) -> bytes::Bytes {
+    if !arena_enabled() {
+        return bytes::Bytes::copy_from_slice(src);
+    }
+    ARENA_KEY_SLAB.with(|c| {
+        let mut slab = c.borrow_mut();
+        arena_view(&mut slab, src)
+    })
+}
+
+/// Stage `src` through the thread-local value slab.
+fn arena_val(src: &[u8]) -> bytes::Bytes {
+    if !arena_enabled() {
+        return bytes::Bytes::copy_from_slice(src);
+    }
+    ARENA_VAL_SLAB.with(|c| {
+        let mut slab = c.borrow_mut();
+        arena_view(&mut slab, src)
+    })
+}
+
 /// RFC-0306 probe hook: point-path block counters (main-thread TLS read).
 #[derive(Debug, Clone, Copy)]
 pub struct ProbeCounters {
@@ -1413,50 +1483,12 @@ pub fn probe_counters() -> ProbeCounters {
 }
 
 /// Atomic write batch (one Pedra `apply_batch` = all-or-nothing).
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct WriteBatch {
     ops: Vec<(Option<Arc<str>>, BatchOp)>,
-    /// RFC-0306 P1: batch-scoped staging bump. `put_cf`/`delete_*` append
-    /// here and hand out `Bytes` views of one shared backing instead of
-    /// one allocation per key and per value (4.03 allocs/op measured at
-    /// 25M). Unlike the retired thread-local arena this cannot outlive
-    /// the batch: the buffer is owned by the `WriteBatch`, and views the
-    /// engine retains keep only this batch's backing alive — bounded by
-    /// the live run/chunk, never by the process.
-    staging: bytes::BytesMut,
-}
-
-/// Initial staging capacity: sized so a hydrate batch (~1024 ops x 240 B)
-/// never forces a grow while views are outstanding (a shared-block grow
-/// copies the live tail). Amortized to ~0 allocations per op.
-const WRITE_BATCH_STAGING_BYTES: usize = 128 * 1024;
-
-impl Default for WriteBatch {
-    fn default() -> Self {
-        Self {
-            ops: Vec::new(),
-            staging: bytes::BytesMut::with_capacity(WRITE_BATCH_STAGING_BYTES),
-        }
-    }
 }
 
 impl WriteBatch {
-    /// Copy `raw` into the staging bump and return a shared view of it.
-    fn stage(&mut self, raw: &[u8]) -> Bytes {
-        self.staging.extend_from_slice(raw);
-        self.staging.split_to(raw.len()).freeze()
-    }
-
-    /// Stage `key` and `value` with one bump append and one detach:
-    /// `Bytes::slice` on the frozen pair is a zero-copy view.
-    fn stage_kv(&mut self, key: &[u8], value: &[u8]) -> (Bytes, Bytes) {
-        self.staging.extend_from_slice(key);
-        self.staging.extend_from_slice(value);
-        let pair = self.staging.split_to(key.len() + value.len()).freeze();
-        let k = pair.slice(..key.len());
-        let v = pair.slice(key.len()..);
-        (k, v)
-    }
     /// Empty batch.
     #[must_use]
     pub fn new() -> Self {
@@ -1488,9 +1520,13 @@ impl WriteBatch {
 
     /// Put into a named CF.
     pub fn put_cf(&mut self, cf: &ColumnFamily, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
-        let (key, value) = self.stage_kv(key.as_ref(), value.as_ref());
-        self.ops
-            .push((Some(Arc::clone(&cf.name)), BatchOp::Put { key, value }));
+        self.ops.push((
+            Some(Arc::clone(&cf.name)),
+            BatchOp::Put {
+                key: arena_key(key.as_ref()),
+                value: arena_val(value.as_ref()),
+            },
+        ));
     }
 
     /// Stage an owned-Bytes put without a second key/value copy — the
@@ -1513,9 +1549,12 @@ impl WriteBatch {
 
     /// Delete from a named CF.
     pub fn delete_cf(&mut self, cf: &ColumnFamily, key: impl AsRef<[u8]>) {
-        let key = self.stage(key.as_ref());
-        self.ops
-            .push((Some(Arc::clone(&cf.name)), BatchOp::Delete { key }));
+        self.ops.push((
+            Some(Arc::clone(&cf.name)),
+            BatchOp::Delete {
+                key: arena_key(key.as_ref()),
+            },
+        ));
     }
 
     /// Stage an owned-Bytes delete (see [`Self::put_cf_bytes`]).
@@ -1536,11 +1575,12 @@ impl WriteBatch {
         if s >= e {
             return;
         }
-        let start = self.stage(s);
-        let end = self.stage(e);
         self.ops.push((
             Some(Arc::clone(&cf.name)),
-            BatchOp::DeleteRange { start, end },
+            BatchOp::DeleteRange {
+                start: arena_key(s),
+                end: arena_key(e),
+            },
         ));
     }
 }
@@ -1946,6 +1986,11 @@ impl<E: PedraEnv> Snapshot<'_, E> {
     pub fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         self.db.get_at(self.snap, DEFAULT_CF, key)
     }
+
+    /// Point read on a CF pinned at the snapshot sequence.
+    ///
+    /// # Errors
+    /// Unknown CF or Pedra errors.
     pub fn get_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         self.db.get_at(self.snap, &cf.name, key)
     }
@@ -2515,12 +2560,13 @@ impl<E: PedraEnv> DB<E> {
         // SST residency. Rocks caches 4 KiB blocks; slipstream's default
         // 1 GiB knob then pinned 1 GiB of 64 MiB files on the 3.9 GiB
         // guest and v57 lookup_100 regressed. Cap whole-file residency at
-        // the 256 MiB default; a smaller knob still shrinks it.
-        let payload_budget = opts
-            .block_cache_bytes
-            .unwrap_or(DEFAULT_SST_PAYLOAD_BUDGET_BYTES)
-            .min(DEFAULT_SST_PAYLOAD_BUDGET_BYTES);
-        core_opts.sst_payload_budget_bytes = Some(payload_budget);
+        // the 256 MiB default; a smaller knob still shrinks it. The decoded
+        // block cache stays separately capped below.
+        core_opts.sst_payload_budget_bytes = Some(
+            opts.block_cache_bytes
+                .unwrap_or(DEFAULT_SST_PAYLOAD_BUDGET_BYTES)
+                .min(DEFAULT_SST_PAYLOAD_BUDGET_BYTES),
+        );
         if opts.enable_blob_files {
             core_opts.large_value_threshold = Some(opts.min_blob_size as usize);
         }
@@ -2542,14 +2588,12 @@ impl<E: PedraEnv> DB<E> {
             db.set_auto_reclaim(true);
         }
         if let Some(n) = opts.block_cache_bytes {
-            // RFC-0160 P2.3 + RFC-0305 A/B (100M on a 4 GiB guest): the
-            // caller's `NewLRUCache` / `set_block_cache` bounds Pedra's
-            // whole read cache — payload residency above plus the decoded
-            // plain-block cache — to the same memory budget Rocks gets.
-            // Stacking the plain budget on top of the payload share
-            // oversubscribed the box by `payload_budget` and lookup_100
-            // paid cold-block churn for re-probes that never came.
-            db.set_block_cache_budget_bytes(n.saturating_sub(payload_budget).max(1));
+            // RFC-0160 P2.3: the caller's `NewLRUCache` / `set_block_cache`
+            // sizes the 4 KiB decoded-block cache (Rocks block cache), not
+            // whole-file SST residency (capped above at 256 MiB). The old
+            // 32 MiB decoded cap left slipstream's 1 GiB knob inert and
+            // get_hit tied with Rocks at 10M+.
+            db.set_block_cache_budget_bytes(n.max(1));
         }
         // Rocks parity: rust-rocksdb drops superseded versions below the
         // oldest live snapshot (`Snapshot` pins / OCC begins). This bounds
@@ -2599,24 +2643,12 @@ impl<E: PedraEnv> DB<E> {
     }
 
     fn notify_compact(&self) {
-        // RFC-0305: per-apply notification woke the compact worker ~1 kHz
-        // during hydrate; its tick takes three Db read locks and walks the
-        // SST inventory (tombstone-due) — pure interference with the
-        // writer's write lock. The worker's own 5 ms poll plus at-most-20 ms
-        // of added latency here covers every trigger.
-        thread_local! {
-            static LAST_NOTIFY: std::cell::Cell<Option<std::time::Instant>> =
-                const { std::cell::Cell::new(None) };
-        }
-        const MIN_GAP: std::time::Duration = std::time::Duration::from_millis(20);
-        let should = LAST_NOTIFY.with(|l| match l.get() {
-            Some(last) => last.elapsed() >= MIN_GAP,
-            None => true,
-        });
-        if !should {
-            return;
-        }
-        LAST_NOTIFY.with(|l| l.set(Some(std::time::Instant::now())));
+        // RFC-0306: a 20 ms per-thread throttle here (round 2) broke
+        // `auto_compact_when_sst_count_reaches_threshold` — compact
+        // wake-up latency is user-visible, not noise. Reverted; if the
+        // bench box's HYDRATEDIAG attributes writer interference to
+        // compact wakes, re-land as event-driven notifies (flush/install
+        // events), never a blanket delay.
         if let Some(tx) = &self.flush_tx {
             let _ = tx.try_send(CompactCmd::Run);
         }
@@ -2680,27 +2712,6 @@ impl<E: PedraEnv> DB<E> {
     #[must_use]
     pub fn sst_run_debug(&self) -> Vec<(u32, usize, bool)> {
         self.inner.with_read(|core| core.sst_run_debug())
-    }
-
-    /// RFC-0306 stale-read hunt: engine encoding of a user key.
-    /// RFC-0308 stale-read hunt: (visible, last) sequence numbers.
-    pub fn debug_seqs(&self) -> (u64, u64) {
-        (self.inner.visible_sequence(), self.inner.last_sequence())
-    }
-
-    /// RFC-0308 stale-read hunt: point-get branch counters.
-    pub fn debug_point_branches(&self) -> [u64; 3] {
-        self.inner.point_get_branch_counters()
-    }
-
-    /// RFC-0306 stale-read hunt: engine encoding of a user key.
-    pub fn debug_encode(&self, cf: &str, key: &[u8]) -> Vec<u8> {
-        self.codec.encode(cf, key).into()
-    }
-
-    /// RFC-0306 stale-read hunt: per-layer trace of an ENCODED key.
-    pub fn debug_lookup_trace_encoded(&self, enc: &[u8]) -> String {
-        self.inner.point_lookup_trace(enc)
     }
 
     /// RFC-0306 probe hook: tables probed by point lookups so far.
@@ -2784,7 +2795,6 @@ impl<E: PedraEnv> DB<E> {
             decide(&v)
         }
     }
-
 
     /// Put into the default CF.
     ///
@@ -2894,13 +2904,6 @@ impl<E: PedraEnv> DB<E> {
     ///
     /// # Errors
     /// Pedra read errors.
-    /// RFC-0308 Pilar D: named-CF get returning `Bytes` (refcount handoff,
-    /// no `.to_vec()` per get — the Vec API copies the payload on every
-    /// hit). Same path and semantics as `get_cf`.
-    pub fn get_cf_bytes(&self, cf: &ColumnFamily, key: &[u8]) -> Result<Option<Bytes>> {
-        self.get_cached_bytes(&cf.name, key)
-    }
-
     pub fn get_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         self.get_cached(&cf.name, key)
     }
@@ -2917,45 +2920,6 @@ impl<E: PedraEnv> DB<E> {
     }
 
     /// TLS-warmed point get on a CF name already known valid.
-    /// RFC-0308 Pilar D: `get_cached` without the terminal value copy —
-    /// hits hand the cached `Bytes` straight through.
-    fn get_cached_bytes(&self, cf: &str, key: &[u8]) -> Result<Option<Bytes>> {
-        let effective = cf_encode_effective(cf, self.codec.default_raw);
-        thread_local! {
-            static ENC: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
-        }
-        ENC.with(|cell| -> Result<Option<Bytes>> {
-            let mut buf = cell.borrow_mut();
-            buf.clear();
-            if !pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
-                buf.extend_from_slice(effective.as_bytes());
-                buf.push(0);
-            }
-            buf.extend_from_slice(key);
-            let enc: &[u8] = &buf;
-            if self.fast_encoded_miss(enc) {
-                drop(buf);
-                self.inner.note_class_point(false);
-                return Ok(None);
-            }
-            let epoch = self.cache_epoch_base + self.inner.point_tls_epoch();
-            let gen = self.inner.key_tls_gen(enc);
-            if let Some(hit) = LAST_CF.with(|slot| slot.borrow().get(epoch, gen, cf, key)) {
-                drop(buf);
-                self.inner.note_class_point(hit.is_some());
-                return Ok(hit);
-            }
-            let got = self.inner.get(enc);
-            drop(buf);
-            if got.is_some() {
-                LAST_CF.with(|slot| {
-                    slot.borrow_mut().store(epoch, gen, cf, key, got.clone())
-                });
-            }
-            Ok(got)
-        })
-    }
-
     fn get_cached(&self, cf: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         let key = key.as_ref();
         // Fast-path bypass is delegated to self.inner.get to ensure memtables are checked first
@@ -3987,6 +3951,12 @@ impl<E: PedraEnv> DB<E> {
             };
             return self.inner.compact_filter(&mut native).map_err(Error::from);
         }
+        // RFC-0306: settle is the bench's capture point — emit the writer
+        // phase accounting here (also printed at DB drop) so a hydrate run
+        // attributes its budget without scraping the tail of the log.
+        if pedradb_core::write_diag_kernel::latched_bulk_diag_enabled() {
+            eprintln!("{}", pedradb_core::write_diag_kernel::latched_bulk_diag_line());
+        }
         self.inner.compact().map_err(Error::from)
     }
 
@@ -4572,44 +4542,6 @@ impl<E: PedraEnv> DB<E> {
         key: impl AsRef<[u8]>,
     ) -> Result<Option<DBPinnableSlice<'_>>> {
         Ok(self.get_cf(cf, key)?.map(DBPinnableSlice::from_vec))
-    }
-
-    /// RFC-0308 Pilar A: batched named-CF point reads with a sorted probe
-    /// plan. One visible-sequence read for the whole batch; keys execute
-    /// in ENCODED order so consecutive keys usually land in the same run
-    /// table (its bloom partition and index stay hot between probes — the
-    /// locality neither the per-key loop nor Rocks' MultiGet has), with
-    /// stable indices restoring the caller's order. Results are `Bytes`
-    /// (Pilar D: no per-hit payload copy).
-    pub fn multi_get_cf_bytes<'a, K, I>(&self, keys: I) -> Vec<Result<Option<Bytes>>>
-    where
-        K: AsRef<[u8]>,
-        I: IntoIterator<Item = (&'a ColumnFamily, K)>,
-    {
-        let pairs: Vec<(&ColumnFamily, K)> = keys.into_iter().collect();
-        let n = pairs.len();
-        let mut out: Vec<Result<Option<Bytes>>> = Vec::with_capacity(n);
-        if pedradb_core::write_admission_kernel::batch_is_empty(n as u64) {
-            return out;
-        }
-        // Encode every key once, remember its position.
-        let mut plan: Vec<(usize, Vec<u8>)> = Vec::with_capacity(n);
-        for (i, (cf, k)) in pairs.iter().enumerate() {
-            let mut enc = Vec::with_capacity(cf.name.len() + 1 + k.as_ref().len());
-            enc.extend_from_slice(cf.name.as_bytes());
-            enc.push(0);
-            enc.extend_from_slice(k.as_ref());
-            plan.push((i, enc));
-        }
-        plan.sort_by(|a, b| a.1.cmp(&b.1));
-        let mut results: Vec<Option<Option<Bytes>>> = vec![None; n];
-        for (i, enc) in &plan {
-            results[*i] = Some(self.inner.get(enc));
-        }
-        for r in results.into_iter() {
-            out.push(Ok(r.unwrap_or(None)));
-        }
-        out
     }
 
     /// rust-rocksdb `multi_get`.
@@ -5281,14 +5213,6 @@ where
     E::File: Send + Sync + 'static,
 {
     let (tx, rx) = mpsc::sync_channel(1);
-    if worker_count == 0 {
-        // RFC-0306 triage / API honesty: max_background_jobs = 0 spawns no
-        // workers and arms no flush backpressure. The old clamp(1,16) at
-        // the call site turned 0 into 1, so "no background jobs" still ran
-        // a poller — the differential oracle's no-worker knob was a no-op.
-        drop(rx);
-        return (None, None, Vec::new());
-    }
     // Flush backpressure is armed: with this worker draining parked mems,
     // submits may block on flush debt (WriteGroup::await_flush_debt).
     inner.set_flush_worker_attached(true);
@@ -7554,7 +7478,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0306 P0 teeth:    /// RFC-0306 P0 teeth: a settled miss outside every family envelope
+    /// RFC-0306 P1 teeth: a batch big enough to roll the staging slabs
+    /// over mid-batch must keep every op view readable (aa6d24e's
+    /// per-batch arena regressed here; retained slabs must not).
+    #[test]
+    fn write_batch_arena_views_survive_rollover() {
+        let dir = tmp("p1-arena-rollover");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_sync(false);
+        let db = DB::open_cf(&opts, &dir, &["data"]).unwrap();
+        let data = db.cf_handle("data").unwrap();
+        let mut wo = WriteOptions::default();
+        wo.set_sync(false);
+        let val = vec![b'v'; 200];
+        // ~12 MiB staged — the slabs roll at ~8 MiB.
+        let n = 60_000usize;
+        let mut wb = WriteBatch::default();
+        for j in 0..n {
+            wb.put_cf(&data, format!("k-{j:08}").as_bytes(), &val);
+        }
+        assert_eq!(wb.len(), n);
+        db.write_opt_owned(wb, &wo).unwrap();
+        db.flush().unwrap();
+        for j in [0usize, 1, n / 2, n - 2, n - 1] {
+            assert_eq!(
+                db.get_named("data", format!("k-{j:08}").as_bytes())
+                    .unwrap()
+                    .as_deref(),
+                Some(val.as_slice()),
+                "key {j} must read back across the slab rollover"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0306 P0 teeth: a settled miss outside every family envelope
     /// answers None on the pre-TLS fast path, a write outside the old
     /// envelope invalidates the cached envelope (the new key must read
     /// back), and the gap key inside the envelope still goes through the
@@ -7607,7 +7566,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Slipstream path: `WriteBatch` + `write_opt` after latch, then get.    /// Slipstream path: `WriteBatch` + `write_opt` after latch, then get.
+    /// Slipstream path: `WriteBatch` + `write_opt` after latch, then get.
     #[test]
     fn write_opt_latched_hydrate_roundtrip() {
         let dir = tmp("writeopt-bulk");

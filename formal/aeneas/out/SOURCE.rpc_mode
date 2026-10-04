@@ -1,0 +1,4 @@
+path=crates/pedradb-store/src/rpc_mode_kernel.rs
+sha256=60b9c90786a03872fdba0b7e6b30b8827ae49d797f068dad8f140ecdf2a0d829
+aeneas=f5a4c58-dirty
+charon=0.1.232

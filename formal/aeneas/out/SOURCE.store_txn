@@ -1,0 +1,4 @@
+path=crates/pedradb-store/src/txn_kernel.rs
+sha256=7cfc8e204e8386d56798f7dc7a5330b4c3a878a8b678d49bff7ed71da5d33976
+aeneas=f5a4c58-dirty
+charon=0.1.232

@@ -272,7 +272,7 @@ def membership_kernel.membership_identity_before_applied_as_is
     Visibility: public -/
 def membership_kernel.high_water_at_least
   (disk_hw : Std.U64) (ram_hw : Std.U64) : Result Std.U64 := do
-  core.cmp.Ord.max.default core.cmp.OrdU64.partialOrdInst.lt disk_hw ram_hw
+  core.cmp.Ord.max.default core.cmp.OrdU64 disk_hw ram_hw
 
 /-- [pedra_aeneas_store_membership_kernel::membership_kernel::high_water_at_least_as_is]:
     Source: 'src/../../../../crates/pedradb-store/src/membership_kernel.rs', lines 159:0-161:1
@@ -687,16 +687,13 @@ def membership_kernel.liveness_admitted_as_is
     Visibility: public -/
 def membership_kernel.elect_claim_banner
   (es1 : Bool) (es2 : Bool) (es3 : Bool) : Result Str := do
-  let b ← membership_kernel.liveness_admitted es1 es2 es3
-  if b
-  then ok (toStr "eventual-live es1=1 es2=1 es3=1")
-  else ok (toStr "bounded-elect not-eventual")
+  sorry
 
 /-- [pedra_aeneas_store_membership_kernel::membership_kernel::elect_claim_banner_as_is]:
     Source: 'src/../../../../crates/pedradb-store/src/membership_kernel.rs', lines 506:0-508:1
     Visibility: public -/
 def membership_kernel.elect_claim_banner_as_is
   (_es1 : Bool) (_es2 : Bool) (_es3 : Bool) : Result Str := do
-  ok (toStr "live")
+  sorry
 
 end pedra_aeneas_store_membership_kernel

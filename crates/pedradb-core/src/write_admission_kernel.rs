@@ -3,7 +3,7 @@
 //! **Single artifact:** this file is what `rustc` links *and* what Verus
 //! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
 //!
-//!   ./scripts/verus_write_admission.sh
+//!   cargo xtask verus write_admission
 
 #![forbid(unsafe_code)]
 

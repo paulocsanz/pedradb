@@ -284,9 +284,6 @@ official-Pedra baseline supersedes it.
 ## Reproducing
 
 ```sh
-# Pedra, 1M smoke (no extra toolchain)
-SCALE_ENTRIES=1000000 ./scripts/reproduce-scale.sh pedradb /tmp/scale-pedra
-
 # Official harness, one backend per process
 cd crates/snapshot-bench
 for b in pedradb rocksdb; do

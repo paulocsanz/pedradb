@@ -6,10 +6,10 @@
 //! merge path that does not require materialising the full keyspace first.
 
 //! **Term:** this file is what `rustc` links. Aeneas extracts that body
-//! (`scripts/aeneas_merge.sh`). A toy-enum / u64 view of `&[u8]` /
+//! (`cargo xtask aeneas merge`). A toy-enum / u64 view of `&[u8]` /
 //! `key::ValueType` is a model twin — not last-wins (deleted).
 //!
-//!   ./scripts/aeneas_merge.sh --required
+//!   cargo xtask aeneas merge --required
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BinaryHeap, VecDeque};
@@ -138,10 +138,14 @@ pub fn write_op_range_end_as_is(_kind: ValueType, _value: &[u8]) -> Option<&[u8]
 /// hides it. `Deletion` / `RangeDeletion` are not live.
 #[must_use]
 pub fn visible_at(kind: ValueType, range_hidden: bool) -> bool {
-    match kind {
-        ValueType::Value => !range_hidden,
-        ValueType::Deletion | ValueType::RangeDeletion => false,
-    }
+    crate::mutate_switch!(
+        crate::mutation_switch_kernel::MUTANT_RESURRECT_TOMBSTONE,
+        match kind {
+            ValueType::Value => !range_hidden,
+            ValueType::Deletion | ValueType::RangeDeletion => false,
+        },
+        true
+    )
 }
 
 /// AS-IS: never hide (deleted / range-covered keys scan as live).
@@ -256,7 +260,7 @@ pub fn iter_window_keep_as_is(_snapshot_live: bool) -> bool {
 /// One min-heap sift-down step decision (RFC-0187 P1.3 heap-sift kernel).
 /// The production heap owns only the ORDER of heads ([`head_before`] over
 /// `(user_key, sequence)`); the STRUCTURE of the repair lives in this
-/// kernel, extracted by `scripts/aeneas_merge.sh`.
+/// kernel, extracted by `cargo xtask aeneas merge`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SiftStep {
     /// Hole already beats both children — invariant restored.

@@ -112,11 +112,11 @@ let json_status: String = format_json_status(&stats, &health);
 
 ---
 
-## 3. Cloud-Native HTTP Endpoints (`pedradb-http`)
+## 3. Standard Observability Output
 
-When serving via `pedradb-http`, standard observability endpoints are exposed:
+When exposing metrics via HTTP endpoints in host services, standard observability payloads are generated directly via `pedradb-core`:
 
-### `GET /metrics`
+### OpenMetrics / Prometheus (`format_prometheus_metrics`)
 Returns OpenMetrics / Prometheus formatted plain text (`text/plain; version=0.0.4; charset=utf-8`):
 
 ```text
@@ -152,12 +152,12 @@ pedra_space_amplification 1.210000
 pedra_corruptions_detected 0
 ```
 
-### `GET /health` and `GET /status`
+### JSON Health (`format_json_status`)
 Returns JSON representation of engine health.
 
-**HTTP Status Codes (Cloud-Native Fail-Closed Semantics):**
-- **`200 OK`**: Status is `Healthy` or `Degraded`. Traffic is permitted.
-- **`503 Service Unavailable`**: Status is `ActionRequired`. Kubernetes readiness/liveness probes automatically evict the pod or fail over traffic.
+**Cloud-Native Fail-Closed Semantics:**
+- **Healthy or Degraded**: System operates normally or handles background maintenance. Traffic is permitted (HTTP 200).
+- **ActionRequired**: Integrity or severe resource hazard requires intervention. Kubernetes readiness/liveness probes fail closed (HTTP 503).
 
 **Example Response:**
 ```json
@@ -185,22 +185,17 @@ Returns JSON representation of engine health.
 
 ---
 
-## 4. Push Alerting Webhooks
+## 4. Health-Based Automated Action
 
-For environments without active pull-based Prometheus scraping, `pedradb-http` supports automated alert webhooks:
+Applications embedding PedraDB can evaluate health states directly to trigger automated remedies or dispatch alerts:
 
 ```rust
-use pedradb_http::dispatch_health_webhook;
-
 let report = db.health();
 let stats = db.stats();
 
 if report.status == pedradb_core::HealthStatus::ActionRequired {
-    let webhook_addr = "127.0.0.1:9090";
-    let endpoint = "/api/v1/alerts";
-    if let Err(e) = dispatch_health_webhook(webhook_addr, endpoint, &report, &stats) {
-        eprintln!("Failed to push alert webhook: {e}");
-    }
+    eprintln!("ActionRequired: {:?}", report.issues);
+    // Dispatch alert or fail Kubernetes readiness probe
 }
 ```
 
@@ -208,6 +203,6 @@ if report.status == pedradb_core::HealthStatus::ActionRequired {
 
 ## 5. Architectural References
 
-- **RFC-0269**: [Sistema Unificado de Métricas, Saúde, Intervenção e Telemetria](rfc/0269-sistema-unificado-metricas-saude-intervencao-telemetria.md)
-- **Comparative Research Report**: [Comparative Study of Database Internals & Health Observability](reports/2026-09-24-internal-metrics-and-health-observability.md)
-- **Zero-Twin Verification Policy**: [RFC-0270](rfc/0270-zero-twin-verification.md)
+- **RFC-0269**: Sistema Unificado de Métricas, Saúde, Intervenção e Telemetria
+- **Comparative Research Report**: Comparative Study of Database Internals & Health Observability
+- **Zero-Twin Verification Policy**: RFC-0270

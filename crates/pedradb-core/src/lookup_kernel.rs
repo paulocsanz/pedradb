@@ -4,7 +4,7 @@
 //! proves (`cfg(verus_keep_ghost)`). `db.rs` `get_at` / lookup call these
 //! instead of raw `snap.seq` comparisons.
 //!
-//!   ./scripts/verus_lookup.sh
+//!   cargo xtask verus lookup
 
 #![forbid(unsafe_code)]
 

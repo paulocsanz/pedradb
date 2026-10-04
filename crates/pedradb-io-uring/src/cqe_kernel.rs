@@ -6,7 +6,7 @@
 //! for them; `cqe_res_ok` is the term — not a ring model
 //! (`cqe_ring_model_admitted` stays false).
 //!
-//!   ./scripts/aeneas_cqe.sh
+//!   cargo xtask aeneas cqe
 //!
 //! Production Linux `ring::UringState` is the only caller. Bytes on disk, the
 //! ring, and `submit_and_wait` are **caller + axiom**.

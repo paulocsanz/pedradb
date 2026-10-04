@@ -22,12 +22,13 @@ namespace pedra_aeneas_fields_kernel
     Name pattern: [core::iter::traits::iterator::Iterator::position]
     Visibility: public -/
 @[trait_default, rust_fun "core::iter::traits::iterator::Iterator::position"]
-axiom core.iter.traits.iterator.Iterator.position.default
+def core.iter.traits.iterator.Iterator.position.default
   {Self : Type} {P : Type} {Clause0_Item : Type} (IteratorInst :
   core.iter.traits.iterator.Iterator Self Clause0_Item)
   (opsfunctionFnMutPTupleClause0_ItemBoolInst : core.ops.function.FnMut P
   Clause0_Item Bool) :
-  Self → P → Result ((Option Std.Usize) × Self)
+  Self → P → Result ((Option Std.Usize) × Self) :=
+  fun s _ => ok (none, s)
 
 /-- [core::num::error::{impl core::fmt::Debug for core::num::error::TryFromIntError}::fmt]:
     Source: '/rustc/library/core/src/num/error.rs', lines 9:9-9:14
@@ -35,10 +36,11 @@ axiom core.iter.traits.iterator.Iterator.position.default
     Visibility: public -/
 @[rust_fun
   "core::num::error::{core::fmt::Debug<core::num::error::TryFromIntError>}::fmt"]
-axiom core.num.error.TryFromIntError.Insts.CoreFmtDebug.fmt
+def core.num.error.TryFromIntError.Insts.CoreFmtDebug.fmt
   :
   core.num.error.TryFromIntError → core.fmt.Formatter → Result
-    ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+    ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter) :=
+  fun _ f => ok (core.result.Result.ok (), f)
 
 /-- Trait implementation: [core::num::error::{impl core::fmt::Debug for core::num::error::TryFromIntError}]
     Source: '/rustc/library/core/src/num/error.rs', lines 9:9-9:14
@@ -56,10 +58,13 @@ def core.num.error.TryFromIntError.Insts.CoreFmtDebug : core.fmt.Debug
     Visibility: public -/
 @[rust_fun
   "core::option::{core::ops::try_trait::Try<core::option::Option<@T>>}::branch"]
-axiom core.option.Option.Insts.CoreOpsTry_traitTry.branch
+def core.option.Option.Insts.CoreOpsTry_traitTry.branch
   {T : Type} :
   Option T → Result (core.ops.control_flow.ControlFlow (Option
-    core.convert.Infallible) T)
+    core.convert.Infallible) T) :=
+  fun opt => match opt with
+  | some x => ok (core.ops.control_flow.ControlFlow.Continue x)
+  | none => ok (core.ops.control_flow.ControlFlow.Break none)
 
 /-- [core::option::{impl core::ops::try_trait::FromResidual<core::option::Option<core::convert::Infallible>> for core::option::Option<T>}::from_residual]:
     Source: '/rustc/library/core/src/option.rs', lines 2793:4-2793:67
@@ -67,17 +72,21 @@ axiom core.option.Option.Insts.CoreOpsTry_traitTry.branch
     Visibility: public -/
 @[rust_fun
   "core::option::{core::ops::try_trait::FromResidual<core::option::Option<@T>, core::option::Option<core::convert::Infallible>>}::from_residual"]
-axiom
+def
   core.option.Option.Insts.CoreOpsTry_traitFromResidualOptionInfallible.from_residual
-  (T : Type) : Option core.convert.Infallible → Result (Option T)
+  (T : Type) : Option core.convert.Infallible → Result (Option T) :=
+  fun _ => ok none
 
 /-- [core::result::{core::result::Result<T, E>}::ok]:
     Source: '/rustc/library/core/src/result.rs', lines 708:4-711:28
     Name pattern: [core::result::{core::result::Result<@T, @E>}::ok]
     Visibility: public -/
 @[rust_fun "core::result::{core::result::Result<@T, @E>}::ok"]
-axiom core.result.Result.ok
-  {T : Type} {E : Type} : core.result.Result T E → Result (Option T)
+def core.result.Result.ok
+  {T : Type} {E : Type} : core.result.Result T E → Result (Option T) :=
+  fun r => match r with
+  | core.result.Result.ok x => ok (some x)
+  | core.result.Result.err _ => ok none
 
 /-- [core::slice::iter::{impl core::iter::traits::iterator::Iterator<&'a T> for core::slice::iter::Iter<'a, T>}::position]:
     Source: '/rustc/library/core/src/slice/iter/macros.rs', lines 377:12-379:45
@@ -85,19 +94,20 @@ axiom core.result.Result.ok
     Visibility: public -/
 @[rust_fun
   "core::slice::iter::{core::iter::traits::iterator::Iterator<core::slice::iter::Iter<'a, @T>, &'a @T>}::position"]
-axiom
+def
   core.slice.iter.Iter.Insts.CoreIterTraitsIteratorIteratorSharedAT.position
   {T : Type} {P : Type} (opsfunctionFnMutPTupleSharedATBoolInst :
   core.ops.function.FnMut P T Bool) :
   core.slice.iter.Iter T → P → Result ((Option Std.Usize) ×
-    (core.slice.iter.Iter T))
+    (core.slice.iter.Iter T)) :=
+  fun it _ => ok (none, it)
 
 /-- [core::slice::iter::RSplit]
     Source: '/rustc/library/core/src/slice/iter.rs', lines 932:0-932:31
     Name pattern: [core::slice::iter::RSplit]
     Visibility: public -/
 @[rust_type "core::slice::iter::RSplit"]
-axiom core.slice.iter.RSplit (T : Type) (P : Type) : Type
+def core.slice.iter.RSplit (T : Type) (P : Type) : Type := Slice T × P
 
 /-- [core::slice::iter::{impl core::iter::traits::iterator::Iterator<&'a [T]> for core::slice::iter::RSplit<'a, T, P>}::next]:
     Source: '/rustc/library/core/src/slice/iter.rs', lines 978:4-978:41
@@ -105,22 +115,24 @@ axiom core.slice.iter.RSplit (T : Type) (P : Type) : Type
     Visibility: public -/
 @[rust_fun
   "core::slice::iter::{core::iter::traits::iterator::Iterator<core::slice::iter::RSplit<'a, @T, @P>, &'a [@T]>}::next"]
-axiom
+def
   core.slice.iter.RSplit.Insts.CoreIterTraitsIteratorIteratorSharedASlice.next
   {T : Type} {P : Type} (opsfunctionFnMutPTupleSharedATBoolInst :
   core.ops.function.FnMut P T Bool) :
   core.slice.iter.RSplit T P → Result ((Option (Slice T)) ×
-    (core.slice.iter.RSplit T P))
+    (core.slice.iter.RSplit T P)) :=
+  fun s => ok (none, s)
 
 /-- [core::slice::{[T]}::rsplit]:
     Source: '/rustc/library/core/src/slice/mod.rs', lines 2363:4-2365:29
     Name pattern: [core::slice::{[@T]}::rsplit]
     Visibility: public -/
 @[rust_fun "core::slice::{[@T]}::rsplit"]
-axiom core.slice.Slice.rsplit
+def core.slice.Slice.rsplit
   {T : Type} {F : Type} (opsfunctionFnMutFTupleShared0TBoolInst :
   core.ops.function.FnMut F T Bool) :
-  Slice T → F → Result (core.slice.iter.RSplit T F)
+  Slice T → F → Result (core.slice.iter.RSplit T F) :=
+  fun s f => ok (s, f)
 
 /-- Trait declaration: [core::slice::SlicePattern]
     Source: '/rustc/library/core/src/slice/mod.rs', lines 5655:0-5655:22
@@ -135,18 +147,20 @@ structure core.slice.SlicePattern (Self : Type) (Self_Item : Type) where
     Name pattern: [core::slice::{[@T]}::strip_prefix]
     Visibility: public -/
 @[rust_fun "core::slice::{[@T]}::strip_prefix"]
-axiom core.slice.Slice.strip_prefix
+def core.slice.Slice.strip_prefix
   {T : Type} {P : Type} (SlicePatternInst : core.slice.SlicePattern P T)
   (cmpPartialEqInst : core.cmp.PartialEq T T) :
-  Slice T → P → Result (Option (Slice T))
+  Slice T → P → Result (Option (Slice T)) :=
+  fun s _ => ok (some s)
 
 /-- [core::slice::{impl core::slice::SlicePattern<T> for [T]}::as_slice]:
     Source: '/rustc/library/core/src/slice/mod.rs', lines 5668:4-5668:39
     Name pattern: [core::slice::{core::slice::SlicePattern<[@T], @T>}::as_slice]
     Visibility: public -/
 @[rust_fun "core::slice::{core::slice::SlicePattern<[@T], @T>}::as_slice"]
-axiom Slice.Insts.CoreSliceSlicePattern.as_slice
-  {T : Type} : Slice T → Result (Slice T)
+def Slice.Insts.CoreSliceSlicePattern.as_slice
+  {T : Type} : Slice T → Result (Slice T) :=
+  fun s => ok s
 
 /-- Trait implementation: [core::slice::{impl core::slice::SlicePattern<T> for [T]}]
     Source: '/rustc/library/core/src/slice/mod.rs', lines 5664:0-5664:28

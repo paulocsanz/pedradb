@@ -220,10 +220,52 @@ impl_def core.iter.adapters.filter.Filter.Insts.CoreIterTraitsIteratorIterator
   next :=
     core.iter.adapters.filter.Filter.Insts.CoreIterTraitsIteratorIterator.next
     traitsiteratorIteratorInst opsfunctionFnMutPTupleSharedClause0_ItemBoolInst
+  map := fun {B : Type} {F : Type} (opsfunctionFnMutPTuplePPInst :
+    core.ops.function.FnMut F Clause0_Item B) =>
+    core.iter.traits.iterator.Iterator.map.default
+    (core.iter.adapters.filter.Filter.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst
+    opsfunctionFnMutPTupleSharedClause0_ItemBoolInst)
+    opsfunctionFnMutPTuplePPInst
+  filter := fun {P1 : Type} (opsfunctionFnMutPTupleSharedPBoolInst :
+    core.ops.function.FnMut P1 Clause0_Item Bool) =>
+    core.iter.traits.iterator.Iterator.filter.default
+    (core.iter.adapters.filter.Filter.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst
+    opsfunctionFnMutPTupleSharedClause0_ItemBoolInst)
+    opsfunctionFnMutPTupleSharedPBoolInst
   take := core.iter.traits.iterator.Iterator.take.trait_default
     (core.iter.adapters.filter.Filter.Insts.CoreIterTraitsIteratorIterator
     traitsiteratorIteratorInst
     opsfunctionFnMutPTupleSharedClause0_ItemBoolInst)
+  collect := fun {B : Type} (collectFromIteratorInst :
+    core.iter.traits.collect.FromIterator B Clause0_Item) =>
+    core.iter.traits.iterator.Iterator.collect.default
+    (core.iter.adapters.filter.Filter.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst
+    opsfunctionFnMutPTupleSharedClause0_ItemBoolInst) collectFromIteratorInst
+  all := fun {F : Type} (opsfunctionFnMutPTuplePBoolInst :
+    core.ops.function.FnMut F Clause0_Item Bool) =>
+    core.iter.traits.iterator.Iterator.all.default
+    (core.iter.adapters.filter.Filter.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst
+    opsfunctionFnMutPTupleSharedClause0_ItemBoolInst)
+    opsfunctionFnMutPTuplePBoolInst
+  max := fun (cmpOrdInst : core.cmp.Ord Clause0_Item) =>
+    core.iter.traits.iterator.Iterator.max.default
+    (core.iter.adapters.filter.Filter.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst
+    opsfunctionFnMutPTupleSharedClause0_ItemBoolInst) cmpOrdInst
+  min := fun (cmpOrdInst : core.cmp.Ord Clause0_Item) =>
+    core.iter.traits.iterator.Iterator.min.default
+    (core.iter.adapters.filter.Filter.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst
+    opsfunctionFnMutPTupleSharedClause0_ItemBoolInst) cmpOrdInst
+  sum := fun {S : Type} (accumSumInst : core.iter.traits.accum.Sum S
+    Clause0_Item) => core.iter.traits.iterator.Iterator.sum.default
+    (core.iter.adapters.filter.Filter.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst
+    opsfunctionFnMutPTupleSharedClause0_ItemBoolInst) accumSumInst
 }
 
 /-- [core::iter::adapters::map::{impl core::iter::traits::iterator::Iterator<B> for core::iter::adapters::map::Map<I, F>}::next]:
@@ -253,9 +295,48 @@ impl_def core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator {B :
   (core.iter.adapters.map.Map I F) B := {
   next := core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator.next
     traitsiteratorIteratorInst opsfunctionFnMutFTupleClause0_ItemBInst
+  map := fun {B1 : Type} {F1 : Type} (opsfunctionFnMutPTupleBPInst :
+    core.ops.function.FnMut F1 B B1) =>
+    core.iter.traits.iterator.Iterator.map.default
+    (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst opsfunctionFnMutFTupleClause0_ItemBInst)
+    opsfunctionFnMutPTupleBPInst
+  filter := fun {P : Type} (opsfunctionFnMutPTupleSharedPBoolInst :
+    core.ops.function.FnMut P B Bool) =>
+    core.iter.traits.iterator.Iterator.filter.default
+    (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst opsfunctionFnMutFTupleClause0_ItemBInst)
+    opsfunctionFnMutPTupleSharedPBoolInst
   take := core.iter.traits.iterator.Iterator.take.trait_default
     (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
     traitsiteratorIteratorInst opsfunctionFnMutFTupleClause0_ItemBInst)
+  collect := fun {B1 : Type} (collectFromIteratorInst :
+    core.iter.traits.collect.FromIterator B1 B) =>
+    core.iter.traits.iterator.Iterator.collect.default
+    (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst opsfunctionFnMutFTupleClause0_ItemBInst)
+    collectFromIteratorInst
+  all := fun {F1 : Type} (opsfunctionFnMutPTupleFBoolInst :
+    core.ops.function.FnMut F1 B Bool) =>
+    core.iter.traits.iterator.Iterator.all.default
+    (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst opsfunctionFnMutFTupleClause0_ItemBInst)
+    opsfunctionFnMutPTupleFBoolInst
+  max := fun (cmpOrdInst : core.cmp.Ord B) =>
+    core.iter.traits.iterator.Iterator.max.default
+    (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst opsfunctionFnMutFTupleClause0_ItemBInst)
+    cmpOrdInst
+  min := fun (cmpOrdInst : core.cmp.Ord B) =>
+    core.iter.traits.iterator.Iterator.min.default
+    (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst opsfunctionFnMutFTupleClause0_ItemBInst)
+    cmpOrdInst
+  sum := fun {S : Type} (accumSumInst : core.iter.traits.accum.Sum S B) =>
+    core.iter.traits.iterator.Iterator.sum.default
+    (core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator
+    traitsiteratorIteratorInst opsfunctionFnMutFTupleClause0_ItemBInst)
+    accumSumInst
 }
 
 /-- [core::iter::traits::accum::{impl core::iter::traits::accum::Sum<u64> for u64}::sum]:
@@ -293,13 +374,6 @@ axiom core.num.U64.saturating_mul : Std.U64 → Std.U64 → Result Std.U64
     Visibility: public -/
 @[rust_fun "core::num::{u64}::saturating_pow"]
 axiom core.num.U64.saturating_pow : Std.U64 → Std.U32 → Result Std.U64
-
-/-- [core::num::{u64}::wrapping_pow]:
-    Source: '/rustc/library/core/src/num/uint_macros.rs', lines 2899:8-2899:61
-    Name pattern: [core::num::{u64}::wrapping_pow]
-    Visibility: public -/
-@[rust_fun "core::num::{u64}::wrapping_pow"]
-axiom core.num.U64.wrapping_pow : Std.U64 → Std.U32 → Result Std.U64
 
 /-- [core::option::{core::option::Option<&'_0 T>}::cloned]:
     Source: '/rustc/library/core/src/option.rs', lines 2161:4-2163:17
@@ -467,9 +541,41 @@ impl_def
   T) := {
   next :=
     core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice.next
+  map := fun {B : Type} {F : Type} (opsfunctionFnMutPTupleSharedSlicePInst :
+    core.ops.function.FnMut F (Slice T) B) =>
+    core.iter.traits.iterator.Iterator.map.default
+    (core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice
+    T) opsfunctionFnMutPTupleSharedSlicePInst
+  filter := fun {P : Type} (opsfunctionFnMutPTupleSharedSharedSliceBoolInst :
+    core.ops.function.FnMut P (Slice T) Bool) =>
+    core.iter.traits.iterator.Iterator.filter.default
+    (core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice
+    T) opsfunctionFnMutPTupleSharedSharedSliceBoolInst
   take := core.iter.traits.iterator.Iterator.take.trait_default
     (core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice
     T)
+  collect := fun {B : Type} (collectFromIteratorPSharedSliceInst :
+    core.iter.traits.collect.FromIterator B (Slice T)) =>
+    core.iter.traits.iterator.Iterator.collect.default
+    (core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice
+    T) collectFromIteratorPSharedSliceInst
+  all := fun {F : Type} (opsfunctionFnMutPTupleShared0SliceBoolInst :
+    core.ops.function.FnMut F (Slice T) Bool) =>
+    core.iter.traits.iterator.Iterator.all.default
+    (core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice
+    T) opsfunctionFnMutPTupleShared0SliceBoolInst
+  max := fun (cmpOrdSharedSliceInst : core.cmp.Ord (Slice T)) =>
+    core.iter.traits.iterator.Iterator.max.default
+    (core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice
+    T) cmpOrdSharedSliceInst
+  min := fun (cmpOrdSharedSliceInst : core.cmp.Ord (Slice T)) =>
+    core.iter.traits.iterator.Iterator.min.default
+    (core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice
+    T) cmpOrdSharedSliceInst
+  sum := fun {S : Type} (accumSumPSharedSliceInst : core.iter.traits.accum.Sum
+    S (Slice T)) => core.iter.traits.iterator.Iterator.sum.default
+    (core.slice.iter.Windows.Insts.CoreIterTraitsIteratorIteratorSharedASlice
+    T) accumSumPSharedSliceInst
 }
 
 /-- [core::slice::{[T]}::first]:
@@ -616,11 +722,6 @@ def leveled_enabled : Result Bool := do
       "0")
   | core.result.Result.Err _ => ok true
 
-/-- [pedra_aeneas_leveling_kernel::leveled_enabled_as_is]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 57:0-59:1 -/
-def leveled_enabled_as_is : Result Bool := do
-  ok true
-
 /-- [pedra_aeneas_leveling_kernel::level_target_bytes]:
     Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 64:0-70:1 -/
 def level_target_bytes
@@ -633,17 +734,6 @@ def level_target_bytes
     let i1 ← core.num.U64.saturating_pow LEVEL_FANOUT exp
     core.num.U64.saturating_mul l1_target i1
 
-/-- [pedra_aeneas_leveling_kernel::level_target_bytes_as_is]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 78:0-83:1 -/
-def level_target_bytes_as_is
-  (level : Std.U32) (l1_target : Std.U64) : Result Std.U64 := do
-  if level = 0#u32
-  then ok 0#u64
-  else
-    let i ← level - 1#u32
-    let i1 ← core.num.U64.wrapping_pow LEVEL_FANOUT i
-    ok (core.num.U64.wrapping_mul l1_target i1)
-
 /-- [pedra_aeneas_leveling_kernel::LevelFile]
     Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 89:0-94:1 -/
 structure LevelFile where
@@ -651,6 +741,27 @@ structure LevelFile where
   lo : alloc.vec.Vec Std.U8
   hi : alloc.vec.Vec Std.U8
   bytes : Std.U64
+
+/-- [pedra_aeneas_leveling_kernel::{impl core::fmt::Debug for pedra_aeneas_leveling_kernel::LevelFile}::fmt]:
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 88:9-88:14
+    Visibility: public -/
+def LevelFile.Insts.CoreFmtDebug.fmt
+  (self : LevelFile) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  let dyn := Dyn.mk _ core.fmt.DebugUsize self.idx
+  let dyn1 := Dyn.mk _ (core.fmt.DebugVec core.fmt.DebugU8) self.lo
+  let dyn2 := Dyn.mk _ (core.fmt.DebugVec core.fmt.DebugU8) self.hi
+  let dyn3 := Dyn.mk _ (core.fmt.DebugShared core.fmt.DebugU64) self.bytes
+  core.fmt.Formatter.debug_struct_field4_finish f (toStr "LevelFile") (toStr
+    "idx") dyn (toStr "lo") dyn1 (toStr "hi") dyn2 (toStr "bytes") dyn3
+
+/-- Trait implementation: [pedra_aeneas_leveling_kernel::{impl core::fmt::Debug for pedra_aeneas_leveling_kernel::LevelFile}]
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 88:9-88:14 -/
+@[reducible]
+def LevelFile.Insts.CoreFmtDebug : core.fmt.Debug LevelFile := {
+  fmt := LevelFile.Insts.CoreFmtDebug.fmt
+}
 
 /-- [pedra_aeneas_leveling_kernel::{impl core::clone::Clone for pedra_aeneas_leveling_kernel::LevelFile}::clone]:
     Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 88:16-88:21
@@ -794,242 +905,8 @@ def
 
 /-- [pedra_aeneas_leveling_kernel::is_disjoint]:
     Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 111:0-117:1 -/
-@[rust_loop_body]
-def is_disjoint_inner_loop.body
-  (files : Slice LevelFile) (a : LevelFile) (j : Std.Usize) :
-  Result (ControlFlow Std.Usize Bool)
-  := do
-  let n := Slice.len files
-  if j < n
-  then
-    let b ← Slice.index_usize files j
-    let sa ← alloc.vec.Vec.as_slice Global a.lo
-    let sb ← alloc.vec.Vec.as_slice Global b.lo
-    let a_first ←
-      Shared1A.Insts.CoreCmpPartialOrdShared0B.le
-        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) sa sb
-    let okpair ←
-      if a_first
-      then
-        let ha ← alloc.vec.Vec.as_slice Global a.hi
-        Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
-          (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) ha sb
-      else
-        let hb ← alloc.vec.Vec.as_slice Global b.hi
-        Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
-          (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) hb sa
-    if okpair
-    then
-      let j1 ← j + 1#usize
-      ok (cont j1)
-    else ok (done false)
-  else ok (done true)
-
-@[rust_loop]
-def is_disjoint_inner_loop
-  (files : Slice LevelFile) (a : LevelFile) (j : Std.Usize) :
-  Result Bool
-  := do
-  loop (fun j1 => is_disjoint_inner_loop.body files a j1) j
-
-@[rust_loop_body]
-def is_disjoint_outer_loop.body
-  (files : Slice LevelFile) (i : Std.Usize) :
-  Result (ControlFlow Std.Usize Bool)
-  := do
-  let n := Slice.len files
-  if i < n
-  then
-    let a ← Slice.index_usize files i
-    let j ← i + 1#usize
-    let b ← is_disjoint_inner_loop files a j
-    if b
-    then
-      let i1 ← i + 1#usize
-      ok (cont i1)
-    else ok (done false)
-  else ok (done true)
-
-@[rust_loop]
-def is_disjoint_outer_loop
-  (files : Slice LevelFile) (i : Std.Usize) : Result Bool := do
-  loop (fun i1 => is_disjoint_outer_loop.body files i1) i
-
 def is_disjoint (files : Slice LevelFile) : Result Bool := do
-  is_disjoint_outer_loop files 0#usize
-
-/-- [pedra_aeneas_leveling_kernel::is_disjoint_as_is::closure#1]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 129:13-129:57 -/
-@[reducible]
-def is_disjoint_as_is.closure_1 := Unit
-
-/-- [pedra_aeneas_leveling_kernel::is_disjoint_as_is::{impl core::ops::function::FnMut<(&'_ [&'_ pedra_aeneas_leveling_kernel::LevelFile],), bool> for pedra_aeneas_leveling_kernel::is_disjoint_as_is::closure#1}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 129:13-129:57 -/
-def
-  is_disjoint_as_is.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedSliceSharedLevelFileBool.call_mut
-  (c : is_disjoint_as_is.closure_1) (tupled_args : Slice LevelFile) :
-  Result (Bool × is_disjoint_as_is.closure_1)
-  := do
-  let lf ← Slice.index_usize tupled_args 0#usize
-  let s ← alloc.vec.Vec.as_slice Global lf.hi
-  let lf1 ← Slice.index_usize tupled_args 1#usize
-  let s1 ← alloc.vec.Vec.as_slice Global lf1.lo
-  let b ←
-    Shared1A.Insts.CoreCmpPartialOrdShared0B.le
-      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) s s1
-  ok (b, c)
-
-/-- [pedra_aeneas_leveling_kernel::is_disjoint_as_is::{impl core::ops::function::FnOnce<(&'_ [&'_ pedra_aeneas_leveling_kernel::LevelFile],), bool> for pedra_aeneas_leveling_kernel::is_disjoint_as_is::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 129:13-129:57 -/
-def
-  is_disjoint_as_is.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedSliceSharedLevelFileBool.call_once
-  (c : is_disjoint_as_is.closure_1) (s : Slice LevelFile) : Result Bool := do
-  let (b, _) ←
-    is_disjoint_as_is.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedSliceSharedLevelFileBool.call_mut
-      c s
-  ok b
-
-/-- Trait implementation: [pedra_aeneas_leveling_kernel::is_disjoint_as_is::{impl core::ops::function::FnOnce<(&'_ [&'_ pedra_aeneas_leveling_kernel::LevelFile],), bool> for pedra_aeneas_leveling_kernel::is_disjoint_as_is::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 129:13-129:57 -/
-@[reducible]
-def
-  is_disjoint_as_is.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedSliceSharedLevelFileBool
-  : core.ops.function.FnOnce is_disjoint_as_is.closure_1 (Slice LevelFile) Bool
-  := {
-  call_once :=
-    is_disjoint_as_is.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedSliceSharedLevelFileBool.call_once
-}
-
-/-- Trait implementation: [pedra_aeneas_leveling_kernel::is_disjoint_as_is::{impl core::ops::function::FnMut<(&'_ [&'_ pedra_aeneas_leveling_kernel::LevelFile],), bool> for pedra_aeneas_leveling_kernel::is_disjoint_as_is::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 129:13-129:57 -/
-@[reducible]
-def
-  is_disjoint_as_is.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedSliceSharedLevelFileBool
-  : core.ops.function.FnMut is_disjoint_as_is.closure_1 (Slice LevelFile) Bool
-  := {
-  FnOnceInst :=
-    is_disjoint_as_is.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedSliceSharedLevelFileBool
-  call_mut :=
-    is_disjoint_as_is.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedSliceSharedLevelFileBool.call_mut
-}
-
-/-- [pedra_aeneas_leveling_kernel::is_disjoint_as_is::closure]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 126:19-126:41 -/
-@[reducible]
-def is_disjoint_as_is.closure := Unit
-
-/-- [pedra_aeneas_leveling_kernel::is_disjoint_as_is::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile, &'_ &'_ pedra_aeneas_leveling_kernel::LevelFile), core::cmp::Ordering> for pedra_aeneas_leveling_kernel::is_disjoint_as_is::closure}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 126:19-126:41 -/
-def
-  is_disjoint_as_is.closure.Insts.CoreOpsFunctionFnMutPairSharedSharedLevelFileSharedSharedLevelFileOrdering.call_mut
-  (c : is_disjoint_as_is.closure) (tupled_args : (LevelFile × LevelFile)) :
-  Result (Ordering × is_disjoint_as_is.closure)
-  := do
-  let (a, b) := tupled_args
-  let o ← alloc.vec.Vec.Insts.CoreCmpOrd.cmp Global core.cmp.OrdU8 a.lo b.lo
-  ok (o, c)
-
-/-- [pedra_aeneas_leveling_kernel::is_disjoint_as_is::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile, &'_ &'_ pedra_aeneas_leveling_kernel::LevelFile), core::cmp::Ordering> for pedra_aeneas_leveling_kernel::is_disjoint_as_is::closure}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 126:19-126:41 -/
-def
-  is_disjoint_as_is.closure.Insts.CoreOpsFunctionFnOncePairSharedSharedLevelFileSharedSharedLevelFileOrdering.call_once
-  (c : is_disjoint_as_is.closure) (p : (LevelFile × LevelFile)) :
-  Result Ordering
-  := do
-  let (o, _) ←
-    is_disjoint_as_is.closure.Insts.CoreOpsFunctionFnMutPairSharedSharedLevelFileSharedSharedLevelFileOrdering.call_mut
-      c p
-  ok o
-
-/-- Trait implementation: [pedra_aeneas_leveling_kernel::is_disjoint_as_is::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile, &'_ &'_ pedra_aeneas_leveling_kernel::LevelFile), core::cmp::Ordering> for pedra_aeneas_leveling_kernel::is_disjoint_as_is::closure}]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 126:19-126:41 -/
-@[reducible]
-def
-  is_disjoint_as_is.closure.Insts.CoreOpsFunctionFnOncePairSharedSharedLevelFileSharedSharedLevelFileOrdering
-  : core.ops.function.FnOnce is_disjoint_as_is.closure (LevelFile × LevelFile)
-  Ordering := {
-  call_once :=
-    is_disjoint_as_is.closure.Insts.CoreOpsFunctionFnOncePairSharedSharedLevelFileSharedSharedLevelFileOrdering.call_once
-}
-
-/-- Trait implementation: [pedra_aeneas_leveling_kernel::is_disjoint_as_is::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile, &'_ &'_ pedra_aeneas_leveling_kernel::LevelFile), core::cmp::Ordering> for pedra_aeneas_leveling_kernel::is_disjoint_as_is::closure}]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 126:19-126:41 -/
-@[reducible]
-def
-  is_disjoint_as_is.closure.Insts.CoreOpsFunctionFnMutPairSharedSharedLevelFileSharedSharedLevelFileOrdering
-  : core.ops.function.FnMut is_disjoint_as_is.closure (LevelFile × LevelFile)
-  Ordering := {
-  FnOnceInst :=
-    is_disjoint_as_is.closure.Insts.CoreOpsFunctionFnOncePairSharedSharedLevelFileSharedSharedLevelFileOrdering
-  call_mut :=
-    is_disjoint_as_is.closure.Insts.CoreOpsFunctionFnMutPairSharedSharedLevelFileSharedSharedLevelFileOrdering.call_mut
-}
-
-/-- [pedra_aeneas_leveling_kernel::is_disjoint_as_is]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 124:0-130:1 -/
-@[rust_loop_body]
-def is_disjoint_as_is_inner_loop.body
-  (files : Slice LevelFile) (a : LevelFile) (j : Std.Usize) :
-  Result (ControlFlow Std.Usize Bool)
-  := do
-  let n := Slice.len files
-  if j < n
-  then
-    let b ← Slice.index_usize files j
-    let sa ← alloc.vec.Vec.as_slice Global a.lo
-    let sb ← alloc.vec.Vec.as_slice Global b.lo
-    let a_first ←
-      Shared1A.Insts.CoreCmpPartialOrdShared0B.le
-        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) sa sb
-    let okpair ←
-      if a_first
-      then
-        let ha ← alloc.vec.Vec.as_slice Global a.hi
-        Shared1A.Insts.CoreCmpPartialOrdShared0B.le
-          (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) ha sb
-      else
-        let hb ← alloc.vec.Vec.as_slice Global b.hi
-        Shared1A.Insts.CoreCmpPartialOrdShared0B.le
-          (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) hb sa
-    if okpair
-    then
-      let j1 ← j + 1#usize
-      ok (cont j1)
-    else ok (done false)
-  else ok (done true)
-
-@[rust_loop]
-def is_disjoint_as_is_inner_loop
-  (files : Slice LevelFile) (a : LevelFile) (j : Std.Usize) :
-  Result Bool
-  := do
-  loop (fun j1 => is_disjoint_as_is_inner_loop.body files a j1) j
-
-@[rust_loop_body]
-def is_disjoint_as_is_outer_loop.body
-  (files : Slice LevelFile) (i : Std.Usize) :
-  Result (ControlFlow Std.Usize Bool)
-  := do
-  let n := Slice.len files
-  if i < n
-  then
-    let a ← Slice.index_usize files i
-    let j ← i + 1#usize
-    let b ← is_disjoint_as_is_inner_loop files a j
-    if b
-    then
-      let i1 ← i + 1#usize
-      ok (cont i1)
-    else ok (done false)
-  else ok (done true)
-
-@[rust_loop]
-def is_disjoint_as_is_outer_loop
-  (files : Slice LevelFile) (i : Std.Usize) : Result Bool := do
-  loop (fun i1 => is_disjoint_as_is_outer_loop.body files i1) i
-
-def is_disjoint_as_is (files : Slice LevelFile) : Result Bool := do
-  is_disjoint_as_is_outer_loop files 0#usize
+  sorry
 
 /-- [pedra_aeneas_leveling_kernel::total_bytes::closure]
     Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 135:21-135:32 -/
@@ -1089,29 +966,6 @@ def total_bytes (files : Slice LevelFile) : Result Std.U64 := do
     (core.iter.traits.iterator.IteratorSliceIter LevelFile)
     total_bytes.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileU64)
     U64.Insts.CoreIterTraitsAccumSumU64 m
-
-/-- [pedra_aeneas_leveling_kernel::total_bytes_as_is]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 143:0-145:1 -/
-def total_bytes_as_is (files : Slice LevelFile) : Result Std.U64 := do
-  let i := Slice.len files
-  ok (UScalar.cast .U64 i)
-
-/-- [pedra_aeneas_leveling_kernel::overlaps_as_is]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 153:0-155:1 -/
-def overlaps_as_is
-  (f : LevelFile) (hull_lo : Slice Std.U8) (hull_hi : Slice Std.U8) :
-  Result Bool
-  := do
-  let s ← alloc.vec.Vec.as_slice Global f.lo
-  let b ←
-    Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
-      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) s hull_hi
-  if b
-  then
-    let s1 ← alloc.vec.Vec.as_slice Global f.hi
-    Shared1A.Insts.CoreCmpPartialOrdShared0B.ge
-      (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) s1 hull_lo
-  else ok false
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#4]
     Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 180:25-180:34 -/
@@ -1265,8 +1119,7 @@ def
   (c : pick_l0_to_l1.closure_1) (tupled_args : LevelFile) :
   Result ((Slice Std.U8) × pick_l0_to_l1.closure_1)
   := do
-  let s := alloc.vec.Vec.deref tupled_args.hi
-  ok (s, c)
+  sorry
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), &'_ [u8]> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure#1}::call_once]:
     Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 174:33-174:52 -/
@@ -1314,8 +1167,7 @@ def
   (c : pick_l0_to_l1.closure) (tupled_args : LevelFile) :
   Result ((Slice Std.U8) × pick_l0_to_l1.closure)
   := do
-  let s := alloc.vec.Vec.deref tupled_args.lo
-  ok (s, c)
+  sorry
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), &'_ [u8]> for pedra_aeneas_leveling_kernel::pick_l0_to_l1::closure}::call_once]:
     Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 173:33-173:52 -/
@@ -1352,252 +1204,11 @@ def
 
 /-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1]:
     Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 164:0-181:1 -/
-@[rust_loop_body]
-def pick_l0_sel_loop.body
-  (l0 : Slice LevelFile) (n : Std.Usize)
-  (sel : alloc.vec.Vec Std.Usize)
-  (hull_lo : alloc.vec.Vec Std.U8) (hull_hi : alloc.vec.Vec Std.U8)
-  (i : Std.Usize) :
-  Result (ControlFlow
-    ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Std.U8) ×
-      (alloc.vec.Vec Std.U8) × Std.Usize)
-    ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Std.U8) ×
-      (alloc.vec.Vec Std.U8)))
-  := do
-  if i < n
-  then
-    let f ← Slice.index_usize l0 i
-    let sel1 ← alloc.vec.Vec.push sel f.idx
-    let slo ← alloc.vec.Vec.as_slice Global f.lo
-    let hlo ← alloc.vec.Vec.as_slice Global hull_lo
-    let lo_lt ←
-      Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
-        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) slo hlo
-    let hull_lo1 ←
-      match lo_lt with
-      | true => alloc.vec.CloneVec.clone core.clone.CloneU8 f.lo
-      | false => ok hull_lo
-    let shi ← alloc.vec.Vec.as_slice Global f.hi
-    let hhi ← alloc.vec.Vec.as_slice Global hull_hi
-    let hi_lt ←
-      Shared1A.Insts.CoreCmpPartialOrdShared0B.lt
-        (Slice.Insts.CoreCmpPartialOrdSlice core.cmp.PartialOrdU8) hhi shi
-    let hull_hi1 ←
-      match hi_lt with
-      | true => alloc.vec.CloneVec.clone core.clone.CloneU8 f.hi
-      | false => ok hull_hi
-    let i1 ← i + 1#usize
-    ok (cont (sel1, hull_lo1, hull_hi1, i1))
-  else ok (done (sel, hull_lo, hull_hi))
-
-@[rust_loop]
-def pick_l0_sel_loop
-  (l0 : Slice LevelFile) (n : Std.Usize)
-  (sel : alloc.vec.Vec Std.Usize)
-  (hull_lo : alloc.vec.Vec Std.U8) (hull_hi : alloc.vec.Vec Std.U8)
-  (i : Std.Usize) :
-  Result ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Std.U8) ×
-    (alloc.vec.Vec Std.U8))
-  := do
-  loop
-    (fun (sel1, hull_lo1, hull_hi1, i1) =>
-      pick_l0_sel_loop.body l0 n sel1 hull_lo1 hull_hi1 i1)
-    (sel, hull_lo, hull_hi, i)
-
-@[rust_loop_body]
-def pick_l0_slice_loop.body
-  (l1 : Slice LevelFile)
-  (hull_lo : alloc.vec.Vec Std.U8) (hull_hi : alloc.vec.Vec Std.U8)
-  (slice : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize)
-    (alloc.vec.Vec Std.Usize))
-  := do
-  let n := Slice.len l1
-  if i < n
-  then
-    let f ← Slice.index_usize l1 i
-    let s := alloc.vec.Vec.deref hull_lo
-    let s1 := alloc.vec.Vec.deref hull_hi
-    let b ← LevelFile.overlaps f s s1
-    let slice1 ←
-      if b then alloc.vec.Vec.push slice f.idx else ok slice
-    let i1 ← i + 1#usize
-    ok (cont (slice1, i1))
-  else ok (done slice)
-
-@[rust_loop]
-def pick_l0_slice_loop
-  (l1 : Slice LevelFile)
-  (hull_lo : alloc.vec.Vec Std.U8) (hull_hi : alloc.vec.Vec Std.U8)
-  (slice : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
-  Result (alloc.vec.Vec Std.Usize)
-  := do
-  loop
-    (fun (slice1, i1) =>
-      pick_l0_slice_loop.body l1 hull_lo hull_hi slice1 i1)
-    (slice, i)
-
 def pick_l0_to_l1
   (l0 : Slice LevelFile) (l1 : Slice LevelFile) (max_l0 : Std.Usize) :
   Result (Option ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Std.Usize)))
   := do
-  let b ← core.slice.Slice.is_empty l0
-  if b
-  then ok none
-  else
-    if max_l0 = 0#usize
-    then ok none
-    else
-      let n0 := Slice.len l0
-      let n := if n0 < max_l0 then n0 else max_l0
-      let f0 ← Slice.index_usize l0 0#usize
-      let hull_lo ← alloc.vec.CloneVec.clone core.clone.CloneU8 f0.lo
-      let hull_hi ← alloc.vec.CloneVec.clone core.clone.CloneU8 f0.hi
-      let sel0 := alloc.vec.Vec.new Std.Usize
-      let sel1 ← alloc.vec.Vec.push sel0 f0.idx
-      let (sel, hull_lo1, hull_hi1) ←
-        pick_l0_sel_loop l0 n sel1 hull_lo hull_hi 1#usize
-      let slice0 := alloc.vec.Vec.new Std.Usize
-      let slice ← pick_l0_slice_loop l1 hull_lo1 hull_hi1 slice0 0#usize
-      ok (some (sel, slice))
-
-/-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure#1]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 196:22-196:31 -/
-@[reducible]
-def pick_l0_to_l1_as_is_whole_level.closure_1 := Unit
-
-/-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure#1}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 196:22-196:31 -/
-def
-  pick_l0_to_l1_as_is_whole_level.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize.call_mut
-  (c : pick_l0_to_l1_as_is_whole_level.closure_1) (tupled_args : LevelFile) :
-  Result (Std.Usize × pick_l0_to_l1_as_is_whole_level.closure_1)
-  := do
-  ok (tupled_args.idx, c)
-
-/-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 196:22-196:31 -/
-def
-  pick_l0_to_l1_as_is_whole_level.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize.call_once
-  (c : pick_l0_to_l1_as_is_whole_level.closure_1) (lf : LevelFile) :
-  Result Std.Usize
-  := do
-  let (i, _) ←
-    pick_l0_to_l1_as_is_whole_level.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize.call_mut
-      c lf
-  ok i
-
-/-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 196:22-196:31 -/
-@[reducible]
-def
-  pick_l0_to_l1_as_is_whole_level.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize
-  : core.ops.function.FnOnce pick_l0_to_l1_as_is_whole_level.closure_1
-  LevelFile Std.Usize := {
-  call_once :=
-    pick_l0_to_l1_as_is_whole_level.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize.call_once
-}
-
-/-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 196:22-196:31 -/
-@[reducible]
-def
-  pick_l0_to_l1_as_is_whole_level.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize
-  : core.ops.function.FnMut pick_l0_to_l1_as_is_whole_level.closure_1 LevelFile
-  Std.Usize := {
-  FnOnceInst :=
-    pick_l0_to_l1_as_is_whole_level.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize
-  call_mut :=
-    pick_l0_to_l1_as_is_whole_level.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize.call_mut
-}
-
-/-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 195:22-195:31 -/
-@[reducible]
-def pick_l0_to_l1_as_is_whole_level.closure := Unit
-
-/-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 195:22-195:31 -/
-def
-  pick_l0_to_l1_as_is_whole_level.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize.call_mut
-  (c : pick_l0_to_l1_as_is_whole_level.closure) (tupled_args : LevelFile) :
-  Result (Std.Usize × pick_l0_to_l1_as_is_whole_level.closure)
-  := do
-  ok (tupled_args.idx, c)
-
-/-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 195:22-195:31 -/
-def
-  pick_l0_to_l1_as_is_whole_level.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize.call_once
-  (c : pick_l0_to_l1_as_is_whole_level.closure) (lf : LevelFile) :
-  Result Std.Usize
-  := do
-  let (i, _) ←
-    pick_l0_to_l1_as_is_whole_level.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize.call_mut
-      c lf
-  ok i
-
-/-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure}]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 195:22-195:31 -/
-@[reducible]
-def
-  pick_l0_to_l1_as_is_whole_level.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize
-  : core.ops.function.FnOnce pick_l0_to_l1_as_is_whole_level.closure LevelFile
-  Std.Usize := {
-  call_once :=
-    pick_l0_to_l1_as_is_whole_level.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize.call_once
-}
-
-/-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level::closure}]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 195:22-195:31 -/
-@[reducible]
-def
-  pick_l0_to_l1_as_is_whole_level.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize
-  : core.ops.function.FnMut pick_l0_to_l1_as_is_whole_level.closure LevelFile
-  Std.Usize := {
-  FnOnceInst :=
-    pick_l0_to_l1_as_is_whole_level.closure.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize
-  call_mut :=
-    pick_l0_to_l1_as_is_whole_level.closure.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize.call_mut
-}
-
-/-- [pedra_aeneas_leveling_kernel::pick_l0_to_l1_as_is_whole_level]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 187:0-198:1 -/
-@[rust_loop_body]
-def pick_idx_loop.body
-  (files : Slice LevelFile) (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize)
-    (alloc.vec.Vec Std.Usize))
-  := do
-  let n := Slice.len files
-  if i < n
-  then
-    let f ← Slice.index_usize files i
-    let out1 ← alloc.vec.Vec.push out f.idx
-    let i1 ← i + 1#usize
-    ok (cont (out1, i1))
-  else ok (done out)
-
-@[rust_loop]
-def pick_idx_loop
-  (files : Slice LevelFile) (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
-  Result (alloc.vec.Vec Std.Usize)
-  := do
-  loop (fun (out1, i1) => pick_idx_loop.body files out1 i1) (out, i)
-
-def pick_l0_to_l1_as_is_whole_level
-  (l0 : Slice LevelFile) (l1 : Slice LevelFile) :
-  Result (Option ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Std.Usize)))
-  := do
-  let b ← core.slice.Slice.is_empty l0
-  if b
-  then ok none
-  else
-    let v0 := alloc.vec.Vec.new Std.Usize
-    let v ← pick_idx_loop l0 v0 0#usize
-    let v10 := alloc.vec.Vec.new Std.Usize
-    let v1 ← pick_idx_loop l1 v10 0#usize
-    ok (some (v, v1))
+  sorry
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown::closure#1]
     Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 225:13-225:22 -/
@@ -1699,27 +1310,15 @@ def pick_pushdown
   (src : Slice LevelFile) (dst : Slice LevelFile) :
   Result (Option (Std.Usize × (alloc.vec.Vec Std.Usize)))
   := do
-  let b ← core.slice.Slice.is_empty src
-  if b
-  then ok none
-  else
-    let d ← is_disjoint dst
-    if d
-    then
-      let source ← Slice.index_usize src 0#usize
-      let slice0 := alloc.vec.Vec.new Std.Usize
-      let slice ←
-        pick_l0_slice_loop dst source.lo source.hi slice0 0#usize
-      ok (some (source.idx, slice))
-    else ok none
+  sorry
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure#1]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 244:13-244:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 241:13-241:22 -/
 @[reducible]
 def pick_pushdown_as_is_blind.closure_1 := Unit
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure#1}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 244:13-244:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 241:13-241:22 -/
 def
   pick_pushdown_as_is_blind.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize.call_mut
   (c : pick_pushdown_as_is_blind.closure_1) (tupled_args : LevelFile) :
@@ -1728,7 +1327,7 @@ def
   ok (tupled_args.idx, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure#1}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 244:13-244:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 241:13-241:22 -/
 def
   pick_pushdown_as_is_blind.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize.call_once
   (c : pick_pushdown_as_is_blind.closure_1) (lf : LevelFile) :
@@ -1740,7 +1339,7 @@ def
   ok i
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnOnce<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 244:13-244:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 241:13-241:22 -/
 @[reducible]
 def
   pick_pushdown_as_is_blind.closure_1.Insts.CoreOpsFunctionFnOnceTupleSharedLevelFileUsize
@@ -1751,7 +1350,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnMut<(&'_ pedra_aeneas_leveling_kernel::LevelFile,), usize> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure#1}]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 244:13-244:22 -/
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 241:13-241:22 -/
 @[reducible]
 def
   pick_pushdown_as_is_blind.closure_1.Insts.CoreOpsFunctionFnMutTupleSharedLevelFileUsize
@@ -1764,12 +1363,12 @@ def
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 243:16-243:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 240:16-240:54 -/
 def pick_pushdown_as_is_blind.closure :=
   alloc.vec.Vec Std.U8 × alloc.vec.Vec Std.U8
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure<'_0, '_1>}::call_mut]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 243:16-243:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 240:16-240:54 -/
 def
   pick_pushdown_as_is_blind.closure.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileBool.call_mut
   (c : pick_pushdown_as_is_blind.closure) (tupled_args : LevelFile) :
@@ -1782,7 +1381,7 @@ def
   ok (b, c)
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure<'_0, '_1>}::call_once]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 243:16-243:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 240:16-240:54 -/
 def
   pick_pushdown_as_is_blind.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileBool.call_once
   (c : pick_pushdown_as_is_blind.closure) (lf : LevelFile) : Result Bool := do
@@ -1792,7 +1391,7 @@ def
   ok b
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnOnce<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure<'_0, '_1>}]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 243:16-243:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 240:16-240:54 -/
 @[reducible]
 def
   pick_pushdown_as_is_blind.closure.Insts.CoreOpsFunctionFnOnceTupleSharedSharedLevelFileBool
@@ -1803,7 +1402,7 @@ def
 }
 
 /-- Trait implementation: [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::{impl core::ops::function::FnMut<(&'_ &'_ pedra_aeneas_leveling_kernel::LevelFile,), bool> for pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind::closure<'_0, '_1>}]
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 243:16-243:54 -/
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 240:16-240:54 -/
 @[reducible]
 def
   pick_pushdown_as_is_blind.closure.Insts.CoreOpsFunctionFnMutTupleSharedSharedLevelFileBool
@@ -1816,19 +1415,11 @@ def
 }
 
 /-- [pedra_aeneas_leveling_kernel::pick_pushdown_as_is_blind]:
-    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 236:0-247:1 -/
+    Source: '../../../crates/pedradb-core/src/leveling_kernel.rs', lines 236:0-244:1 -/
 def pick_pushdown_as_is_blind
   (src : Slice LevelFile) (dst : Slice LevelFile) :
   Result (Option (Std.Usize × (alloc.vec.Vec Std.Usize)))
   := do
-  let b ← core.slice.Slice.is_empty src
-  if b
-  then ok none
-  else
-    let source ← Slice.index_usize src 0#usize
-    let slice0 := alloc.vec.Vec.new Std.Usize
-    let slice ←
-      pick_l0_slice_loop dst source.lo source.hi slice0 0#usize
-    ok (some (source.idx, slice))
+  sorry
 
 end pedra_aeneas_leveling_kernel

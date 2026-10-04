@@ -14,34 +14,40 @@ A decision kernel is machine-checked when three things agree:
    (`formal/aeneas/out/SOURCE.*`) still matches the file's sha256.
 3. The Lean file has the named theorem and does not contain `sorry`.
 
-Every one of the **151** catalog pairs is `single_artifact`: the twin is
+Every one of the **172** catalog pairs is `single_artifact`: the twin is
 the kernel. There is no second copy of the decision that can drift from
-the binary. **132** of the 151 also carry the three teeth: a production
+the binary. **170** of the 172 also carry the three teeth: a production
 caller, an `as_is` mutant (the bug the proof refuses), and a test that
 plants that mutant and expects failure.
 
 This is not "no bugs". The OS, the disk, rustc, Aeneas, Lean, and Z3 are
-not proved. Store, raft, and the SQL layer are not in this repository, so
-their proofs are not either. `t1_modelo` (store atomicity refinement) and
-`c1_modelo` (raft quorum refinement) live in those crates. The public
-verified report claims only the 151 shipped pair ids.
+not proved. This repository ships the embedded engine and its
+operational surface (`pedradb-core`, `-posix`, `-io-uring`, `-sim`,
+`-spec`, `-ops`, `rocksdb-compat`, and the bench harnesses). The
+distributed building blocks under development — store, raft, sql, http,
+replication — are **not in this repository**, so their proofs are not
+either; the store/raft refinement kernels (`t1_modelo`, `c1_modelo`)
+live in the development tree. Count the pairs yourself: every id in
+`scripts/formal/catalog.json` names a kernel file present in this tree —
+that self-consistency is what the lint's extract and GAP checks enforce.
 
-## Where the 151 pairs sit
+## Where the 172 pairs sit
 
-Counted by the kernel file `rustc` links:
+Counted by the kernel file `rustc` links — regenerate this table with
+`python3 -c "import json,collections; c=collections.Counter(p['kernel'].split('/')[-1].rsplit('_kernel.rs',1)[0].rsplit('.rs',1)[0] for p in json.load(open('scripts/formal/catalog.json'))['pairs']); print(sorted(c.items(), key=lambda kv:-kv[1]))"`:
 
 | Kernel file | Pairs | What the decisions are |
 |---|---:|---|
-| `write_admission` | 18 | Stall, WAL barrier, torn head and tail, directory fsync, empty batch, sequence exhaustion |
-| `group_commit` | 16 | Who is in the group, when it publishes, first-committer wins |
-| `flush` | 11 | When a memtable is due, per family and globally |
-| `scan`, `cf` | 7 each | Scan guard and window; column-family encode, decode, and SST tag |
-| `changelog`, `compact`, `lookup`, `env_crash`, `wal_state`, `scale` | 6 each | Changelog rebuild; compaction choice; point lookup; which crashes are legal; WAL state; forecast cuts |
-| `recover`, `cqe` | 5 each | Torn-tail recovery; io_uring completion codes |
-| `merge`, `properties`, `lsm_r1` | 4 each | Merge step; D1/R1/T1 predicates; no resurrection across levels |
-| `bloom`, `manifest`, `probe_order`, `write_ack` | 3 each | Bloom membership; MANIFEST install; newest-first probe; ack before the barrier |
-| `reopen`, `vlog_gc`, `d1_modelo` | 2 each | Reopen after damage; value-log GC; durability model |
-| one pair each | 9 | Prefix end, CRC, key pack, batch, lock table, iterator window, magic, ops PITR window, crate root |
+| `write_admission` | 20 | Stall, WAL barrier, torn head and tail, directory fsync, empty batch, sequence exhaustion |
+| `group_commit` | 17 | Who is in the group, when it publishes, first-committer wins |
+| `flush` | 14 | When a memtable is due, per family and globally |
+| `scan`, `cf`, `leveling`, `group_window` | 7 each | Scan guard and window; column-family codec; level assignment; group-commit window |
+| `compact`, `lookup`, `env_crash`, `wal_state`, `scale` | 6 each | Compaction choice; point lookup; which crashes are legal; WAL state; forecast cuts |
+| `changelog`, `cqe`, `recover` | 5 each | Changelog rebuild; io_uring completion codes; torn-tail recovery |
+| `lsm_r1`, `properties` | 4 each | No resurrection across levels; D1/R1/T1 predicates |
+| `bloom`, `manifest`, `merge`, `probe_order`, `write_ack` | 3 each | Bloom membership; MANIFEST install; merge step; newest-first probe; ack before the barrier |
+| `reopen`, `vlog_gc`, `d1_modelo`, `wal_ticket`, `client_axis` | 2 each | Reopen after damage; value-log GC; durability model; WAL ticket; client axis |
+| one pair each | 15 | Prefix end, CRC, key pack, batch, lock table, iterator window, magic, ops PITR window, crate root, and the remaining single-decision kernels |
 
 The area table that used to sit in the README was an orientation. Several
 of its labels (`product_crown`, `bloom_filter`, `lookup` as a single id,
@@ -50,21 +56,22 @@ strings in `catalog.json`.
 
 ## What CI runs
 
-`.github/workflows/ci.yml` does two things, in order:
+`.github/workflows/ci.yml` executes three independent jobs with dedicated time budgets so test builds never starve verification:
 
-```sh
-cargo test -q -p pedradb-core --lib
-python3 scripts/formal/pedra_formal.py --lint > lint.log
-python3 scripts/ci_ratchet.py lint lint.log 107
-```
+1. **`tests`**: `cargo test -q -p pedradb-core --lib` (hard fail on any test failure).
+2. **`formal-lint`**: verifies glue lint and classification debt with ceiling 0:
+   ```sh
+   python3 scripts/formal/pedra_formal.py --lint > lint.log
+   python3 scripts/ci_ratchet.py lint lint.log 0
+   ```
+3. **`hygiene`**: runs `python3 scripts/check_public_hygiene.py` ensuring zero internal leaks or dangling links.
 
-On the green run for `eeae662` the test line was **1,094 passed, 4
-ignored**. The lint line was **0 FAIL**.
+On the current tree, the test suite passes with **1,325 passed, 4 ignored** (the
+README's Verification paragraph carries the live number), and the formal lint
+passes with **0 gap, 0 fail** at debt ceiling 0 — the ok-line count moves with
+the tree; the invariants are the zeros.
 
-`ci_ratchet.py` exits 1 if any FAIL line contains `drift`, and if the
-FAIL count is above 107. A non-drift FAIL under that ceiling still passes
-the workflow. The ceiling is a debt cap, not a claim that new failures
-are free. The current count is zero.
+`ci_ratchet.py` exits 1 if any FAIL line is found or if the FAIL count exceeds the debt ceiling (0). The debt ceiling is zero tolerance: any drift or unclassified public surface fails CI.
 
 `scripts/pedra_formal.sh` is the same Python entry with more flags.
 GitHub CI uses `--lint` only. Locally:
@@ -104,7 +111,7 @@ turn `GAP` into a failure.
 ## The verified profile
 
 `pedradb_core::verified::profile_report` is the machine-checked tie to
-the catalog. The set of kernels marked On equals the 151 pair ids.
+the catalog. The set of kernels marked On equals the 172 pair ids.
 Nothing else is claimed On. The test is
 `verified_report_matches_catalog`.
 
@@ -115,7 +122,7 @@ is pinned to 0.
 
 ## Dynamic checks around the proofs
 
-- **1,094** `pedradb-core` tests on the green CI run, including the
+- **1,325** `pedradb-core` tests on the green CI run, including the
   Stateright models above, codec smoke tests, a WAL durability suite, and
   a concurrent race suite.
 - **`pedradb-sim`**: the same engine, with an `Env` that can fail the Nth
@@ -131,7 +138,7 @@ From a clean checkout, with Python 3:
 
 ```sh
 python3 scripts/formal/pedra_formal.py --lint
-python3 scripts/ci_ratchet.py lint lint.log 107   # after redirecting the lint
+python3 scripts/ci_ratchet.py lint lint.log 0   # after redirecting the lint
 ```
 
 A drift FAIL names the kernel path and the stamp. Restamp from the source

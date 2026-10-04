@@ -16,6 +16,12 @@ pub const DIRECT_IO_PAGE_ALIGNMENT: usize = 4096;
 /// Legacy block-aligned Direct I/O boundary (512 bytes).
 pub const DIRECT_IO_SECTOR_ALIGNMENT: usize = 512;
 
+/// Maximum direct I/O transfer size (2 GiB - 4096 bytes) for POSIX SSIZE_MAX compliance.
+pub const MAX_DIRECT_IO_TRANSFER_LEN: usize = 0x7fff_f000;
+
+/// Maximum direct I/O alignment requirement supported (2 MiB huge page boundary).
+pub const MAX_DIRECT_IO_ALIGNMENT: usize = 2 * 1024 * 1024;
+
 /// Violations of Direct I/O alignment invariants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DirectIoAlignmentViolation {
@@ -49,12 +55,79 @@ pub enum DirectIoAlignmentViolation {
         /// Transfer length.
         transfer_len: usize,
     },
-    /// Alignment specified is invalid (must be a power of two >= 512).
+    /// File offset plus transfer length wraps around u64.
+    FileOffsetOverflow {
+        /// File offset.
+        file_offset: u64,
+        /// Transfer length.
+        transfer_len: usize,
+    },
+    /// Transfer length exceeds maximum allowed by POSIX/hardware DMA.
+    TransferLengthExceedsMaximum {
+        /// Transfer length observed.
+        transfer_len: usize,
+        /// Maximum allowed transfer length.
+        max_allowed: usize,
+    },
+    /// Memory allocation capacity overflowed during alignment rounding.
+    AllocationOverflow {
+        /// Requested capacity.
+        capacity: usize,
+        /// Required alignment.
+        alignment: usize,
+    },
+    /// Alignment specified is invalid (must be a power of two between 512 and 2 MiB).
     InvalidAlignmentRequirement {
         /// Invalid alignment value.
         alignment: usize,
     },
+    /// Requested slice range exceeds usable buffer boundary.
+    SliceOutOfBounds {
+        /// Offset.
+        offset: usize,
+        /// Length.
+        len: usize,
+        /// Total usable length.
+        usable_len: usize,
+    },
 }
+
+impl std::fmt::Display for DirectIoAlignmentViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MisalignedBufferPointer { ptr_addr, required_alignment } => {
+                write!(f, "buffer pointer {ptr_addr:#x} is not aligned to {required_alignment} bytes")
+            }
+            Self::MisalignedFileOffset { file_offset, required_alignment } => {
+                write!(f, "file offset {file_offset:#x} is not aligned to {required_alignment} bytes")
+            }
+            Self::MisalignedTransferLength { transfer_len, required_alignment } => {
+                write!(f, "transfer length {transfer_len} is not a multiple of {required_alignment} bytes")
+            }
+            Self::ZeroLengthTransfer => write!(f, "transfer length cannot be zero for Direct I/O DMA"),
+            Self::PointerArithmeticOverflow { ptr_addr, transfer_len } => {
+                write!(f, "pointer arithmetic overflow: base {ptr_addr:#x} + len {transfer_len}")
+            }
+            Self::FileOffsetOverflow { file_offset, transfer_len } => {
+                write!(f, "file offset overflow: offset {file_offset:#x} + len {transfer_len}")
+            }
+            Self::TransferLengthExceedsMaximum { transfer_len, max_allowed } => {
+                write!(f, "transfer length {transfer_len} exceeds maximum allowed {max_allowed}")
+            }
+            Self::AllocationOverflow { capacity, alignment } => {
+                write!(f, "allocation arithmetic overflow: capacity {capacity} with alignment {alignment}")
+            }
+            Self::InvalidAlignmentRequirement { alignment } => {
+                write!(f, "invalid alignment requirement {alignment} (must be power of two between 512 and 2 MiB)")
+            }
+            Self::SliceOutOfBounds { offset, len, usable_len } => {
+                write!(f, "slice range [{offset}..{}] out of usable bounds {usable_len}", offset + len)
+            }
+        }
+    }
+}
+
+impl std::error::Error for DirectIoAlignmentViolation {}
 
 /// Verifies whether an I/O request satisfies the Direct I/O contract.
 ///
@@ -66,7 +139,10 @@ pub fn verify_direct_io_request(
     transfer_len: usize,
     required_alignment: usize,
 ) -> Result<(), DirectIoAlignmentViolation> {
-    if !required_alignment.is_power_of_two() || required_alignment < DIRECT_IO_SECTOR_ALIGNMENT {
+    if !required_alignment.is_power_of_two()
+        || required_alignment < DIRECT_IO_SECTOR_ALIGNMENT
+        || required_alignment > MAX_DIRECT_IO_ALIGNMENT
+    {
         return Err(DirectIoAlignmentViolation::InvalidAlignmentRequirement {
             alignment: required_alignment,
         });
@@ -76,9 +152,23 @@ pub fn verify_direct_io_request(
         return Err(DirectIoAlignmentViolation::ZeroLengthTransfer);
     }
 
+    if transfer_len > MAX_DIRECT_IO_TRANSFER_LEN {
+        return Err(DirectIoAlignmentViolation::TransferLengthExceedsMaximum {
+            transfer_len,
+            max_allowed: MAX_DIRECT_IO_TRANSFER_LEN,
+        });
+    }
+
     if ptr_addr.checked_add(transfer_len).is_none() {
         return Err(DirectIoAlignmentViolation::PointerArithmeticOverflow {
             ptr_addr,
+            transfer_len,
+        });
+    }
+
+    if file_offset.checked_add(transfer_len as u64).is_none() {
+        return Err(DirectIoAlignmentViolation::FileOffsetOverflow {
+            file_offset,
             transfer_len,
         });
     }
@@ -117,26 +207,29 @@ pub struct AlignedDirectBuffer {
 }
 
 impl AlignedDirectBuffer {
-    /// Allocates an aligned buffer with `capacity` rounded up to the nearest multiple of `alignment`.
-    ///
-    /// # Panics
-    /// Panics if alignment is not a power of two >= 512.
-    #[must_use]
-    pub fn allocate(capacity: usize, alignment: usize) -> Self {
-        assert!(
-            alignment.is_power_of_two() && alignment >= DIRECT_IO_SECTOR_ALIGNMENT,
-            "Alignment must be a power of two >= 512"
-        );
+    /// Allocates an aligned buffer with `capacity` rounded up to the nearest multiple of `alignment`,
+    /// returning a Result instead of panicking on invalid configuration.
+    pub fn try_allocate(capacity: usize, alignment: usize) -> Result<Self, DirectIoAlignmentViolation> {
+        if !alignment.is_power_of_two()
+            || alignment < DIRECT_IO_SECTOR_ALIGNMENT
+            || alignment > MAX_DIRECT_IO_ALIGNMENT
+        {
+            return Err(DirectIoAlignmentViolation::InvalidAlignmentRequirement { alignment });
+        }
 
         let aligned_len = if capacity == 0 {
             alignment
         } else {
-            (capacity + alignment - 1) & !(alignment - 1)
+            let added = capacity
+                .checked_add(alignment - 1)
+                .ok_or(DirectIoAlignmentViolation::AllocationOverflow { capacity, alignment })?;
+            added & !(alignment - 1)
         };
 
-        // Allocate extra bytes so that regardless of where `raw_storage` lands,
-        // we can slice out an `aligned_len` block that starts on an `alignment` boundary.
-        let total_alloc = aligned_len + alignment;
+        let total_alloc = aligned_len
+            .checked_add(alignment)
+            .ok_or(DirectIoAlignmentViolation::AllocationOverflow { capacity, alignment })?;
+
         let raw_storage = vec![0u8; total_alloc];
 
         let base_ptr = raw_storage.as_ptr() as usize;
@@ -147,11 +240,21 @@ impl AlignedDirectBuffer {
             alignment - misaligned_rem
         };
 
-        Self {
+        Ok(Self {
             raw_storage,
             aligned_offset,
             usable_len: aligned_len,
-        }
+        })
+    }
+
+    /// Allocates an aligned buffer with `capacity` rounded up to the nearest multiple of `alignment`.
+    ///
+    /// # Panics
+    /// Panics if alignment is not a power of two between 512 and 2 MiB, or if allocation overflows.
+    #[must_use]
+    #[track_caller]
+    pub fn allocate(capacity: usize, alignment: usize) -> Self {
+        Self::try_allocate(capacity, alignment).expect("valid capacity and alignment required")
     }
 
     /// Returns the virtual memory address of the aligned start of the buffer.
@@ -169,6 +272,39 @@ impl AlignedDirectBuffer {
     /// Returns a mutable slice over the aligned buffer content.
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
         &mut self.raw_storage[self.aligned_offset..self.aligned_offset + self.usable_len]
+    }
+
+    /// Returns a verified aligned sub-slice from the buffer.
+    pub fn aligned_sub_slice(
+        &self,
+        offset: usize,
+        len: usize,
+        alignment: usize,
+    ) -> Result<&[u8], DirectIoAlignmentViolation> {
+        if offset % alignment != 0 {
+            return Err(DirectIoAlignmentViolation::MisalignedBufferPointer {
+                ptr_addr: self.aligned_address() + offset,
+                required_alignment: alignment,
+            });
+        }
+        if len % alignment != 0 {
+            return Err(DirectIoAlignmentViolation::MisalignedTransferLength {
+                transfer_len: len,
+                required_alignment: alignment,
+            });
+        }
+        let end = offset.checked_add(len).ok_or(DirectIoAlignmentViolation::PointerArithmeticOverflow {
+            ptr_addr: offset,
+            transfer_len: len,
+        })?;
+        if end > self.usable_len {
+            return Err(DirectIoAlignmentViolation::SliceOutOfBounds {
+                offset,
+                len,
+                usable_len: self.usable_len,
+            });
+        }
+        Ok(&self.as_slice()[offset..end])
     }
 
     /// Returns the usable length of the aligned buffer.

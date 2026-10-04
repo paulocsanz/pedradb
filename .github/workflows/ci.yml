@@ -1,9 +1,15 @@
-# CI: build + test suite (hard fail) + formal glue lint.
+# CI: build + test suite (hard fail) in one job; formal glue lint and
+# public hygiene in independent jobs with their own budgets.
 #
 # Tests: any failure is red. Lint: drift FAIL is red; classification debt
 # is held at a ceiling (growth is red). Lean extracts are not built here
 # on purpose: lake + mathlib takes about an hour;
 # scripts/lean_extracts.sh --required covers it locally.
+#
+# The lint and hygiene jobs do NOT compile Rust: they run in seconds in
+# their own job so a long test build can never starve them out of the
+# workflow timeout (the "dead ratchet" failure mode: five consecutive
+# cancelled runs with the lint step never reached, 2026-10-01..02).
 name: CI
 
 on:
@@ -12,27 +18,57 @@ on:
   pull_request:
 
 jobs:
-  ci:
+  tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build test suite
-        run: cargo test -q -p pedradb-core --lib --no-run
-      - name: Run tests
-        run: cargo test -q -p pedradb-core --lib 2>&1 | tee test.log
-      - name: Formal glue lint (drift = fail; debt ceiling 977)
-        run: |
-          set +e
-          python3 scripts/formal/pedra_formal.py --lint > lint.log 2>&1
-          python3 scripts/ci_ratchet.py lint lint.log 977
-      - name: Upload logs on failure
+      - name: Build public test suites
+        run: cargo test -q --no-run -p pedradb-core --lib -p rocksdb-compat -p pedradb-sim -p pedradb-spec -p pedradb-posix
+      - name: Core engine unit tests (pedradb-core)
+        run: cargo test -q -p pedradb-core --lib 2>&1 | tee core.log
+      - name: Core strict linearizability & anti-hole suites (RFC-0330)
+        run: cargo test -q -p pedradb-core --test rfc0330_strict_linearizability_read_your_writes --test rfc0330_async_wal_anti_hole_contract 2>&1 | tee -a core.log
+      - name: RocksDB compatibility & differential oracle (rocksdb-compat)
+        run: cargo test -q -p rocksdb-compat --lib --tests 2>&1 | tee compat.log
+      - name: Fault-grid & crash-consistency simulation (RFC-0333, RFC-0334, RFC-0335)
+        run: cargo test -q -p pedradb-sim --test rfc0333_fault_grid_concurrent_crash_consistency --test rfc0334_manifest_compaction_crash_consistency --test rfc0335_pacing_poison_radix_settle 2>&1 | tee sim.log
+      - name: Formal specification contracts (pedradb-spec)
+        run: cargo test -q -p pedradb-spec 2>&1 | tee spec.log
+      - name: POSIX platform primitives (pedradb-posix)
+        run: cargo test -q -p pedradb-posix 2>&1 | tee posix.log
+      - name: Upload test logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-logs
-          path: |
-            test.log
-            lint.log
+          name: ci-test-logs
+          path: "*.log"
+
+  formal-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Formal glue lint (drift = fail; debt ceiling 0, realigned 2026-10-03)
+        run: |
+          set +e
+          python3 scripts/formal/pedra_formal.py --lint > lint.log 2>&1
+          python3 scripts/ci_ratchet.py lint lint.log 0
+      - name: Upload lint log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-lint-log
+          path: lint.log
+
+  hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Public-mirror hygiene (manifest surface, no internal docs, no dangling internal links)
+        run: python3 scripts/check_public_hygiene.py
+      - name: Cross-references (every named script must exist)
+        run: python3 scripts/check_xrefs.py

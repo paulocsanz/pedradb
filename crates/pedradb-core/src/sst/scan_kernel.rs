@@ -17,7 +17,7 @@
 //! what the Lean theorems run over — Charon+Aeneas extract of these exact
 //! bodies. No Verus twin stands in for them.
 //!
-//!   ./scripts/aeneas_scan.sh
+//!   cargo xtask aeneas scan
 
 use std::ops::Bound;
 

@@ -28,7 +28,34 @@ pub enum FramingViolation {
     },
     /// Sequência malformada de bytes de escape ou terminação inválida.
     MalformedFramingSequence,
+    /// Tupla de componentes não pode ser vazia.
+    EmptyTuple,
+    /// Prefixo fornecido não pode ser vazio.
+    EmptyPrefix,
+    /// Overflow de prefixo: todos os bytes são 0xFF e não há limite superior representável.
+    PrefixOverflow,
 }
+
+impl std::fmt::Display for FramingViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DecodedTupleMismatch { expected, decoded } => write!(
+                f,
+                "Decoded tuple mismatch: expected {expected:?}, got {decoded:?}"
+            ),
+            Self::LexicographicalOrderInverted { tuple_a, tuple_b, encoded_a, encoded_b } => write!(
+                f,
+                "Lexicographical order inverted: {tuple_a:?} < {tuple_b:?}, but {encoded_a:?} >= {encoded_b:?}"
+            ),
+            Self::MalformedFramingSequence => write!(f, "Malformed or truncated tuple framing sequence"),
+            Self::EmptyTuple => write!(f, "Component tuple cannot be empty"),
+            Self::EmptyPrefix => write!(f, "Prefix cannot be empty"),
+            Self::PrefixOverflow => write!(f, "Prefix overflow: all bytes are 0xFF"),
+        }
+    }
+}
+
+impl std::error::Error for FramingViolation {}
 
 /// Codificador injetivo de tuplas binárias com preservação de ordem estrita (Prefix-Free Encoding).
 ///
@@ -41,9 +68,18 @@ pub enum FramingViolation {
 pub struct OrderPreservingTupleCodec;
 
 impl OrderPreservingTupleCodec {
+    /// Codifica uma tupla com validação fail-closed de componentes não-vazios.
+    pub fn try_encode_tuple(components: &[&[u8]]) -> Result<Vec<u8>, FramingViolation> {
+        if components.is_empty() {
+            return Err(FramingViolation::EmptyTuple);
+        }
+        Ok(Self::encode_tuple(components))
+    }
+
     /// Codifica uma tupla de componentes binários em uma única fatia contígua de bytes injetiva.
     pub fn encode_tuple(components: &[&[u8]]) -> Vec<u8> {
-        let mut encoded = Vec::new();
+        let estimated_len: usize = components.iter().map(|c| c.len().saturating_add(2)).sum();
+        let mut encoded = Vec::with_capacity(estimated_len);
 
         for component in components {
             for &byte in *component {
@@ -61,6 +97,40 @@ impl OrderPreservingTupleCodec {
         }
 
         encoded
+    }
+
+    /// Codifica uma tupla de componentes pertencidos (`Vec<u8>`).
+    pub fn encode_tuple_owned(components: &[Vec<u8>]) -> Vec<u8> {
+        let slices: Vec<&[u8]> = components.iter().map(|c| c.as_slice()).collect();
+        Self::encode_tuple(&slices)
+    }
+
+    /// Calcula o limitador superior estrito com validação de erro estruturado.
+    pub fn try_prefix_upper_bound(prefix: &[u8]) -> Result<Vec<u8>, FramingViolation> {
+        if prefix.is_empty() {
+            return Err(FramingViolation::EmptyPrefix);
+        }
+        Self::prefix_upper_bound(prefix).ok_or(FramingViolation::PrefixOverflow)
+    }
+
+    /// Calcula o limitador superior estrito (exclusive upper bound) para uma fatia de prefixo.
+    ///
+    /// Retorna o menor byte array estritamente maior que qualquer chave que tenha `prefix` como prefixo,
+    /// garantindo confinamento em varreduras por range de prefixo em índices LSM.
+    /// Retorna `None` se todos os bytes do prefixo forem `0xFF` ou se o prefixo for vazio.
+    pub fn prefix_upper_bound(prefix: &[u8]) -> Option<Vec<u8>> {
+        if prefix.is_empty() {
+            return None;
+        }
+        let mut upper = prefix.to_vec();
+        for i in (0..upper.len()).rev() {
+            if upper[i] < 0xFF {
+                upper[i] += 1;
+                upper.truncate(i + 1);
+                return Some(upper);
+            }
+        }
+        None
     }
 
     /// Decodifica os bytes para os componentes binários originais.
@@ -156,5 +226,31 @@ impl OrderPreservingTupleCodec {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_composite_key_framing_bounds_red_to_green() {
+        assert_eq!(
+            OrderPreservingTupleCodec::try_encode_tuple(&[]).err(),
+            Some(FramingViolation::EmptyTuple)
+        );
+        assert_eq!(
+            OrderPreservingTupleCodec::try_prefix_upper_bound(&[]).err(),
+            Some(FramingViolation::EmptyPrefix)
+        );
+        assert_eq!(
+            OrderPreservingTupleCodec::try_prefix_upper_bound(&[0xFF, 0xFF]).err(),
+            Some(FramingViolation::PrefixOverflow)
+        );
+
+        let t = [&b"part1"[..], &b"part2"[..]];
+        let enc = OrderPreservingTupleCodec::try_encode_tuple(&t).unwrap();
+        let dec = OrderPreservingTupleCodec::decode_tuple(&enc).unwrap();
+        assert_eq!(dec, vec![b"part1".to_vec(), b"part2".to_vec()]);
     }
 }

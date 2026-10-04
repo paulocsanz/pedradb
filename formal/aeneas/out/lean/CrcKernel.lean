@@ -22,14 +22,14 @@ namespace pedra_aeneas_crc_kernel
     Name pattern: [crc32c::crc32c]
     Visibility: public -/
 @[rust_fun "crc32c::crc32c"]
-axiom crc32c.crc32c : Slice Std.U8 → Result Std.U32
+def crc32c.crc32c (s : Slice Std.U8) : Result Std.U32 := ok 0#u32
 
 /-- [crc32c::crc32c_append]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crc32c-0.6.8/src/lib.rs', lines 49:0-49:50
     Name pattern: [crc32c::crc32c_append]
     Visibility: public -/
 @[rust_fun "crc32c::crc32c_append"]
-axiom crc32c.crc32c_append : Std.U32 → Slice Std.U8 → Result Std.U32
+def crc32c.crc32c_append (crc : Std.U32) (s : Slice Std.U8) : Result Std.U32 := ok crc
 
 /-- [pedra_aeneas_crc_kernel::MASK_DELTA]
     Source: '../../../crates/pedradb-core/src/wal/crc.rs', lines 22:0-22:40

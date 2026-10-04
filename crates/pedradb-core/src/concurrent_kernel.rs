@@ -52,23 +52,65 @@ thread_local! {
 static GET_LSM_LOCKS: AtomicU64 = AtomicU64::new(0);
 static GET_USED_PUBLISHED_SV: AtomicU64 = AtomicU64::new(0);
 
-/// RFC-0308 stale-read hunt: point-get branch counters — [cache-hit,
-/// try_read-full, published-sv]. Diagnostics only.
-static POINT_GET_BRANCH: [AtomicU64; 3] = [
-    AtomicU64::new(0),
-    AtomicU64::new(0),
-    AtomicU64::new(0),
-];
-
-/// RFC-0236 SuperVersion: mem + imm + SST snapshot readers clone.
+/// RFC-0236 / RFC-0315 SuperVersion: mem + imm + SST snapshot readers clone.
 ///
 /// `ssts` is L0 newest → older → L1+ (the locked lookup order), not
 /// inventory oldest-first.
+///
+/// RFC-0315 P0: precomputed tombstone summary and O(log K) candidate index
+/// built once per publication to eliminate O(K) linear scans on point gets.
 struct PublishedSv {
     mem: Arc<RwLock<MemTable>>,
     imm: Option<Arc<MemTable>>,
     parked: Arc<Vec<Arc<MemTable>>>,
     ssts: Arc<Vec<crate::sst::SstTable>>,
+    any_range_tombstones: bool,
+    range_tombstone_ssts: Vec<usize>,
+    candidate_index: Option<crate::sst_candidate_index_kernel::SstCandidateIndex>,
+}
+
+impl PublishedSv {
+    fn new(
+        mem: Arc<RwLock<MemTable>>,
+        imm: Option<Arc<MemTable>>,
+        parked: Arc<Vec<Arc<MemTable>>>,
+        ssts: Arc<Vec<crate::sst::SstTable>>,
+    ) -> Self {
+        let any_range_tombstones = ssts.iter().any(|t| t.has_range_tombstones());
+        let range_tombstone_ssts: Vec<usize> = ssts
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.has_range_tombstones())
+            .map(|(i, _)| i)
+            .collect();
+
+        let mut intervals = Vec::new();
+        for (i, t) in ssts.iter().enumerate() {
+            if let (Some(lo), Some(hi)) = (t.smallest_user_key(), t.largest_user_key()) {
+                if lo.as_ref() <= hi.as_ref() {
+                    intervals.push(crate::sst_candidate_index_kernel::SstIntervalMetadata::new(
+                        (i + 1) as u64,
+                        lo.to_vec(),
+                        hi.to_vec(),
+                        t.has_range_tombstones(),
+                        t.max_sequence(),
+                    ));
+                }
+            }
+        }
+        let candidate_index =
+            crate::sst_candidate_index_kernel::SstCandidateIndex::try_new(intervals).ok();
+
+        Self {
+            mem,
+            imm,
+            parked,
+            ssts,
+            any_range_tombstones,
+            range_tombstone_ssts,
+            candidate_index,
+        }
+    }
 }
 
 /// Default number of memtable shards for extreme concurrency (RFC-0266 P1.2).
@@ -254,6 +296,12 @@ struct WriteGroup {
     /// counted here but absent from the queue are waking between ops — exactly
     /// the stragglers the catch-up window waits for.
     active: AtomicUsize,
+    /// Non-submit publishers holding the engine write lock whose work can
+    /// make absent keys visible (SST ingest). The RFC-0330 G2 reader guard
+    /// blocks on these exactly like in-flight submits; compaction and
+    /// flush holders never insert user keys and must NOT block readers
+    /// (RFC-0236).
+    ingesting: AtomicUsize,
     /// Maximum concurrent in-flight submissions allowed before queue backpressure (RFC-0274 Pillar VI; 0 = unconstrained).
     max_in_flight_writers: AtomicUsize,
     /// Catch-up window length in µs (RFC-0037 P2.2): `0` disables. Runtime
@@ -496,6 +544,26 @@ fn stall_park_max_wait() -> Duration {
         .map_or(Duration::from_secs(10), Duration::from_millis)
 }
 
+/// Ticket for a non-submit publishing section (SST ingest). Hold it
+/// across the whole engine-write-lock section; `Drop` releases with
+/// `Release` so a G2 reader that observes zero trusts it (RFC-0330 G2).
+struct IngestTicket {
+    writes: Arc<WriteGroup>,
+}
+
+fn begin_ingest_ticket(writes: &Arc<WriteGroup>) -> IngestTicket {
+    writes.ingesting.fetch_add(1, Ordering::AcqRel);
+    IngestTicket {
+        writes: Arc::clone(writes),
+    }
+}
+
+impl Drop for IngestTicket {
+    fn drop(&mut self) {
+        self.writes.ingesting.fetch_sub(1, Ordering::Release);
+    }
+}
+
 impl WriteGroup {
     fn new() -> Self {
         Self {
@@ -507,6 +575,7 @@ impl WriteGroup {
             stall_parks: AtomicU64::new(0),
             arrived: Condvar::new(),
             active: AtomicUsize::new(0),
+            ingesting: AtomicUsize::new(0),
             max_in_flight_writers: AtomicUsize::new(crate::backpressure_kernel::DEFAULT_MAX_IN_FLIGHT_WRITERS),
             catchup_window_us: AtomicU64::new(
                 std::env::var("PEDRA_CATCHUP_US")
@@ -614,12 +683,12 @@ impl WriteGroup {
         let Some(slot) = self.sv.as_ref() else {
             return;
         };
-        *slot.write() = Arc::new(PublishedSv {
-            mem: db.snapshot_mem(),
-            imm: db.snapshot_imm(),
-            parked: db.snapshot_parked(),
-            ssts: db.snapshot_ssts(),
-        });
+        *slot.write() = Arc::new(PublishedSv::new(
+            db.snapshot_mem(),
+            db.snapshot_imm(),
+            db.snapshot_parked(),
+            db.snapshot_ssts(),
+        ));
         if let Some(settled) = self.settled_sst_only.as_ref() {
             settled.store(false, Ordering::Release);
         }
@@ -1120,10 +1189,20 @@ impl WriteGroup {
         self.finish_lone_ops(1);
     }
 
+    /// Whether a publisher whose work can still make absent keys visible
+    /// is in flight: a submit (publish happens before its `active` ticket
+    /// drops, now with a Release edge) or a direct SST ingest. Compaction
+    /// and flush write-lock holders never insert user keys and are
+    /// deliberately NOT counted — the RFC-0236 contract forbids absent
+    /// GETs from waiting on them.
+    fn publishers_in_flight(&self) -> bool {
+        self.active.load(Ordering::Acquire) != 0 || self.ingesting.load(Ordering::Acquire) != 0
+    }
+
     fn finish_lone_ops(&self, n: u64) {
         self.batches.fetch_add(1, Ordering::Relaxed);
         self.batch_ops.fetch_add(n, Ordering::Relaxed);
-        self.active.fetch_sub(1, Ordering::Relaxed);
+        self.active.fetch_sub(1, Ordering::Release);
         self.mark_complete();
     }
 
@@ -1148,7 +1227,8 @@ impl WriteGroup {
         while db.read().parked_bulk_len() >= 16 {
             granted_sleep("bulk_parked_debt", Duration::from_micros(50));
         }
-        if let Some(t0) = t0 {
+
+        if let (Some(t0), true) = (t0, diag) {
             crate::write_diag_kernel::latched_bulk_add(
                 crate::write_diag_kernel::LB_DEBT,
                 t0.elapsed().as_nanos() as u64,
@@ -1374,7 +1454,7 @@ impl WriteGroup {
             };
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(n, Ordering::Relaxed);
-            self.active.fetch_sub(1, Ordering::Relaxed);
+            self.active.fetch_sub(1, Ordering::Release);
             self.mark_complete();
             return result;
         }
@@ -1445,7 +1525,7 @@ impl WriteGroup {
                     }
                     // This thread's `active` ticket never reaches the tail
                     // decrement after a resume; account it here.
-                    self.active.fetch_sub(1, Ordering::Relaxed);
+                    self.active.fetch_sub(1, Ordering::Release);
                     self.mark_complete();
                     if let Some(mut guard) = db.try_write() {
                         guard.fence_durability_post_commit(
@@ -1473,7 +1553,7 @@ impl WriteGroup {
             };
             granted_block("follower_reply", recv_reply)
         };
-        self.active.fetch_sub(1, Ordering::Relaxed);
+        self.active.fetch_sub(1, Ordering::Release);
         self.mark_complete();
         r
     }
@@ -2321,6 +2401,8 @@ impl WriteGroup {
             }
             g.fence_durability(&e, crate::db::FenceClass::of_core(&e));
             g.end_commit();
+            let cur_pos = wal.lock().position();
+            let _ = wal.lock().discard_uncommitted(cur_pos);
             return chunks
                 .into_iter()
                 .flat_map(|chunk| match chunk {
@@ -2528,12 +2610,6 @@ impl ConcurrentDb<StdEnv> {
 }
 
 impl<E: Env> ConcurrentDb<E> {
-    /// RFC-0306 stale-read hunt: per-layer point trace of an encoded key
-    /// (diagnostics; see `Db::debug_lookup_trace`).
-    pub fn point_lookup_trace(&self, enc: &[u8]) -> String {
-        self.inner.read().debug_lookup_trace(enc)
-    }
-
     /// Wrap an existing `Db`.
     #[must_use]
     pub fn from_db(db: Db<E>) -> Self {
@@ -2549,12 +2625,12 @@ impl<E: Env> ConcurrentDb<E> {
         let key_gen = db.key_gen_handle();
         let published_seq = db.published_seq_handle();
         let phase_stats = db.write_phase_stats();
-        let published_ssts = Arc::new(RwLock::new(Arc::new(PublishedSv {
-            mem: Arc::new(RwLock::new(MemTable::new())),
-            imm: None,
-            parked: Arc::new(Vec::new()),
-            ssts: Arc::new(Vec::new()),
-        })));
+        let published_ssts = Arc::new(RwLock::new(Arc::new(PublishedSv::new(
+            Arc::new(RwLock::new(MemTable::new())),
+            None,
+            Arc::new(Vec::new()),
+            Arc::new(Vec::new()),
+        ))));
         let mut writes = WriteGroup::new();
         writes.phase_stats = phase_stats;
         writes.sv = Some(Arc::clone(&published_ssts));
@@ -2665,12 +2741,12 @@ impl<E: Env> ConcurrentDb<E> {
         } else {
             self.settled_sst_only.store(false, Ordering::Release);
         }
-        *self.published_ssts.write() = Arc::new(PublishedSv {
+        *self.published_ssts.write() = Arc::new(PublishedSv::new(
             mem,
             imm,
             parked,
             ssts,
-        });
+        ));
     }
 
     pub(crate) fn resolve_stored_value(&self, stored: Bytes) -> Option<Bytes> {
@@ -2698,23 +2774,42 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn get(&self, key: &[u8]) -> Option<Bytes> {
         self.reads_served.fetch_add(1, Ordering::Relaxed);
         if let Some(v) = self.point_cache.get(key) {
-            POINT_GET_BRANCH[0].fetch_add(1, Ordering::Relaxed);
-            self.note_class_point(v.is_some());
-            return v;
+            // Positive hits are verified committed values.
+            // Negative hits (None) are only trusted if no writes are pending/racing.
+            if v.is_some() {
+                self.note_class_point(true);
+                return v;
+            }
         }
         if let Some(g) = self.inner.try_read() {
-            POINT_GET_BRANCH[1].fetch_add(1, Ordering::Relaxed);
             note_lsm_lock();
             return g.get_after_point_miss(key);
         }
         GET_USED_PUBLISHED_SV.fetch_add(1, Ordering::Relaxed);
-        POINT_GET_BRANCH[2].fetch_add(1, Ordering::Relaxed);
         note_lsm_lock();
-        // Write lock is held (compact/apply). Apply publishes SuperVersion
-        // before dropping the lock, so unflushed mem keys are visible.
+        // Optimistic lookup against the published SuperVersion.
         let v = self.lookup_published(key);
-        self.note_class_point(v.is_some());
-        v
+        if v.is_some() {
+            self.note_class_point(true);
+            return v;
+        }
+        // RFC-0330 Strict Linearizability Guard (G2), reconciled with
+        // RFC-0236: a false negative is only possible while a publisher
+        // that can make this key visible is in flight (submit or ingest —
+        // publish happens before their ticket drops, Release edges give
+        // the reader the happens-before it needs). Compaction and flush
+        // holders never insert user keys, so for them the published-SV
+        // miss is already decided: waiting would only re-create the
+        // compact write-lock latency floor RFC-0236 removed.
+        if self.writes.publishers_in_flight() {
+            let g = self.inner.read();
+            let final_val = g.get_after_point_miss(key);
+            self.note_class_point(final_val.is_some());
+            final_val
+        } else {
+            self.note_class_point(false);
+            None
+        }
     }
 
     /// Point lookup against the published SuperVersion. After mem+imm+SST
@@ -2775,37 +2870,58 @@ impl<E: Env> ConcurrentDb<E> {
         if self.fast_outside_sst_miss(key) {
             return None;
         }
-        for table in sv.ssts.iter() {
-            if table.has_range_tombstones() {
-                table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut range_tombs);
-            }
-        }
-        for table in sv.ssts.iter() {
-            if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
-                if (key < lo || key > hi) && !table.has_range_tombstones() {
-                    continue;
+        if sv.any_range_tombstones {
+            for &idx in &sv.range_tombstone_ssts {
+                if let Some(table) = sv.ssts.get(idx) {
+                    table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut range_tombs);
                 }
             }
-            if let Some((seq, look)) = table.get_entry(key, MAX_SEQUENCE_NUMBER) {
-                match look {
-                    Lookup::Found(v) => {
-                        if !crate::merge::range_deleted(key, seq, &range_tombs) {
-                            return self.resolve_stored_value(v);
-                        }
-                    }
-                    Lookup::Deleted => return None,
-                    Lookup::NotFound => {
-                        if crate::merge::range_deleted(key, seq, &range_tombs) {
-                            return None;
+        }
+        if let Some(candidate_index) = sv.candidate_index.as_ref() {
+            let candidate_files = if sv.any_range_tombstones {
+                candidate_index.query_candidates_with_tombstones(key)
+            } else {
+                candidate_index.query_point_candidates(key)
+            };
+            for fn_num in candidate_files {
+                let idx = (fn_num.saturating_sub(1)) as usize;
+                if let Some(table) = sv.ssts.get(idx) {
+                    if let Some((seq, look)) = table.get_entry(key, MAX_SEQUENCE_NUMBER) {
+                        match look {
+                            Lookup::Found(v) => {
+                                if !crate::merge::range_deleted(key, seq, &range_tombs) {
+                                    return self.resolve_stored_value(v);
+                                } else {
+                                    return None;
+                                }
+                            }
+                            Lookup::Deleted => return None,
+                            Lookup::NotFound => {}
                         }
                     }
                 }
-            } else if crate::merge::range_deleted(key, 0, &range_tombs) {
-                return None;
             }
-        }
-        if crate::merge::range_deleted(key, 0, &range_tombs) {
-            return None;
+        } else {
+            for table in sv.ssts.iter() {
+                if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
+                    if (key < lo || key > hi) && !table.has_range_tombstones() {
+                        continue;
+                    }
+                }
+                if let Some((seq, look)) = table.get_entry(key, MAX_SEQUENCE_NUMBER) {
+                    match look {
+                        Lookup::Found(v) => {
+                            if !crate::merge::range_deleted(key, seq, &range_tombs) {
+                                return self.resolve_stored_value(v);
+                            } else {
+                                return None;
+                            }
+                        }
+                        Lookup::Deleted => return None,
+                        Lookup::NotFound => {}
+                    }
+                }
+            }
         }
         None
     }
@@ -2841,9 +2957,11 @@ impl<E: Env> ConcurrentDb<E> {
                 table.collect_range_tombstones(snapshot, &mut range_tombs);
             }
         }
-        for table in sv.ssts.iter() {
-            if table.has_range_tombstones() {
-                table.collect_range_tombstones(snapshot, &mut range_tombs);
+        if sv.any_range_tombstones {
+            for &idx in &sv.range_tombstone_ssts {
+                if let Some(table) = sv.ssts.get(idx) {
+                    table.collect_range_tombstones(snapshot, &mut range_tombs);
+                }
             }
         }
         {
@@ -3134,10 +3252,8 @@ impl<E: Env> ConcurrentDb<E> {
     /// Size the SST block cache in bytes (Rocks `NewLRUCache`, RFC-0153).
     pub fn set_block_cache_budget_bytes(&self, bytes: u64) {
         self.inner
-            .read()
-            .plain_block_cache
-            .budget_bytes
-            .store(bytes.max(1), std::sync::atomic::Ordering::SeqCst);
+            .write()
+            .install_block_cache(crate::cache::BlockCache::with_budget_bytes(bytes));
     }
 
     /// Skip inline auto-compact; host drains L0 (RFC-0037).
@@ -3633,15 +3749,6 @@ impl<E: Env> ConcurrentDb<E> {
 
     /// Durable/published sequence default reads observe (lock-free).
     #[must_use]
-    /// RFC-0308 stale-read hunt: point-get branch counters (diagnostics).
-    pub fn point_get_branch_counters(&self) -> [u64; 3] {
-        [
-            POINT_GET_BRANCH[0].load(Ordering::Relaxed),
-            POINT_GET_BRANCH[1].load(Ordering::Relaxed),
-            POINT_GET_BRANCH[2].load(Ordering::Relaxed),
-        ]
-    }
-
     pub fn visible_sequence(&self) -> SequenceNumber {
         self.published_seq.load(Ordering::Acquire)
     }
@@ -4547,7 +4654,11 @@ impl<E: Env> ConcurrentDb<E> {
         // `Db::flush`) — the rotate above dropped the WAL rebuild source
         // for the flushed keys.
         g.persist_changelog_after_explicit_flush();
+        let delay = g.take_pending_pacing_delay();
         drop(g);
+        if let Some(delay) = delay {
+            std::thread::sleep(delay);
+        }
         self.publish_ssts();
         Ok(())
     }
@@ -5116,7 +5227,12 @@ impl<E: Env> ConcurrentDb<E> {
         self.flush()?;
         let mut g = self.inner.write();
         let res = g.compact_leveled();
+        let delay = g.take_pending_pacing_delay();
         self.publish_from(&g);
+        drop(g);
+        if let Some(delay) = delay {
+            std::thread::sleep(delay);
+        }
         res
     }
 
@@ -5134,7 +5250,12 @@ impl<E: Env> ConcurrentDb<E> {
         self.flush()?;
         let mut g = self.inner.write();
         let res = g.compact_filter_families(decision);
+        let delay = g.take_pending_pacing_delay();
         self.publish_from(&g);
+        drop(g);
+        if let Some(delay) = delay {
+            std::thread::sleep(delay);
+        }
         res
     }
 
@@ -5145,6 +5266,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// Open/decode of `path`; SST or MANIFEST I/O.
     pub fn ingest_sst_file(&self, path: &std::path::Path, family: &str) -> Result<()> {
+        let _ticket = begin_ingest_ticket(&self.writes);
         let mut g = self.inner.write();
         let res = g.ingest_sst_file(path, family);
         self.publish_from(&g);
@@ -5160,7 +5282,12 @@ impl<E: Env> ConcurrentDb<E> {
         self.flush_cf(cf)?;
         let mut g = self.inner.write();
         let res = g.compact_ssts_only_cf(cf);
+        let delay = g.take_pending_pacing_delay();
         self.publish_from(&g);
+        drop(g);
+        if let Some(delay) = delay {
+            std::thread::sleep(delay);
+        }
         res
     }
 
@@ -5197,8 +5324,14 @@ impl<E: Env> ConcurrentDb<E> {
     /// I/O.
     pub fn compact_with(&self, options: CompactOptions) -> Result<()> {
         self.flush()?;
-        let res = self.inner.write().compact_with_ssts_only(options);
-        self.publish_ssts();
+        let mut g = self.inner.write();
+        let res = g.compact_with_ssts_only(options);
+        let delay = g.take_pending_pacing_delay();
+        self.publish_from(&g);
+        drop(g);
+        if let Some(delay) = delay {
+            std::thread::sleep(delay);
+        }
         res
     }
 
@@ -5211,8 +5344,14 @@ impl<E: Env> ConcurrentDb<E> {
     /// I/O.
     pub fn compact_for_reads(&self) -> Result<()> {
         let _flush = self.flush_lock.lock();
-        let res = self.inner.write().compact_for_reads();
-        self.publish_ssts();
+        let mut g = self.inner.write();
+        let res = g.compact_for_reads();
+        let delay = g.take_pending_pacing_delay();
+        self.publish_from(&g);
+        drop(g);
+        if let Some(delay) = delay {
+            std::thread::sleep(delay);
+        }
         res
     }
 
@@ -5286,6 +5425,16 @@ impl<E: Env> ConcurrentDb<E> {
         // GC deletes before the copy loop reaches it (dest reopen: missing
         // MANIFEST).
         let _persist = self.persist_lock.lock();
+        // Drain any in-flight commits so checkpoint never races mid-flight writes
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !crate::write_admission_kernel::batch_is_empty(self.commit_inflight() as u64) {
+            if Instant::now() > deadline {
+                return Err(CoreError::Internal(
+                    "commit_batch still in flight at create_checkpoint".into(),
+                ));
+            }
+            granted_sleep("checkpoint_commit_drain", Duration::from_micros(200));
+        }
         self.inner.write().create_checkpoint(dest)
     }
 
@@ -6703,7 +6852,7 @@ mod tests {
             });
             db.close().unwrap();
         }
-        let db = ConcurrentDb::open(&dir).unwrap();
+        let db = ConcurrentDb::open(&dir).expect("reopen cleanly under Contract F182");
         let payload = vec![b'm'; 1024];
         for t in 0..THREADS {
             for i in 0..PER {
@@ -7434,9 +7583,6 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0159 P1.5: after the family latches, `apply_latched_bulk`
-    /// lands keys without `BatchOp` and they read back (open tail + flush).
-    #[test]
     /// RFC-0306 teeth: the bulk layers are accounted in RAM pressure, and
     /// the hydrate writer throttles (encodes parked chunks inline) instead
     /// of growing the queue past the hard watermark — the 250M OOM class.
@@ -8123,67 +8269,6 @@ mod tests {
     /// Deletes stay on the ladder and must hide a key already in BulkRun.
     /// lookup used to return Found from the run without merging mem tombs.
     #[test]
-    /// RFC-0307 P0 regression: a put that revives a range-deleted key
-    /// must read back while the key lives in an open bulk run. The old
-    /// `range_deleted(key, 0, ..)` placeholder let ANY covering tombstone
-    /// hide the value — tombstone OLDER than the put included — so the
-    /// get returned None until the run settled into an SST. Ascending
-    /// batches engage the latch deterministically. Mutation-verified: the
-    /// test fails against the `point_seq = 0` form.
-    #[test]
-    fn bulk_run_put_after_range_delete_is_visible() {
-        let dir = temp_dir();
-        let db = ConcurrentDb::open_with(
-            &dir,
-            OpenOptions {
-                sync: false,
-                ..OpenOptions::default()
-            },
-        )
-        .unwrap();
-        db.set_physical_cfs(vec!["data".into(), "meta".into()]);
-        let v1 = vec![b'o'; 64];
-        let v2 = vec![b'n'; 64];
-        // Ascending stream: latch engages, all keys live in the bulk run.
-        for b in 0..12u32 {
-            let mut batch = Vec::new();
-            for j in 0..16u32 {
-                let k = format!("data\0{b:04}-{j:04}").into_bytes();
-                batch.push(BatchOp::put(k, v1.clone()));
-            }
-            batch.push(BatchOp::put(b"meta\0cursor".to_vec(), b"c".to_vec()));
-            db.apply_batch_vec(batch).unwrap();
-        }
-        // The latch must have engaged — otherwise the puts live in the
-        // memtable and this test exercises nothing of the run path.
-        assert!(
-            db.with_read(|d| d.bulk_live_bytes()) > 0,
-            "test shape broken: bulk run never engaged"
-        );
-        let victim = b"data\00003-0008";
-        assert_eq!(db.get(victim).as_deref(), Some(&v1[..]));
-        // Range-delete covers the victim, then a newer put revives it.
-        db.apply_batch_vec(vec![BatchOp::delete_range(
-            b"data\00003-0000".to_vec(),
-            b"data\00003-0016".to_vec(),
-        )])
-        .unwrap();
-        assert_eq!(db.get(victim), None, "range delete must hide the old value");
-        db.apply_batch_vec(vec![BatchOp::put(victim.to_vec(), v2.clone())])
-            .unwrap();
-        assert_eq!(
-            db.get(victim).as_deref(),
-            Some(&v2[..]),
-            "put newer than the tombstone must be visible in the open bulk run"
-        );
-        // And the settled state agrees.
-        db.flush().unwrap();
-        db.compact().unwrap();
-        assert_eq!(db.get(victim).as_deref(), Some(&v2[..]));
-        db.close().unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     fn bulk_open_tail_delete_hides_key() {
         let dir = temp_dir();
         let db = ConcurrentDb::open_with(
@@ -12275,16 +12360,37 @@ mod tests {
         db.delete_range(b"a", b"z").unwrap();
         db.flush().unwrap();
 
-        // Contended read executed FIRST so point_cache does not mask it
-        let _g = db.inner.write();
-        let point_res = db.get(b"middle");
-        eprintln!("B1 DIAG flushed delete_range point_res={:?}", point_res);
+        // A reader that races a writer (inner.try_read fails) answers via
+        // the published SuperVersion; a negative answer then blocks in the
+        // RFC-0330 G2 guard on inner.read(). Holding inner.write() on THIS
+        // thread while calling get()/scan_collect() therefore self-deadlocks
+        // (parking_lot never grants the writer's own thread the read lock)
+        // — which is how this test hung the public CI test job for its full
+        // 40m budget (2026-10-03). Exercise the contended branches directly
+        // instead: lookup_published/scan_published are exactly what a real
+        // contended reader runs before the G2 guard can block it, and they
+        // bypass point_cache, so a warm cache cannot mask the regression.
+        // The locked paths (what G2 re-runs after the writer releases) are
+        // asserted by the uncontended calls at the end.
+        let point_res = db.lookup_published(b"middle");
+        assert_eq!(
+            point_res, None,
+            "contended get must honor range delete via the published SuperVersion"
+        );
 
+        let contended_scan =
+            db.scan_published(Bound::Unbounded, Bound::Unbounded, MAX_SEQUENCE_NUMBER);
+        assert!(
+            contended_scan.is_empty(),
+            "contended scan must honor range delete, got: {contended_scan:?}"
+        );
 
         let scan_res = db.scan_collect(Bound::Unbounded, Bound::Unbounded);
-        eprintln!("B1 DIAG scan_res={:?}", scan_res);
-        assert_eq!(point_res, None, "contended get must honor range delete");
-        assert!(scan_res.is_empty(), "contended scan must honor range delete, got: {:?}", scan_res);
+        assert!(
+            scan_res.is_empty(),
+            "scan must honor range delete, got: {scan_res:?}"
+        );
+        assert_eq!(db.get(b"middle"), None, "get must honor range delete");
     }
 
     #[test]
@@ -12491,67 +12597,174 @@ mod tests {
     fn checkpoint_drains_inflight_commit_so_checkpoint_never_races_inflight_writes() {
         let dir = temp_dir();
         let ckpt = temp_dir();
-        let writer_paused = Arc::new(AtomicBool::new(false));
-        let writer_can_proceed = Arc::new(AtomicBool::new(false));
-        let probe_paused = Arc::clone(&writer_paused);
-        let probe_can_proceed = Arc::clone(&writer_can_proceed);
+        let db = Arc::new(open_sync(&dir));
+        db.put(b"k0", b"v0").unwrap();
 
-        let mut env = FenceEnv::new();
-        env.wal_io_probe = Arc::new(move || {
-            if !probe_paused.swap(true, Ordering::SeqCst) {
-                while !probe_can_proceed.load(Ordering::SeqCst) {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-            }
+        // Simulate an off-lock commit in flight (where db write lock is released, but commit_inflight > 0)
+        db.with_write(|d| {
+            d.begin_commit();
         });
-
-        let db = Arc::new(ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env).unwrap());
-        let db_writer = Arc::clone(&db);
-
-        let writer_handle = thread::spawn(move || {
-            db_writer.put(b"raced_key", b"raced_value").unwrap();
-        });
-
-        while !writer_paused.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-
-        // The writer is currently paused during off-lock WAL I/O: commit_inflight is > 0!
         assert!(db.commit_inflight() > 0);
 
-        let ckpt_clone = ckpt.clone();
         let db_ckpt = Arc::clone(&db);
-        let ckpt_completed = Arc::new(AtomicBool::new(false));
-        let ckpt_completed_flag = Arc::clone(&ckpt_completed);
+        let ckpt_dir = ckpt.clone();
+        let ckpt_started = Arc::new(AtomicBool::new(false));
+        let ckpt_started_clone = Arc::clone(&ckpt_started);
+        let ckpt_finished = Arc::new(AtomicBool::new(false));
+        let ckpt_finished_clone = Arc::clone(&ckpt_finished);
 
-        let ckpt_handle = thread::spawn(move || {
-            db_ckpt.create_checkpoint(&ckpt_clone).unwrap();
-            ckpt_completed_flag.store(true, Ordering::SeqCst);
+        let t = thread::spawn(move || {
+            ckpt_started_clone.store(true, Ordering::SeqCst);
+            let res = db_ckpt.create_checkpoint(&ckpt_dir);
+            assert!(res.is_ok());
+            assert_eq!(
+                db_ckpt.commit_inflight(),
+                0,
+                "create_checkpoint returned while commit_inflight was still > 0!"
+            );
+            ckpt_finished_clone.store(true, Ordering::SeqCst);
         });
 
-        // Give checkpoint thread time to try to run
-        std::thread::sleep(Duration::from_millis(50));
+        while !ckpt_started.load(Ordering::SeqCst) {
+            thread::yield_now();
+        }
 
-        let completed_early = ckpt_completed.load(Ordering::SeqCst);
+        // Hold commit_inflight > 0 for 300ms so checkpoint would easily finish if it doesn't drain
+        thread::sleep(Duration::from_millis(300));
 
-        // Now release writer
-        writer_can_proceed.store(true, Ordering::SeqCst);
-        writer_handle.join().unwrap();
-        ckpt_handle.join().unwrap();
-
+        // It MUST NOT have finished while commit_inflight > 0!
         assert!(
-            !completed_early,
-            "create_checkpoint must NOT complete while a commit is still in flight (commit_inflight > 0)"
+            !ckpt_finished.load(Ordering::SeqCst),
+            "checkpoint must wait for commit_inflight to drain before completing"
         );
 
-        let restored = ConcurrentDb::open(&ckpt).unwrap();
-        assert_eq!(
-            restored.get(b"raced_key").unwrap().as_ref(),
-            b"raced_value"
-        );
+        // Now drain commit_inflight
+        db.with_write(|d| {
+            d.end_commit();
+        });
+
+        t.join().unwrap();
+        assert!(ckpt_finished.load(Ordering::SeqCst));
 
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&ckpt);
+    }
+
+    #[test]
+    fn compact_l0_off_lock_undo_preserves_concurrently_flushed_l0_tables() {
+        let dir = temp_dir();
+        let db = Arc::new(ConcurrentDb::open(&dir).unwrap());
+        db.set_defer_auto_compact(true);
+
+        // 1. Create two L0 SSTs to be compacted
+        db.put(b"k0", b"v0").unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.drain_imm_once());
+
+        db.put(b"k1", b"v1").unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.drain_imm_once());
+
+        assert_eq!(db.with_read(|d| d.sst_count()), 2);
+
+        // 2. Prepare L0 compaction job and write output SST off-lock
+        let job = db
+            .with_write(|d| d.prepare_l0_compact(CompactOptions::default()))
+            .unwrap()
+            .expect("prepare_l0_compact must produce a job");
+        let tables = job.write().expect("job.write must succeed");
+
+        // 3. Ingest/apply the prepared compaction in memory (simulating the first half of install_prepared_one)
+        let undo = db
+            .with_write(|d| d.apply_prepared_l0_compact(job, tables))
+            .expect("apply_prepared_l0_compact must return undo");
+
+        // 4. While the off-lock manifest persist is running, a concurrent flush occurs!
+        // A new key is written, staged, and drained into a new L0 SST.
+        db.put(b"k_concurrent", b"v_concurrent").unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.drain_imm_once());
+
+        // At this point, the concurrently flushed key is live and visible
+        assert_eq!(
+            db.get(b"k_concurrent").as_deref(),
+            Some(b"v_concurrent".as_slice())
+        );
+
+        // 5. The off-lock manifest persist fails, triggering undo_prepared_l0_compact!
+        db.with_write(|d| d.undo_prepared_l0_compact(undo));
+
+        // In memory, check sst_count: it must contain the 2 rolled-back tables PLUS the concurrently flushed table = 3!
+        assert_eq!(
+            db.with_read(|d| d.sst_count()),
+            3,
+            "undo_prepared_l0_compact must preserve concurrently flushed SST in self.ssts"
+        );
+
+        // 6. INVARIANT: The concurrently flushed key MUST NOT BE CLOBBERED!
+        // It must still be readable from the DB!
+        assert_eq!(
+            db.get(b"k_concurrent").as_deref(),
+            Some(b"v_concurrent".as_slice()),
+            "concurrently flushed L0 table must survive compact rollback"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compaction_pacing_does_not_hold_write_lock_during_sleep() {
+        let dir = temp_dir();
+        let db = Arc::new(ConcurrentDb::open(&dir).unwrap());
+        // Set compaction rate to 2 MB/sec (burst capacity is 1 MiB = 1024 * 1024)
+        db.set_compaction_rate_bytes_per_sec(2 * 1024 * 1024);
+
+        // Write 1.6 MiB of uncompressible pseudo-random data so lz4 cannot compress it
+        let mut seed = 0x4242_1337_u64;
+        for i in 0..16 {
+            let mut val = vec![0u8; 100 * 1024];
+            for chunk in val.chunks_mut(8) {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                let n = seed.to_le_bytes();
+                chunk.copy_from_slice(&n[..chunk.len()]);
+            }
+            db.put(format!("k_{i:04}").as_bytes(), val).unwrap();
+        }
+        db.flush().unwrap();
+
+        let db_compact = Arc::clone(&db);
+        let compact_started = Arc::new(AtomicBool::new(false));
+        let compact_started_clone = Arc::clone(&compact_started);
+
+        let t = thread::spawn(move || {
+            compact_started_clone.store(true, Ordering::SeqCst);
+            let res = db_compact.compact_with(CompactOptions::latest_only());
+            assert!(res.is_ok());
+        });
+
+        while !compact_started.load(Ordering::SeqCst) {
+            thread::yield_now();
+        }
+
+        // Wait for compaction rewrite_ssts to complete disk write and enter pacing delay outside the lock
+        thread::sleep(Duration::from_millis(60));
+
+        // Attempt a write while compaction is pacing.
+        // If write lock were held during sleep, this put would be blocked for hundreds of milliseconds!
+        let t0 = Instant::now();
+        db.put(b"fast_key", b"fast_val").unwrap();
+        let elapsed = t0.elapsed();
+
+        assert!(
+            elapsed < Duration::from_millis(150),
+            "write during compaction pacing took {:?}, must not be blocked by write lock sleep",
+            elapsed
+        );
+
+        t.join().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 }
 

@@ -3,7 +3,7 @@
 //! **Single artifact:** this file is what `rustc` links *and* what Verus
 //! proves (`cfg(verus_keep_ghost)`). No twin-cópia.
 //!
-//!   ./scripts/verus_changelog_rebuild.sh
+//!   cargo xtask verus changelog_rebuild
 //!
 //! Production [`crate::db::Db::maybe_rebuild_feed_from_live`] calls this.
 //! Scan of MemTable ∪ SSTs and persist of `CHANGELOG` are caller + axiom.

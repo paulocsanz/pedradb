@@ -1,0 +1,4 @@
+path=crates/pedradb-raft/src/vote_kernel.rs
+sha256=013292038a92d1e7e932a69092bf7049e2b8b00ee9a7e26e6007a2bf20676d19
+aeneas=f5a4c58-dirty
+charon=0.1.232

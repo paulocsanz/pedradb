@@ -45,6 +45,34 @@ structure LsmEntry where
   seq : Std.U64
   tomb : Bool
 
+/-- [pedra_aeneas_lsm_r1_kernel::{impl core::clone::Clone for pedra_aeneas_lsm_r1_kernel::LsmEntry}::clone]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 51:9-51:14
+    Visibility: public -/
+def LsmEntry.Insts.CoreCloneClone.clone
+  (self : LsmEntry) : Result LsmEntry := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::clone::Clone for pedra_aeneas_lsm_r1_kernel::LsmEntry}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 51:9-51:14 -/
+@[reducible]
+def LsmEntry.Insts.CoreCloneClone : core.clone.Clone LsmEntry := {
+  clone := LsmEntry.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::marker::Copy for pedra_aeneas_lsm_r1_kernel::LsmEntry}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 51:16-51:20 -/
+@[reducible]
+def LsmEntry.Insts.CoreMarkerCopy : core.marker.Copy LsmEntry := {
+  cloneInst := LsmEntry.Insts.CoreCloneClone
+}
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_lsm_r1_kernel::LsmEntry}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 51:22-51:31 -/
+@[reducible]
+def LsmEntry.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq LsmEntry := {
+}
+
 /-- [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::PartialEq<pedra_aeneas_lsm_r1_kernel::LsmEntry> for pedra_aeneas_lsm_r1_kernel::LsmEntry}::eq]:
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 51:22-51:31
     Visibility: public -/
@@ -64,12 +92,131 @@ def LsmEntry.Insts.CoreCmpPartialEqLsmEntry : core.cmp.PartialEq LsmEntry
   eq := LsmEntry.Insts.CoreCmpPartialEqLsmEntry.eq
 }
 
+/-- [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::Eq for pedra_aeneas_lsm_r1_kernel::LsmEntry}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 51:33-51:35
+    Visibility: public -/
+def LsmEntry.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : LsmEntry) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::Eq for pedra_aeneas_lsm_r1_kernel::LsmEntry}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 51:33-51:35 -/
+@[reducible]
+def LsmEntry.Insts.CoreCmpEq : core.cmp.Eq LsmEntry := {
+  partialEqInst := LsmEntry.Insts.CoreCmpPartialEqLsmEntry
+  assert_fields_are_eq := LsmEntry.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_lsm_r1_kernel::{impl core::fmt::Debug for pedra_aeneas_lsm_r1_kernel::LsmEntry}::fmt]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 51:37-51:42
+    Visibility: public -/
+def LsmEntry.Insts.CoreFmtDebug.fmt
+  (self : LsmEntry) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  let dyn := Dyn.mk _ core.fmt.DebugU64 self.key
+  let dyn1 := Dyn.mk _ core.fmt.DebugU64 self.seq
+  let dyn2 := Dyn.mk _ (core.fmt.DebugShared core.fmt.DebugBool) self.tomb
+  core.fmt.Formatter.debug_struct_field3_finish f (toStr "LsmEntry") (toStr
+    "key") dyn (toStr "seq") dyn1 (toStr "tomb") dyn2
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::fmt::Debug for pedra_aeneas_lsm_r1_kernel::LsmEntry}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 51:37-51:42 -/
+@[reducible]
+def LsmEntry.Insts.CoreFmtDebug : core.fmt.Debug LsmEntry := {
+  fmt := LsmEntry.Insts.CoreFmtDebug.fmt
+}
+
 /-- [pedra_aeneas_lsm_r1_kernel::LsmLevel]
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 60:0-63:1
     Visibility: public -/
 structure LsmLevel where
   entries : Array LsmEntry 4#usize
   len : Std.Usize
+
+/-- [pedra_aeneas_lsm_r1_kernel::{impl core::clone::Clone for pedra_aeneas_lsm_r1_kernel::LsmLevel}::clone]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 59:9-59:14
+    Visibility: public -/
+def LsmLevel.Insts.CoreCloneClone.clone
+  (self : LsmLevel) : Result LsmLevel := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::clone::Clone for pedra_aeneas_lsm_r1_kernel::LsmLevel}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 59:9-59:14 -/
+@[reducible]
+def LsmLevel.Insts.CoreCloneClone : core.clone.Clone LsmLevel := {
+  clone := LsmLevel.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::marker::Copy for pedra_aeneas_lsm_r1_kernel::LsmLevel}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 59:16-59:20 -/
+@[reducible]
+def LsmLevel.Insts.CoreMarkerCopy : core.marker.Copy LsmLevel := {
+  cloneInst := LsmLevel.Insts.CoreCloneClone
+}
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_lsm_r1_kernel::LsmLevel}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 59:22-59:31 -/
+@[reducible]
+def LsmLevel.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq LsmLevel := {
+}
+
+/-- [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::PartialEq<pedra_aeneas_lsm_r1_kernel::LsmLevel> for pedra_aeneas_lsm_r1_kernel::LsmLevel}::eq]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 59:22-59:31
+    Visibility: public -/
+def LsmLevel.Insts.CoreCmpPartialEqLsmLevel.eq
+  (self : LsmLevel) (other : LsmLevel) : Result Bool := do
+  let b ←
+    core.array.equality.PartialEqArray.eq
+      LsmEntry.Insts.CoreCmpPartialEqLsmEntry self.entries other.entries
+  if b
+  then ok (self.len = other.len)
+  else ok false
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::PartialEq<pedra_aeneas_lsm_r1_kernel::LsmLevel> for pedra_aeneas_lsm_r1_kernel::LsmLevel}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 59:22-59:31 -/
+@[reducible]
+def LsmLevel.Insts.CoreCmpPartialEqLsmLevel : core.cmp.PartialEq LsmLevel
+  LsmLevel := {
+  eq := LsmLevel.Insts.CoreCmpPartialEqLsmLevel.eq
+}
+
+/-- [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::Eq for pedra_aeneas_lsm_r1_kernel::LsmLevel}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 59:33-59:35
+    Visibility: public -/
+def LsmLevel.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : LsmLevel) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::Eq for pedra_aeneas_lsm_r1_kernel::LsmLevel}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 59:33-59:35 -/
+@[reducible]
+def LsmLevel.Insts.CoreCmpEq : core.cmp.Eq LsmLevel := {
+  partialEqInst := LsmLevel.Insts.CoreCmpPartialEqLsmLevel
+  assert_fields_are_eq := LsmLevel.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_lsm_r1_kernel::{impl core::fmt::Debug for pedra_aeneas_lsm_r1_kernel::LsmLevel}::fmt]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 59:37-59:42
+    Visibility: public -/
+def LsmLevel.Insts.CoreFmtDebug.fmt
+  (self : LsmLevel) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  let dyn :=
+    Dyn.mk _ (Array.Insts.CoreFmtDebug 4#usize LsmEntry.Insts.CoreFmtDebug)
+      self.entries
+  let dyn1 := Dyn.mk _ (core.fmt.DebugShared core.fmt.DebugUsize) self.len
+  core.fmt.Formatter.debug_struct_field2_finish f (toStr "LsmLevel") (toStr
+    "entries") dyn (toStr "len") dyn1
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::fmt::Debug for pedra_aeneas_lsm_r1_kernel::LsmLevel}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 59:37-59:42 -/
+@[reducible]
+def LsmLevel.Insts.CoreFmtDebug : core.fmt.Debug LsmLevel := {
+  fmt := LsmLevel.Insts.CoreFmtDebug.fmt
+}
 
 /-- [pedra_aeneas_lsm_r1_kernel::{pedra_aeneas_lsm_r1_kernel::LsmLevel}::empty]:
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 67:4-76:5
@@ -86,6 +233,89 @@ def LsmLevel.empty : Result LsmLevel := do
 structure LsmState where
   levels : Array LsmLevel 4#usize
   next_seq : Std.U64
+
+/-- [pedra_aeneas_lsm_r1_kernel::{impl core::clone::Clone for pedra_aeneas_lsm_r1_kernel::LsmState}::clone]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 80:9-80:14
+    Visibility: public -/
+def LsmState.Insts.CoreCloneClone.clone
+  (self : LsmState) : Result LsmState := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::clone::Clone for pedra_aeneas_lsm_r1_kernel::LsmState}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 80:9-80:14 -/
+@[reducible]
+def LsmState.Insts.CoreCloneClone : core.clone.Clone LsmState := {
+  clone := LsmState.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::marker::Copy for pedra_aeneas_lsm_r1_kernel::LsmState}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 80:16-80:20 -/
+@[reducible]
+def LsmState.Insts.CoreMarkerCopy : core.marker.Copy LsmState := {
+  cloneInst := LsmState.Insts.CoreCloneClone
+}
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_lsm_r1_kernel::LsmState}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 80:22-80:31 -/
+@[reducible]
+def LsmState.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq LsmState := {
+}
+
+/-- [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::PartialEq<pedra_aeneas_lsm_r1_kernel::LsmState> for pedra_aeneas_lsm_r1_kernel::LsmState}::eq]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 80:22-80:31
+    Visibility: public -/
+def LsmState.Insts.CoreCmpPartialEqLsmState.eq
+  (self : LsmState) (other : LsmState) : Result Bool := do
+  if self.next_seq = other.next_seq
+  then
+    core.array.equality.PartialEqArray.eq
+      LsmLevel.Insts.CoreCmpPartialEqLsmLevel self.levels other.levels
+  else ok false
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::PartialEq<pedra_aeneas_lsm_r1_kernel::LsmState> for pedra_aeneas_lsm_r1_kernel::LsmState}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 80:22-80:31 -/
+@[reducible]
+def LsmState.Insts.CoreCmpPartialEqLsmState : core.cmp.PartialEq LsmState
+  LsmState := {
+  eq := LsmState.Insts.CoreCmpPartialEqLsmState.eq
+}
+
+/-- [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::Eq for pedra_aeneas_lsm_r1_kernel::LsmState}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 80:33-80:35
+    Visibility: public -/
+def LsmState.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : LsmState) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::cmp::Eq for pedra_aeneas_lsm_r1_kernel::LsmState}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 80:33-80:35 -/
+@[reducible]
+def LsmState.Insts.CoreCmpEq : core.cmp.Eq LsmState := {
+  partialEqInst := LsmState.Insts.CoreCmpPartialEqLsmState
+  assert_fields_are_eq := LsmState.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_lsm_r1_kernel::{impl core::fmt::Debug for pedra_aeneas_lsm_r1_kernel::LsmState}::fmt]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 80:37-80:42
+    Visibility: public -/
+def LsmState.Insts.CoreFmtDebug.fmt
+  (self : LsmState) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  let dyn :=
+    Dyn.mk _ (Array.Insts.CoreFmtDebug 4#usize LsmLevel.Insts.CoreFmtDebug)
+      self.levels
+  let dyn1 := Dyn.mk _ (core.fmt.DebugShared core.fmt.DebugU64) self.next_seq
+  core.fmt.Formatter.debug_struct_field2_finish f (toStr "LsmState") (toStr
+    "levels") dyn (toStr "next_seq") dyn1
+
+/-- Trait implementation: [pedra_aeneas_lsm_r1_kernel::{impl core::fmt::Debug for pedra_aeneas_lsm_r1_kernel::LsmState}]
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 80:37-80:42 -/
+@[reducible]
+def LsmState.Insts.CoreFmtDebug : core.fmt.Debug LsmState := {
+  fmt := LsmState.Insts.CoreFmtDebug.fmt
+}
 
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_state_of]:
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 87:0-92:1
@@ -234,127 +464,33 @@ def lsm_write
   let a := index_mut_back ll1
   ok { levels := a, next_seq := i }
 
+/-- [pedra_aeneas_lsm_r1_kernel::lsm_flush]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 205:0-229:1
+    Visibility: public -/
+def lsm_flush (s : LsmState) : Result (Option LsmState) := do
+  sorry
+
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_compact]:
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 236:0-262:1
     Visibility: public -/
-@[rust_loop_body]
-def lsm_compact_inner_loop.body
-  (drop_all_tombs : Bool) (depth : Std.Usize) (src : LsmLevel)
-  (out : LsmState) (i : Std.Usize) :
-  Result (ControlFlow (LsmState × Std.Usize) (Option LsmState))
-  := do
-  if i < src.len
-  then
-    let e ← Array.index_usize src.entries i
-    let dst ← Array.index_usize out.levels depth
-    let max1 ← MAX_LEVELS - 1#usize
-    if e.tomb && (drop_all_tombs || depth = max1)
-    then
-      let dst1 ← level_remove dst e.key
-      let levels1 ← Array.update out.levels depth dst1
-      let i1 ← i + 1#usize
-      ok (cont ({ levels := levels1, next_seq := out.next_seq }, i1))
-    else
-      let (ok1, dst1) ← level_put dst e
-      if ok1
-      then
-        let levels1 ← Array.update out.levels depth dst1
-        let i1 ← i + 1#usize
-        ok (cont ({ levels := levels1, next_seq := out.next_seq }, i1))
-      else ok (done none)
-  else ok (done (some out))
+axiom lsm_compact : LsmState → Std.Usize → Result (Option LsmState)
 
-@[rust_loop]
-def lsm_compact_inner_loop
-  (drop_all_tombs : Bool) (depth : Std.Usize) (src : LsmLevel)
-  (out : LsmState) (i : Std.Usize) :
-  Result (Option LsmState)
-  := do
-  loop
-    (fun (out1, i1) =>
-      lsm_compact_inner_loop.body drop_all_tombs depth src out1 i1)
-    (out, i)
+/-- [pedra_aeneas_lsm_r1_kernel::lsm_compact_as_is]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 268:0-294:1
+    Visibility: public -/
+axiom lsm_compact_as_is : LsmState → Std.Usize → Result (Option LsmState)
 
-@[rust_loop_body]
-def lsm_compact_src_loop.body
-  (drop_all_tombs : Bool) (depth : Std.Usize)
-  (out : LsmState) (src_lvl : Std.Usize) :
-  Result (ControlFlow (LsmState × Std.Usize) (Option LsmState))
-  := do
-  if src_lvl > 0#usize
-  then
-    let src_lvl1 ← src_lvl - 1#usize
-    let src ← Array.index_usize out.levels src_lvl1
-    let empty ← LsmLevel.empty
-    let levels1 ← Array.update out.levels src_lvl1 empty
-    let out1 := { levels := levels1, next_seq := out.next_seq }
-    let o ← lsm_compact_inner_loop drop_all_tombs depth src out1 0#usize
-    match o with
-    | none => ok (done none)
-    | some out2 => ok (cont (out2, src_lvl1))
-  else ok (done (some out))
-
-@[rust_loop]
-def lsm_compact_src_loop
-  (drop_all_tombs : Bool) (depth : Std.Usize)
-  (out : LsmState) (src_lvl : Std.Usize) :
-  Result (Option LsmState)
-  := do
-  loop
-    (fun (out1, src_lvl1) =>
-      lsm_compact_src_loop.body drop_all_tombs depth out1 src_lvl1)
-    (out, src_lvl)
-
-def lsm_compact
-  (s : LsmState) (depth : Std.Usize) : Result (Option LsmState) := do
-  if depth = 0#usize
-  then ok none
-  else
-    if depth < MAX_LEVELS
-    then lsm_compact_src_loop false depth s depth
-    else ok none
-
-def lsm_compact_as_is
-  (s : LsmState) (depth : Std.Usize) : Result (Option LsmState) := do
-  if depth = 0#usize
-  then ok none
-  else
-    if depth < MAX_LEVELS
-    then lsm_compact_src_loop true depth s depth
-    else ok none
-
+/-- [pedra_aeneas_lsm_r1_kernel::lsm_reopen]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 298:0-300:1
+    Visibility: public -/
 def lsm_reopen (s : LsmState) : Result LsmState := do
   ok s
 
-@[rust_loop_body]
-def lsm_reopen_as_is_loop.body
-  (s : LsmState) (levels : Array LsmLevel 4#usize) (i : Std.Usize) :
-  Result (ControlFlow ((Array LsmLevel 4#usize) × Std.Usize)
-    (Array LsmLevel 4#usize))
-  := do
-  if i < MAX_LEVELS
-  then
-    let j ← MAX_LEVELS - 1#usize
-    let j1 ← j - i
-    let ll ← Array.index_usize s.levels j1
-    let a ← Array.update levels i ll
-    let i1 ← i + 1#usize
-    ok (cont (a, i1))
-  else ok (done levels)
-
-@[rust_loop]
-def lsm_reopen_as_is_loop
-  (s : LsmState) (levels : Array LsmLevel 4#usize) (i : Std.Usize) :
-  Result (Array LsmLevel 4#usize)
-  := do
-  loop
-    (fun (levels1, i1) => lsm_reopen_as_is_loop.body s levels1 i1)
-    (levels, i)
-
+/-- [pedra_aeneas_lsm_r1_kernel::lsm_reopen_as_is]:
+    Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 304:0-312:1
+    Visibility: public -/
 def lsm_reopen_as_is (s : LsmState) : Result LsmState := do
-  let a ← lsm_reopen_as_is_loop s s.levels 0#usize
-  ok { levels := a, next_seq := s.next_seq }
-
+  sorry
 
 /-- [pedra_aeneas_lsm_r1_kernel::lsm_probe]: loop body 0:
     Source: '../../../crates/pedradb-core/src/lsm_r1_kernel.rs', lines 318:4-325:1

@@ -4,6 +4,45 @@
 //! Proves strict continuity and positional bijection under direction switching:
 //! Prev(Next(it)) == it and Next(Prev(it)) == it without off-by-one errors or key skipping.
 
+/// Errors produced by bidirectional iterator validation.
+/// Errors produced by bidirectional iterator validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BidiIteratorError {
+    /// Items are not in strictly ascending key order.
+    UnsortedKeys {
+        /// Key that should have been strictly smaller.
+        prev_key: Vec<u8>,
+        /// Successor key that broke monotonicity.
+        next_key: Vec<u8>,
+    },
+    /// Duplicate keys detected in iterator items.
+    DuplicateKeys {
+        /// The duplicated key.
+        key: Vec<u8>,
+    },
+    /// Key cannot be empty.
+    KeyEmpty,
+    /// Iterator items cannot be empty.
+    EmptyItems,
+}
+
+impl std::fmt::Display for BidiIteratorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsortedKeys { prev_key, next_key } => {
+                write!(f, "unsorted keys in iterator items: {prev_key:?} > {next_key:?}")
+            }
+            Self::DuplicateKeys { key } => {
+                write!(f, "duplicate key in iterator items: {key:?}")
+            }
+            Self::KeyEmpty => write!(f, "key cannot be empty in iterator items"),
+            Self::EmptyItems => write!(f, "iterator items collection cannot be empty"),
+        }
+    }
+}
+
+impl std::error::Error for BidiIteratorError {}
+
 /// Traversal direction of an active iterator cursor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorDirection {
@@ -16,7 +55,7 @@ pub enum CursorDirection {
 }
 
 /// A bidirectional iterator state machine over a deterministic sequence of key-value pairs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BidiCursorStateMachine {
     /// Items in canonical ascending order.
     items: Vec<(Vec<u8>, Vec<u8>)>,
@@ -27,13 +66,93 @@ pub struct BidiCursorStateMachine {
 }
 
 impl BidiCursorStateMachine {
-    /// Creates a new bidirectional cursor over sorted items.
+    /// Creates a new bidirectional cursor over non-empty items.
+    pub fn try_new_non_empty(items: Vec<(Vec<u8>, Vec<u8>)>) -> Result<Self, BidiIteratorError> {
+        if items.is_empty() {
+            return Err(BidiIteratorError::EmptyItems);
+        }
+        Self::try_new(items)
+    }
+
+    /// Creates a new bidirectional cursor over items, validating that keys are strictly sorted.
+    pub fn try_new(items: Vec<(Vec<u8>, Vec<u8>)>) -> Result<Self, BidiIteratorError> {
+        for item in &items {
+            if item.0.is_empty() {
+                return Err(BidiIteratorError::KeyEmpty);
+            }
+        }
+        for window in items.windows(2) {
+            if window[0].0 == window[1].0 {
+                return Err(BidiIteratorError::DuplicateKeys {
+                    key: window[0].0.clone(),
+                });
+            }
+            if window[0].0 > window[1].0 {
+                return Err(BidiIteratorError::UnsortedKeys {
+                    prev_key: window[0].0.clone(),
+                    next_key: window[1].0.clone(),
+                });
+            }
+        }
+        Ok(Self {
+            items,
+            cursor: None,
+            direction: CursorDirection::Neutral,
+        })
+    }
+
+    /// Creates a new bidirectional cursor without validating sortedness.
     #[must_use]
     pub fn new(items: Vec<(Vec<u8>, Vec<u8>)>) -> Self {
         Self {
             items,
             cursor: None,
             direction: CursorDirection::Neutral,
+        }
+    }
+
+    /// Returns true if the cursor is currently positioned at a valid item.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        self.cursor.is_some()
+    }
+
+    /// Returns the current value bytes if cursor is valid.
+    #[must_use]
+    pub fn current_value(&self) -> Option<&[u8]> {
+        self.cursor.map(|idx| self.items[idx].1.as_slice())
+    }
+
+    /// Returns current key-value pair if valid.
+    #[must_use]
+    pub fn current(&self) -> Option<(&[u8], &[u8])> {
+        self.cursor.map(|idx| (self.items[idx].0.as_slice(), self.items[idx].1.as_slice()))
+    }
+
+    /// Positions cursor at the first element whose key is >= `target_key` (Seek).
+    pub fn seek(&mut self, target_key: &[u8]) -> Option<(&[u8], &[u8])> {
+        self.direction = CursorDirection::Forward;
+        let idx = self.items.partition_point(|(k, _)| k.as_slice() < target_key);
+        if idx < self.items.len() {
+            self.cursor = Some(idx);
+            Some((&self.items[idx].0, &self.items[idx].1))
+        } else {
+            self.cursor = None;
+            None
+        }
+    }
+
+    /// Positions cursor at the last element whose key is <= `target_key` (SeekForPrev).
+    pub fn seek_for_prev(&mut self, target_key: &[u8]) -> Option<(&[u8], &[u8])> {
+        self.direction = CursorDirection::Backward;
+        let idx = self.items.partition_point(|(k, _)| k.as_slice() <= target_key);
+        if idx > 0 {
+            let prev_idx = idx - 1;
+            self.cursor = Some(prev_idx);
+            Some((&self.items[prev_idx].0, &self.items[prev_idx].1))
+        } else {
+            self.cursor = None;
+            None
         }
     }
 
@@ -152,5 +271,29 @@ impl BidiCursorStateMachine {
     #[must_use]
     pub fn direction(&self) -> CursorDirection {
         self.direction
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bidi_iterator_validation_red_to_green() {
+        assert_eq!(
+            BidiCursorStateMachine::try_new_non_empty(vec![]),
+            Err(BidiIteratorError::EmptyItems)
+        );
+        assert_eq!(
+            BidiCursorStateMachine::try_new(vec![(vec![], b"v".to_vec())]),
+            Err(BidiIteratorError::KeyEmpty)
+        );
+        assert_eq!(
+            BidiCursorStateMachine::try_new(vec![
+                (b"k1".to_vec(), b"v1".to_vec()),
+                (b"k1".to_vec(), b"v2".to_vec()),
+            ]),
+            Err(BidiIteratorError::DuplicateKeys { key: b"k1".to_vec() })
+        );
     }
 }

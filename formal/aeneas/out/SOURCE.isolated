@@ -1,0 +1,4 @@
+path=crates/pedradb-fold/src/isolated_kernel.rs
+sha256=3db52b12fc9da25998ba0cbeb840ba259288ec521d10e8f461049e186d8a3f20
+aeneas=f5a4c58-dirty
+charon=0.1.232

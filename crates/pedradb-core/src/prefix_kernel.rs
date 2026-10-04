@@ -1,10 +1,10 @@
 //! Exclusive end of a prefix scan (F57 / F58).
 //!
 //! **Term:** this file is what `rustc` links. Aeneas extracts that body
-//! (`scripts/aeneas_prefix.sh`). A Seq / clone_bytes view of the rustc
+//! (`cargo xtask aeneas prefix`). A Seq / clone_bytes view of the rustc
 //! `&[u8]` `to_vec` body is a model twin — not last-wins (deleted).
 //!
-//!   ./scripts/aeneas_prefix.sh --required
+//!   cargo xtask aeneas prefix --required
 //!
 //! Increment the last non-`0xff` byte. `None` = unbounded (empty or all-`0xff`).
 //! Store, fold, and SQL must call **this** function — not `prefix || [0xff]`.

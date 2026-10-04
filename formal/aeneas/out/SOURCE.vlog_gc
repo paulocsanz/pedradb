@@ -1,4 +1,4 @@
 path=crates/pedradb-core/src/vlog_gc_kernel.rs
-sha256=8a1fdb5c9d95a107566d0f48ffa9886b2f369e587793585519be90a793ad51ec
-aeneas=daa85d7
+sha256=9ae23119ccb830b9c75ae99416934f98278141bd2d4cb34e349a62a555958cf6
+aeneas=f5a4c58-dirty
 charon=0.1.232

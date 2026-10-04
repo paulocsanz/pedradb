@@ -1,0 +1,4 @@
+path=crates/pedradb-replicate/src/ship_kernel.rs
+sha256=a0a4d720765a86b75e85286facec314b41fb5130b81ef9b59cf954ead781dfcd
+aeneas=f5a4c58-dirty
+charon=0.1.232

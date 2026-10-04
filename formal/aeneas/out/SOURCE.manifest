@@ -1,4 +1,4 @@
 path=crates/pedradb-core/src/manifest_kernel.rs
-sha256=64a222054f8f1c1a060b2013fa9f1bf0697ebab929f90f2fb1e8fc726e345ee3
-aeneas=daa85d7
+sha256=c1a49624157145944761c7c3a05adebd09601288a85852d7ceeda6e068999c4a
+aeneas=f5a4c58-dirty
 charon=0.1.232

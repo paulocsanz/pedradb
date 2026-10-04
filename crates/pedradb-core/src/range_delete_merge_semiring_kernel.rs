@@ -4,6 +4,26 @@
 //! provando a confluência estrita entre avaliação em tempo de leitura e compactação estratificada.
 
 
+/// Errors in point mutation construction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointMutationError {
+    ZeroSequence,
+    EmptyValue,
+    EmptyOperand,
+}
+
+impl std::fmt::Display for PointMutationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ZeroSequence => write!(f, "Point mutation sequence number cannot be 0"),
+            Self::EmptyValue => write!(f, "Put value cannot be empty"),
+            Self::EmptyOperand => write!(f, "Merge operand cannot be empty"),
+        }
+    }
+}
+
+impl std::error::Error for PointMutationError {}
+
 /// Tipos de mutação de registro individual com sequence number causal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PointMutation {
@@ -29,6 +49,36 @@ pub enum PointMutation {
 }
 
 impl PointMutation {
+    /// Cria uma mutação Put validada.
+    pub fn try_new_put(seq: u64, value: Vec<u8>) -> Result<Self, PointMutationError> {
+        if seq == 0 {
+            return Err(PointMutationError::ZeroSequence);
+        }
+        if value.is_empty() {
+            return Err(PointMutationError::EmptyValue);
+        }
+        Ok(PointMutation::Put { seq, value })
+    }
+
+    /// Cria uma mutação Delete validada.
+    pub fn try_new_delete(seq: u64) -> Result<Self, PointMutationError> {
+        if seq == 0 {
+            return Err(PointMutationError::ZeroSequence);
+        }
+        Ok(PointMutation::Delete { seq })
+    }
+
+    /// Cria uma mutação Merge validada.
+    pub fn try_new_merge(seq: u64, operand: Vec<u8>) -> Result<Self, PointMutationError> {
+        if seq == 0 {
+            return Err(PointMutationError::ZeroSequence);
+        }
+        if operand.is_empty() {
+            return Err(PointMutationError::EmptyOperand);
+        }
+        Ok(PointMutation::Merge { seq, operand })
+    }
+
     /// Retorna o sequence number da mutação.
     pub fn seq(&self) -> u64 {
         match self {
@@ -38,6 +88,26 @@ impl PointMutation {
         }
     }
 }
+
+/// Errors in range tombstone definition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RangeTombstoneError {
+    EmptyKey,
+    InvertedRange,
+    ZeroSequence,
+}
+
+impl std::fmt::Display for RangeTombstoneError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyKey => write!(f, "Range tombstone start and end keys cannot be empty"),
+            Self::InvertedRange => write!(f, "Range tombstone start key must be strictly less than end key"),
+            Self::ZeroSequence => write!(f, "Range tombstone sequence number cannot be 0"),
+        }
+    }
+}
+
+impl std::error::Error for RangeTombstoneError {}
 
 /// Descritor de range tombstone cobrindo um intervalo semi-aberto $[start, end) @ seq$.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,8 +121,29 @@ pub struct RangeTombstone {
 }
 
 impl RangeTombstone {
+    /// Constrói um range tombstone validado.
+    pub fn try_new(start_key: Vec<u8>, end_key: Vec<u8>, seq: u64) -> Result<Self, RangeTombstoneError> {
+        if start_key.is_empty() || end_key.is_empty() {
+            return Err(RangeTombstoneError::EmptyKey);
+        }
+        if start_key >= end_key {
+            return Err(RangeTombstoneError::InvertedRange);
+        }
+        if seq == 0 {
+            return Err(RangeTombstoneError::ZeroSequence);
+        }
+        Ok(Self {
+            start_key,
+            end_key,
+            seq,
+        })
+    }
+
     /// Determina se uma chave pontual cai dentro do intervalo do range tombstone.
     pub fn covers_key(&self, key: &[u8]) -> bool {
+        if key.is_empty() || self.start_key.is_empty() || self.end_key.is_empty() || self.start_key >= self.end_key {
+            return false;
+        }
         key >= self.start_key.as_slice() && key < self.end_key.as_slice()
     }
 }
@@ -78,7 +169,36 @@ pub enum RangeMergeSemiringViolation {
         /// Seq do range tombstone.
         tombstone_seq: u64,
     },
+    /// Chave vazia fornecida.
+    EmptyKey,
+    /// Snapshot sequence number zero.
+    ZeroSnapshotSequence,
 }
+
+impl std::fmt::Display for RangeMergeSemiringViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ReadCompactionDivergence { key, read_value, compaction_value } => {
+                write!(
+                    f,
+                    "Read compaction divergence for key {:?}: read {:?}, compaction {:?}",
+                    key, read_value, compaction_value
+                )
+            }
+            Self::ResurrectedPreTombstoneMerge { key, merge_seq, tombstone_seq } => {
+                write!(
+                    f,
+                    "Resurrected pre-tombstone merge for key {:?}: merge seq {merge_seq} <= tombstone seq {tombstone_seq}",
+                    key
+                )
+            }
+            Self::EmptyKey => write!(f, "Evaluated key cannot be empty"),
+            Self::ZeroSnapshotSequence => write!(f, "Snapshot sequence number cannot be 0"),
+        }
+    }
+}
+
+impl std::error::Error for RangeMergeSemiringViolation {}
 
 /// Avaliador de semianel de merge com interceptação temporal de range deletes.
 pub struct RangeMergeSemiringEvaluator;
@@ -114,9 +234,13 @@ impl RangeMergeSemiringEvaluator {
             .max()
             .unwrap_or(0);
 
+        // Garante ordenação causal decrescente estrita por sequence number
+        let mut sorted_mutations: Vec<&PointMutation> = mutations.iter().collect();
+        sorted_mutations.sort_by_key(|m| std::cmp::Reverse(m.seq()));
+
         // Coleta mutações visíveis sob o snapshot
         let mut visible_mutations = Vec::new();
-        for m in mutations {
+        for m in sorted_mutations {
             if m.seq() <= snapshot_seq {
                 if m.seq() <= max_range_seq {
                     // Aniquilado pelo range tombstone!
@@ -178,6 +302,12 @@ impl RangeMergeSemiringEvaluator {
         l0_range_tombstones: &[RangeTombstone],
         l1_mutations: &[PointMutation],
     ) -> Result<(), RangeMergeSemiringViolation> {
+        if key.is_empty() {
+            return Err(RangeMergeSemiringViolation::EmptyKey);
+        }
+        if snapshot_seq == 0 {
+            return Err(RangeMergeSemiringViolation::ZeroSnapshotSequence);
+        }
         let mut all_mutations = Vec::new();
         all_mutations.extend_from_slice(l0_mutations);
         all_mutations.extend_from_slice(l1_mutations);
@@ -207,7 +337,9 @@ impl RangeMergeSemiringEvaluator {
                     for m in l1_mutations {
                         if m.seq() <= rt.seq {
                             if let PointMutation::Merge { seq, operand } = m {
-                                if val.windows(operand.len()).any(|w| w == operand.as_slice()) {
+                                if !operand.is_empty()
+                                    && val.windows(operand.len()).any(|w| w == operand.as_slice())
+                                {
                                     return Err(RangeMergeSemiringViolation::ResurrectedPreTombstoneMerge {
                                         key: key.to_vec(),
                                         merge_seq: *seq,
@@ -224,3 +356,101 @@ impl RangeMergeSemiringEvaluator {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_range_delete_merge_semiring_structural_invariants_red_to_green() {
+        // Red test 1: PointMutation rejection
+        assert_eq!(
+            PointMutation::try_new_put(0, b"val".to_vec()),
+            Err(PointMutationError::ZeroSequence)
+        );
+        assert_eq!(
+            PointMutation::try_new_put(10, vec![]),
+            Err(PointMutationError::EmptyValue)
+        );
+        assert_eq!(
+            PointMutation::try_new_delete(0),
+            Err(PointMutationError::ZeroSequence)
+        );
+        assert_eq!(
+            PointMutation::try_new_merge(0, b"op".to_vec()),
+            Err(PointMutationError::ZeroSequence)
+        );
+        assert_eq!(
+            PointMutation::try_new_merge(10, vec![]),
+            Err(PointMutationError::EmptyOperand)
+        );
+
+        // Green test 1: Valid PointMutations
+        let put = PointMutation::try_new_put(10, b"v1".to_vec()).expect("valid put");
+        let del = PointMutation::try_new_delete(20).expect("valid del");
+        let merge = PointMutation::try_new_merge(30, b"m1".to_vec()).expect("valid merge");
+        assert_eq!(put.seq(), 10);
+        assert_eq!(del.seq(), 20);
+        assert_eq!(merge.seq(), 30);
+
+        // Red test 2: RangeTombstone rejection
+        assert_eq!(
+            RangeTombstone::try_new(vec![], b"b".to_vec(), 10),
+            Err(RangeTombstoneError::EmptyKey)
+        );
+        assert_eq!(
+            RangeTombstone::try_new(b"a".to_vec(), vec![], 10),
+            Err(RangeTombstoneError::EmptyKey)
+        );
+        assert_eq!(
+            RangeTombstone::try_new(b"b".to_vec(), b"a".to_vec(), 10),
+            Err(RangeTombstoneError::InvertedRange)
+        );
+        assert_eq!(
+            RangeTombstone::try_new(b"a".to_vec(), b"a".to_vec(), 10),
+            Err(RangeTombstoneError::InvertedRange)
+        );
+        assert_eq!(
+            RangeTombstone::try_new(b"a".to_vec(), b"b".to_vec(), 0),
+            Err(RangeTombstoneError::ZeroSequence)
+        );
+
+        // Green test 2: Valid RangeTombstone coverage
+        let rt = RangeTombstone::try_new(b"k10".to_vec(), b"k50".to_vec(), 100).expect("valid rt");
+        assert!(rt.covers_key(b"k10"));
+        assert!(rt.covers_key(b"k25"));
+        assert!(!rt.covers_key(b"k50"));
+        assert!(!rt.covers_key(b"k05"));
+        assert!(!rt.covers_key(b"")); // empty key never covered
+
+        // Red test 3: verify_range_merge_confluence rejection of empty key & zero snapshot
+        let res_empty_key = RangeMergeSemiringEvaluator::verify_range_merge_confluence(
+            b"",
+            100,
+            &[],
+            &[rt.clone()],
+            &[],
+        );
+        assert_eq!(res_empty_key, Err(RangeMergeSemiringViolation::EmptyKey));
+
+        let res_zero_seq = RangeMergeSemiringEvaluator::verify_range_merge_confluence(
+            b"k25",
+            0,
+            &[],
+            &[rt.clone()],
+            &[],
+        );
+        assert_eq!(res_zero_seq, Err(RangeMergeSemiringViolation::ZeroSnapshotSequence));
+
+        // Green test 3: verify_range_merge_confluence succeeds on valid scenario
+        let res_ok = RangeMergeSemiringEvaluator::verify_range_merge_confluence(
+            b"k25",
+            150,
+            &[PointMutation::try_new_put(120, b"fresh".to_vec()).unwrap()],
+            &[rt],
+            &[PointMutation::try_new_put(50, b"stale".to_vec()).unwrap()],
+        );
+        assert!(res_ok.is_ok());
+    }
+}
+

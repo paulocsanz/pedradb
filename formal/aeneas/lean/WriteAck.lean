@@ -4,7 +4,10 @@ import WriteAckKernel
 open Aeneas.Std Result
 open pedra_aeneas_write_ack_kernel
 
-/-- Catalog entry: on_append grows written, not the barrier. -/
+/-- Catalog entry / Concrete instantiation corollary of `on_append_fate_iff`:
+    `on_append_fate_iff` proves universally (∀ l, bytes, w) that written grows
+    strictly by `bytes` while acked and synced remain intact. This theorem
+    provides the base-step verification for the catalog tuple. -/
 theorem on_append_grows_written :
     write_ack_kernel.WriteAckLedger.on_append
       { state := { acked := 0#u64, synced := 0#u64, written := 0#u64 } }

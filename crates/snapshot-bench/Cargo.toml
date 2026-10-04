@@ -6,6 +6,12 @@
 [workspace]
 resolver = "2"
 
+# Mirrors the engine root's [workspace.lints.rust]: this crate is its own
+# workspace (rocksdb `links` conflict), so it must re-declare them locally or
+# `[lints] workspace = true` below has nothing to inherit.
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(verus_keep_ghost)', 'cfg(loom)', 'cfg(pedra_aeneas)'] }
+
 [package]
 name = "snapshot-bench"
 version = "0.1.0"
@@ -35,3 +41,5 @@ fjall = ["dep:fjall"]
 rocksdb = ["dep:rocksdb"]
 pedradb = ["dep:rocksdb-compat", "dep:pedradb-core"]
 
+[lints]
+workspace = true

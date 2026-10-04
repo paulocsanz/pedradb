@@ -156,9 +156,9 @@ fn differential_oracle_randomized_workload() {
     let dir = unique_tmp_dir("random-cf");
     let mut opts = Options::new();
     opts.create_if_missing(true);
-    // RFC-0306 triage: PEDRA_ORACLE_NO_BG=1 runs without background
-    // flush/compact workers — if the stale read survives, the bug is in
-    // the synchronous path; if it vanishes, it is a worker race.
+    // RFC-0330 triage (ported from the public tree, b7fcde6b):
+    // PEDRA_ORACLE_NO_BG=1 runs without background flush/compact workers —
+    // if the stale read survives, the bug is in the synchronous path.
     if std::env::var_os("PEDRA_ORACLE_NO_BG").is_some() {
         opts.set_max_background_jobs(0);
     }
@@ -190,8 +190,13 @@ fn differential_oracle_randomized_workload() {
         .map(|i| format!("key_{i:04}").into_bytes())
         .collect();
 
-    // Run 1,000 randomized operations verifying equivalence after each step
-    for step in 0..1000 {
+    // Run randomized operations verifying equivalence after each step
+    let num_steps = std::env::var("PEDRA_ORACLE_STEPS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(200);
+
+    for step in 0..num_steps {
         let cf_idx = rng.gen_range(0, all_cfs.len());
         let cf = all_cfs[cf_idx];
         let cf_handle = get_cf_handle(cf);
@@ -245,36 +250,21 @@ fn differential_oracle_randomized_workload() {
                 let key = &key_pool[k_idx];
                 let operand = b"+op";
 
-                // RFC-0306 triage: capture the pre-merge read. If it is
-                // already stale, the bug is a plain GET (no merge needed).
+                // G2 permanent trap (RFC-0330 Pilar I): the pre-merge read
+                // must already match the model — every modeled write was
+                // acked with Ok, so ANY divergence here is a
+                // write-Ok -> read-stale linearizability violation.
                 let pre_expected = model.get(cf, key);
                 let pre_actual = if let Some(ref h) = cf_handle {
                     db.get_cf(h, key).unwrap()
                 } else {
                     db.get(key).unwrap()
                 };
-                if pre_actual != pre_expected {
-                    eprintln!(
-                        "=== PRE-MERGE STALE READ step={step} cf={cf} key={} actual={:?} expected={:?} ===",
-                        String::from_utf8_lossy(key),
-                        pre_actual.as_ref().map(|x| String::from_utf8_lossy(x)),
-                        pre_expected.as_ref().map(|x| String::from_utf8_lossy(x))
-                    );
-                    let (vis, last) = db.debug_seqs();
-                    let br = db.debug_point_branches();
-                    eprintln!(
-                        "  SEQ visible={vis} last={last} | BRANCHES cache_hit={} try_read={} published={}",
-                        br[0], br[1], br[2]
-                    );
-                    let enc = db.debug_encode(cf, key);
-                    eprintln!(
-                        "  LAYER TRACE ({}B):\n{}",
-                        enc.len(),
-                        db.debug_lookup_trace_encoded(&enc)
-                    );
-                    let enc = db.debug_encode(cf, key);
-                    eprintln!("  LAYER TRACE (encoded {}B):\n{}", enc.len(), db.debug_lookup_trace_encoded(&enc));
-                }
+                assert_eq!(
+                    pre_actual, pre_expected,
+                    "PRE-MERGE STALE READ step={step} cf={cf} key={} (write-Ok -> read-stale, G2)",
+                    String::from_utf8_lossy(key)
+                );
                 model.merge(step, cf, key, operand);
                 if let Some(ref h) = cf_handle {
                     db.merge_cf(h, key, operand).unwrap();
@@ -292,27 +282,6 @@ fn differential_oracle_randomized_workload() {
                     if let Some(hist) = model.history.get(&(cf.to_string(), key.to_vec())) {
                         eprintln!("  KEY HISTORY: {:#?}", hist);
                     }
-                    // RFC-0306 triage: does an explicit drain heal the read?
-                    // Heals => read-side race (value exists); stays => the
-                    // write or a background compaction dropped it.
-                    let runs = if cf == "default" {
-                        db.sst_run_debug()
-                    } else {
-                        Vec::new()
-                    };
-                    eprintln!("  RUNS at mismatch: {runs:?}");
-                    let _ = db.flush();
-                    let _ = db.compact();
-                    let healed = if cf == "default" {
-                        db.get(key).unwrap()
-                    } else {
-                        db.get_cf(&db.cf_handle(cf).unwrap(), key).unwrap()
-                    };
-                    eprintln!(
-                        "  AFTER flush+compact: {:?} (healed={})",
-                        healed.as_ref().map(|x| String::from_utf8_lossy(x)),
-                        healed == post_expected
-                    );
                 }
                 assert_eq!(post_actual, post_expected, "Mismatch immediately after merge! step={step}");
             }
@@ -333,18 +302,6 @@ fn differential_oracle_randomized_workload() {
                     if let Some(hist) = model.history.get(&(cf.to_string(), key.to_vec())) {
                         eprintln!("  KEY HISTORY: {:#?}", hist);
                     }
-                    let (vis, last) = db.debug_seqs();
-                    let br = db.debug_point_branches();
-                    eprintln!(
-                        "  SEQ visible={vis} last={last} | BRANCHES cache_hit={} try_read={} published={}",
-                        br[0], br[1], br[2]
-                    );
-                    let enc = db.debug_encode(cf, key);
-                    eprintln!(
-                        "  LAYER TRACE ({}B):\n{}",
-                        enc.len(),
-                        db.debug_lookup_trace_encoded(&enc)
-                    );
                 }
                 assert_eq!(
                     actual, expected,

@@ -33,7 +33,7 @@ pedradb-core = { git = "https://github.com/paulocsanz/pedradb" }
 ```rust
 use pedradb_core::ConcurrentDb;
 
-let mut db = ConcurrentDb::open("/tmp/pedra")?;
+let db = ConcurrentDb::open("/tmp/pedra")?;
 let mut tx = db.begin_occ();
 tx.put(b"user/42", br#"{"name":"ada"}"#)?;
 tx.put(b"idx/name/ada", b"42")?;
@@ -45,6 +45,11 @@ assert_eq!(db.get(b"idx/name/ada").as_deref(), Some(b"42".as_ref()));
 cargo run -p pedradb-examples --example hello
 ```
 
+> **Durability note**: PedraDB defaults to `fdatasync` before returning `Ok` on commits.
+> A single client executing 1-key commits pays the physical drive barrier (~1–3 ms on NVMe).
+> For high throughput, use multi-key transactions (`begin_occ`), concurrent worker threads
+> (where group commit amortizes the barrier across writers), or `rocksdb-compat` for async WAL.
+
 `rocksdb-compat` is the rust-rocksdb 0.22 surface, for trying an existing
 caller. It is a migration path, not the product, and it defaults to
 Rocks's async WAL so a comparison is the same durability class.
@@ -52,14 +57,26 @@ Rocks's async WAL so a comparison is the same durability class.
 ## Verification
 
 Decision kernels are proved on the file `rustc` links (Charon + Aeneas →
-Lean). The catalog has **151 pairs**, each one the shipped function, not a
-model written beside it. CI runs `scripts/formal/pedra_formal.py --lint`:
-drift between a kernel and its extract stamp fails the build, and the
-current tree is **0 FAIL** (the ratchet still rejects a non-drift FAIL
-count above 107). The engine crate has **1,094 passing tests** (4 ignored).
+Lean). The catalog has **172 pairs**, each one the shipped function, not a
+model written beside it. CI runs `scripts/formal/pedra_formal.py --lint`
+in its own job (seconds — never starved by a long test build): drift
+between a kernel and its extract stamp fails the build, and any drift or
+unclassified public surface fails CI (debt ceiling 0 — a new unclassified
+function is a red build, not a warning). The engine crate has **1,325
+passing tests** (4 ignored); the CI also runs the `rocksdb-compat`
+differential oracle and adversarial suites.
 
-Not proved: the OS, the disk, rustc, Aeneas, Lean, or Z3. Store and raft
-are not in this repository, so their proofs are not either.
+Decision kernels enforce the **Three Teeth Principle** (RFC-0151 / RFC-0329):
+synthetic mutants planted in the decision kernels are killed with a 100% kill
+rate by automated test oracles using zero-recompile mutation switching.
+
+This repository ships the embedded engine and its operational surface
+(`pedradb-core`, `-posix`, `-io-uring`, `-sim`, `-spec`, `-ops`,
+`rocksdb-compat`, and the bench harnesses). The distributed building
+blocks under development (store, raft, sql, http, replication) live in
+the development tree and are not claimed here.
+
+Not proved: the OS, the disk, rustc, Aeneas, Lean, or Z3.
 
 The catalog map, what each check refuses, and how to run it:
 [`docs/verification.md`](docs/verification.md).
@@ -71,6 +88,17 @@ PedraDB provides zero-lock-contention health diagnostics and internal metrics di
 - **Diagnostic Issues & Remediations**: Automatic detection of L0/memtable write stalls, snapshot pin leaks (analogous to Postgres `datfrozenxid` wraparound risk), cache thrashing, and corruption events, paired with typed remediation recommendations.
 - **Pure Expositions**: OpenMetrics/Prometheus (`format_prometheus_metrics`) and structured JSON (`format_json_status`) formatting without external telemetry dependencies.
 - Detailed guide: [`docs/metrics.md`](docs/metrics.md).
+
+## Concurrency & Durability Guarantees
+
+- **Strict Read-Your-Writes Linearizability**: Every acknowledged transaction (`tx.commit()` -> `Ok`) is immediately visible to subsequent `get` calls on the same thread and concurrent observers. `ConcurrentDb::get` falls back to verified read-lock acquisition if optimistic SuperVersion publication is mid-transition, eliminating transient stale reads (`crates/pedradb-core/tests/rfc0330_strict_linearizability_read_your_writes.rs`).
+- **Gapless Anti-Hole Crash Consistency**: Positional WAL allocations for asynchronous writers are bound to RAII anti-hole seals (Contract F182). Aborted or cancelled write jobs automatically seal allocated spans with valid NOP frames, preventing mid-log tearing on crash recovery (`crates/pedradb-core/tests/rfc0330_async_wal_anti_hole_contract.rs`).
+- **Fail-Closed Verification**: Checksums (CRC32C) and monotonic sequence numbers guard all WAL records, manifest updates, and SST blocks. Any uncorrectable physical corruption aborts recovery safely rather than serving damaged data.
+
+## Status (alpha)
+
+- Status is alpha: the on-disk format and API surface can still evolve before 1.0.
+- Open benchmark cells: read-modify-write is currently 0.70×, and 100M prefix scans on a memory-bounded guest (4 GiB RAM, 256 MiB cache) run at 0.70× vs RocksDB's block cache.
 
 ## Benchmarks
 

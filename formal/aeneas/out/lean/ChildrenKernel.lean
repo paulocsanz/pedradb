@@ -152,7 +152,7 @@ def key_in_half_open
     Source: '../../../crates/montanha-fdb-recipes/src/children_kernel.rs', lines 61:0-63:1
     Visibility: public -/
 def key_in_half_open_as_is
-  (key : Slice Std.U8) (start : Slice Std.U8) (end1 : Slice Std.U8) :
+  (key : Slice Std.U8) (start : Slice Std.U8) (_end : Slice Std.U8) :
   Result Bool
   := do
   Shared1A.Insts.CoreCmpPartialOrdShared0B.ge

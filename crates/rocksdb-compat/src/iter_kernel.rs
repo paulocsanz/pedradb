@@ -1,10 +1,10 @@
 //! Iterator window retain vs snapshot `visible_at` (RFC-0151 P1).
 //!
 //! **Term:** this file is what `rustc` links. Aeneas extracts that body
-//! (`scripts/aeneas_iter.sh`). A Verus cfg-split stand-in billed as last-wins
+//! (`cargo xtask aeneas iter`). A Verus cfg-split stand-in billed as last-wins
 //! of rustc `iter_window_keep(bool)` is a model twin (deleted).
 //!
-//!   ./scripts/aeneas_iter.sh --required
+//!   cargo xtask aeneas iter --required
 //!
 //! A windowed CF iterator must not emit a key the snapshot merge hid
 //! (deletion / covering range tombstone). AS-IS keeps every row.

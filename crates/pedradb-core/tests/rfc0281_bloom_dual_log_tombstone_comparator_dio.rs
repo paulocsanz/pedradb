@@ -15,7 +15,8 @@ use pedradb_core::comparator_axiom_kernel::{
 };
 use pedradb_core::direct_io_contract_kernel::{
     verify_direct_io_request, AlignedDirectBuffer, DirectIoAlignmentViolation,
-    DIRECT_IO_PAGE_ALIGNMENT, DIRECT_IO_SECTOR_ALIGNMENT,
+    DIRECT_IO_PAGE_ALIGNMENT, DIRECT_IO_SECTOR_ALIGNMENT, MAX_DIRECT_IO_ALIGNMENT,
+    MAX_DIRECT_IO_TRANSFER_LEN,
 };
 use pedradb_core::dual_log_recovery_kernel::{
     DualLogRecoveryGate, DualLogRecoveryViolation, ManifestRecoveryAnchor, WalRecoveryRecord,
@@ -440,3 +441,88 @@ fn test_direct_io_4096_alignment_and_buffer_contract() {
     assert_eq!(buf.as_slice()[0], 0xAA);
     assert_eq!(buf.as_slice()[8191], 0xBB);
 }
+
+#[test]
+fn test_direct_io_contract_hardening_red() {
+    // 1. File offset arithmetic overflow deve falhar de forma fechada
+    let err_offset_overflow = verify_direct_io_request(
+        4096,
+        u64::MAX - 4095, // u64::MAX - 4095 + 8192 overflows u64!
+        8192,
+        DIRECT_IO_PAGE_ALIGNMENT,
+    );
+    assert!(
+        matches!(
+            err_offset_overflow,
+            Err(DirectIoAlignmentViolation::FileOffsetOverflow { .. })
+        ),
+        "Overflow aritmético em file_offset + transfer_len deve ser rejeitado"
+    );
+
+    // 2. Transfer length além do limite máximo seguro de Direct I/O (2 GiB - 4096)
+    let err_max_len = verify_direct_io_request(
+        4096,
+        0,
+        MAX_DIRECT_IO_TRANSFER_LEN + 4096,
+        DIRECT_IO_PAGE_ALIGNMENT,
+    );
+    assert!(
+        matches!(
+            err_max_len,
+            Err(DirectIoAlignmentViolation::TransferLengthExceedsMaximum { .. })
+        ),
+        "Transferência excedendo o teto POSIX/Direct I/O deve ser rejeitada"
+    );
+
+    // 3. Alinhamento excessivo (> MAX_DIRECT_IO_ALIGNMENT)
+    let err_huge_alignment = verify_direct_io_request(
+        4096,
+        0,
+        4096,
+        MAX_DIRECT_IO_ALIGNMENT * 2,
+    );
+    assert!(
+        matches!(
+            err_huge_alignment,
+            Err(DirectIoAlignmentViolation::InvalidAlignmentRequirement { .. })
+        ),
+        "Alinhamento superior ao limite de huge pages deve ser rejeitado"
+    );
+
+    // 4. try_allocate com alinhamento inválido não deve dar panic
+    let err_bad_align = AlignedDirectBuffer::try_allocate(4096, 300);
+    assert!(
+        matches!(
+            err_bad_align,
+            Err(DirectIoAlignmentViolation::InvalidAlignmentRequirement { .. })
+        ),
+        "try_allocate deve retornar Result::Err para alinhamento inválido"
+    );
+
+    // 5. try_allocate com capacity overflow
+    let err_cap_overflow = AlignedDirectBuffer::try_allocate(usize::MAX - 100, DIRECT_IO_PAGE_ALIGNMENT);
+    assert!(
+        matches!(
+            err_cap_overflow,
+            Err(DirectIoAlignmentViolation::AllocationOverflow { .. })
+        ),
+        "try_allocate com overflow aritmético de capacidade deve retornar AllocationOverflow"
+    );
+
+    // 6. Sub-slice com verificação de alinhamento
+    let buf = AlignedDirectBuffer::try_allocate(8192, DIRECT_IO_PAGE_ALIGNMENT).expect("valid buffer");
+    assert!(buf.aligned_sub_slice(0, 4096, DIRECT_IO_PAGE_ALIGNMENT).is_ok());
+    assert!(matches!(
+        buf.aligned_sub_slice(100, 4096, DIRECT_IO_PAGE_ALIGNMENT),
+        Err(DirectIoAlignmentViolation::MisalignedBufferPointer { .. })
+    ));
+    assert!(matches!(
+        buf.aligned_sub_slice(0, 5000, DIRECT_IO_PAGE_ALIGNMENT),
+        Err(DirectIoAlignmentViolation::MisalignedTransferLength { .. })
+    ));
+
+    // 7. Implementação de std::error::Error
+    let err_dyn: Box<dyn std::error::Error> = Box::new(DirectIoAlignmentViolation::ZeroLengthTransfer);
+    assert!(!err_dyn.to_string().is_empty());
+}
+

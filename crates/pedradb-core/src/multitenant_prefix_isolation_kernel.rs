@@ -13,6 +13,10 @@
 /// Error occurring during multi-tenant prefix encoding or decoding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TenantPrefixError {
+    /// Tenant identifier is empty.
+    EmptyTenantId,
+    /// Tenant identifier contains illegal null byte (0x00).
+    TenantIdContainsNullByte,
     /// Tenant identifier exceeds maximum allowable length (255 bytes).
     TenantIdTooLong { len: usize, max: usize },
     /// Encoded payload is malformed or truncated.
@@ -21,6 +25,26 @@ pub enum TenantPrefixError {
     TenantMismatch { expected: String, actual: String },
 }
 
+impl std::fmt::Display for TenantPrefixError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyTenantId => write!(f, "Tenant ID cannot be empty"),
+            Self::TenantIdContainsNullByte => write!(f, "Tenant ID cannot contain null bytes (0x00)"),
+            Self::TenantIdTooLong { len, max } => {
+                write!(f, "Tenant ID length {len} exceeds maximum allowed {max}")
+            }
+            Self::MalformedEncoding { expected, actual } => {
+                write!(f, "Malformed encoded key: expected at least {expected} bytes, found {actual}")
+            }
+            Self::TenantMismatch { expected, actual } => {
+                write!(f, "Tenant mismatch: expected '{expected}', found '{actual}'")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TenantPrefixError {}
+
 /// Encoder and validator for isolated multi-tenant prefix namespaces.
 pub struct TenantPrefixCodec;
 
@@ -28,19 +52,31 @@ impl TenantPrefixCodec {
     /// Maximum allowable length for a tenant ID in bytes.
     pub const MAX_TENANT_ID_LEN: usize = 255;
 
+    /// Validates tenant ID syntax.
+    pub fn validate_tenant_id(tenant_id: &str) -> Result<(), TenantPrefixError> {
+        if tenant_id.is_empty() {
+            return Err(TenantPrefixError::EmptyTenantId);
+        }
+        if tenant_id.contains('\0') {
+            return Err(TenantPrefixError::TenantIdContainsNullByte);
+        }
+        if tenant_id.len() > Self::MAX_TENANT_ID_LEN {
+            return Err(TenantPrefixError::TenantIdTooLong {
+                len: tenant_id.len(),
+                max: Self::MAX_TENANT_ID_LEN,
+            });
+        }
+        Ok(())
+    }
+
     /// Encodes a tenant-scoped key into a canonical length-prefixed format:
     /// `[len(tenant_id): u8] || [tenant_id: bytes] || [user_key: bytes]`
     ///
     /// This encoding is strictly injective and prefix-free across distinct tenants.
     pub fn encode_key(tenant_id: &str, user_key: &[u8]) -> Result<Vec<u8>, TenantPrefixError> {
-        let t_bytes = tenant_id.as_bytes();
-        if t_bytes.len() > Self::MAX_TENANT_ID_LEN {
-            return Err(TenantPrefixError::TenantIdTooLong {
-                len: t_bytes.len(),
-                max: Self::MAX_TENANT_ID_LEN,
-            });
-        }
+        Self::validate_tenant_id(tenant_id)?;
 
+        let t_bytes = tenant_id.as_bytes();
         let mut out = Vec::with_capacity(1 + t_bytes.len() + user_key.len());
         out.push(t_bytes.len() as u8);
         out.extend_from_slice(t_bytes);
@@ -54,6 +90,8 @@ impl TenantPrefixCodec {
     /// Upper bound increments the tenant prefix lexicographically without leaking
     /// into subsequent tenants.
     pub fn tenant_scan_bounds(tenant_id: &str) -> Result<(Vec<u8>, Vec<u8>), TenantPrefixError> {
+        Self::validate_tenant_id(tenant_id)?;
+
         let lower = Self::encode_key(tenant_id, &[])?;
         let mut upper = lower.clone();
 
@@ -83,6 +121,8 @@ impl TenantPrefixCodec {
         expected_tenant: &str,
         encoded: &'a [u8],
     ) -> Result<&'a [u8], TenantPrefixError> {
+        Self::validate_tenant_id(expected_tenant)?;
+
         if encoded.is_empty() {
             return Err(TenantPrefixError::MalformedEncoding {
                 expected: 1,
@@ -109,6 +149,12 @@ impl TenantPrefixCodec {
         Ok(&encoded[1 + t_len..])
     }
 
+    /// Verifica se uma chave codificada está estritamente contida dentro do espaço de chaves do tenant.
+    pub fn is_in_tenant_range(tenant_id: &str, encoded_key: &[u8]) -> Result<bool, TenantPrefixError> {
+        let (lower, upper) = Self::tenant_scan_bounds(tenant_id)?;
+        Ok(encoded_key >= lower.as_slice() && encoded_key < upper.as_slice())
+    }
+
     /// Verifies non-interference between two tenant namespaces.
     /// Proves that no key belonging to tenant A can be a prefix of any key belonging to tenant B.
     pub fn verify_non_interference(
@@ -120,10 +166,57 @@ impl TenantPrefixCodec {
         if tenant_a == tenant_b {
             return true; // Self-consistency
         }
-        let enc_a = Self::encode_key(tenant_a, key_a).expect("valid tenant_a");
-        let enc_b = Self::encode_key(tenant_b, key_b).expect("valid tenant_b");
+        let Ok(enc_a) = Self::encode_key(tenant_a, key_a) else {
+            return false;
+        };
+        let Ok(enc_b) = Self::encode_key(tenant_b, key_b) else {
+            return false;
+        };
 
         // Non-interference: neither is a prefix of the other unless tenant IDs match
         !enc_a.starts_with(&enc_b) && !enc_b.starts_with(&enc_a)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tenant_id_validation_red_to_green() {
+        assert_eq!(
+            TenantPrefixCodec::encode_key("", b"k"),
+            Err(TenantPrefixError::EmptyTenantId)
+        );
+        assert_eq!(
+            TenantPrefixCodec::encode_key("tenant\x00evil", b"k"),
+            Err(TenantPrefixError::TenantIdContainsNullByte)
+        );
+        let long_id = "a".repeat(256);
+        assert_eq!(
+            TenantPrefixCodec::encode_key(&long_id, b"k"),
+            Err(TenantPrefixError::TenantIdTooLong { len: 256, max: 255 })
+        );
+    }
+
+    #[test]
+    fn test_is_in_tenant_range() {
+        let tenant_a = "alpha";
+        let tenant_b = "beta";
+        let key = b"my_key";
+
+        let enc_a = TenantPrefixCodec::encode_key(tenant_a, key).unwrap();
+        assert!(TenantPrefixCodec::is_in_tenant_range(tenant_a, &enc_a).unwrap());
+        assert!(!TenantPrefixCodec::is_in_tenant_range(tenant_b, &enc_a).unwrap());
+    }
+
+    #[test]
+    fn test_decode_key_mismatch() {
+        let enc = TenantPrefixCodec::encode_key("tenant1", b"val").unwrap();
+        assert!(matches!(
+            TenantPrefixCodec::decode_key("tenant2", &enc),
+            Err(TenantPrefixError::TenantMismatch { .. })
+        ));
+    }
+}
+

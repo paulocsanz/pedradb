@@ -5,10 +5,10 @@
 //! by the weaker check).
 //!
 //! **Term:** this file is what `rustc` links. Aeneas extracts that body
-//! (`scripts/aeneas_properties.sh`). A Seq view of rustc `&[bool]`
+//! (`cargo xtask aeneas properties`). A Seq view of rustc `&[bool]`
 //! `d1_holds` is a model twin — not last-wins (deleted).
 //!
-//!   ./scripts/aeneas_properties.sh --required
+//!   cargo xtask aeneas properties --required
 //!
 //! - **D1** `d1_holds`: every acked write survives the crash prefix
 //!   (put→Ok is durable — the G1 product promise). AS-IS `d1_holds_as_is`

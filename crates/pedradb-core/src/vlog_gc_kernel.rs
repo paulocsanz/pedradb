@@ -2,10 +2,10 @@
 //! value-log MANIFEST swing and the sealed-blob rewrite guard).
 //!
 //! **Term:** this file is what `rustc` links. Aeneas extracts that body
-//! (`scripts/aeneas_vlog_gc.sh`). A Verus stand-in of vlog_recover_action
+//! (`cargo xtask aeneas vlog_gc`). A Verus stand-in of vlog_recover_action
 //! billed as last-wins of a cfg-split file is a model twin (deleted).
 //!
-//!   ./scripts/aeneas_vlog_gc.sh --required
+//!   cargo xtask aeneas vlog_gc --required
 //!
 //! Pure decision functions only. Production (`db.rs`) calls
 //! [`vlog_recover_action`] on `open_with_env` and [`blob_gc_action`] inside

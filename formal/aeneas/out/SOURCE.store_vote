@@ -1,0 +1,4 @@
+path=crates/pedradb-store/src/vote_kernel.rs
+sha256=8d46b9b3b4083edae1467a47212a175da81a4ace8263365ae0ee5ea4ff637792
+aeneas=daa85d7
+charon=0.1.232

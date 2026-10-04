@@ -227,6 +227,83 @@ fn test_pilar6_ssi_dangerous_structure_detection() {
 }
 
 #[test]
+fn test_pilar6_ssi_cycle_detector_hardening_red() {
+    let mut sgc = SsiSerializationGraph::new();
+
+    // 1. TxnId 0 deve ser rejeitado
+    assert!(matches!(
+        sgc.try_begin_txn(0),
+        Err(SsiViolation::InvalidTxnId { txn_id: 0 })
+    ));
+
+    // 2. Transação duplicada ativa deve ser rejeitada
+    assert!(sgc.try_begin_txn(10).is_ok());
+    assert!(matches!(
+        sgc.try_begin_txn(10),
+        Err(SsiViolation::DuplicateActiveTxn { txn_id: 10 })
+    ));
+
+    // 3. Registro em transação inexistente deve falhar
+    assert!(matches!(
+        sgc.try_record_read(999, b"key1"),
+        Err(SsiViolation::TxnNotFound { txn_id: 999 })
+    ));
+    assert!(matches!(
+        sgc.try_record_write(999, b"key1"),
+        Err(SsiViolation::TxnNotFound { txn_id: 999 })
+    ));
+
+    // 4. Chave vazia deve ser rejeitada
+    assert!(matches!(
+        sgc.try_record_read(10, b""),
+        Err(SsiViolation::EmptyKey)
+    ));
+    assert!(matches!(
+        sgc.try_record_write(10, b""),
+        Err(SsiViolation::EmptyKey)
+    ));
+
+    // 5. Detecção mecânica de ciclo de serialização (T1 -> T2 -> T3 -> T1)
+    let mut cycle_sgc = SsiSerializationGraph::new();
+    cycle_sgc.try_begin_txn(1).unwrap();
+    cycle_sgc.try_begin_txn(2).unwrap();
+    cycle_sgc.try_begin_txn(3).unwrap();
+
+    // T1 reads X, writes Y
+    cycle_sgc.try_record_read(1, b"X").unwrap();
+    cycle_sgc.try_record_write(1, b"Y").unwrap();
+
+    // T2 reads Y, writes Z
+    cycle_sgc.try_record_read(2, b"Y").unwrap();
+    cycle_sgc.try_record_write(2, b"Z").unwrap();
+
+    // T3 reads Z, writes X
+    cycle_sgc.try_record_read(3, b"Z").unwrap();
+    cycle_sgc.try_record_write(3, b"X").unwrap();
+
+    cycle_sgc.analyze_dependencies_for_commit(1);
+    cycle_sgc.analyze_dependencies_for_commit(2);
+    cycle_sgc.analyze_dependencies_for_commit(3);
+
+    // Tentativa de commit de qualquer participante deve detectar o ciclo
+    let commit_res = cycle_sgc.verify_can_commit(1);
+    assert!(
+        matches!(commit_res, Err(SsiViolation::SerializationCycleDetected { ref cycle }) if cycle.contains(&1)),
+        "Ciclo de serialização T1->T2->T3->T1 deve ser detectado fail-closed"
+    );
+
+    // 6. abort_txn deve podar arestas e limpar referências
+    cycle_sgc.abort_txn(2);
+    assert!(!cycle_sgc.active_txns.contains_key(&2));
+    assert!(!cycle_sgc.in_rw_edges.contains_key(&2));
+    assert!(!cycle_sgc.out_rw_edges.contains_key(&2));
+
+    // 7. Implementação de std::error::Error
+    let err_dyn: Box<dyn std::error::Error> = Box::new(SsiViolation::EmptyKey);
+    assert!(!err_dyn.to_string().is_empty());
+}
+
+#[test]
 fn test_pilar7_snapshot_epoch_lease_revocation() {
     let mut manager = SnapshotLeaseManager::new(10); // Epoch 10
 

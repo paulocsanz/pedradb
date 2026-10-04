@@ -1,0 +1,4 @@
+path=crates/pedradb-store/src/tx_glue_kernel.rs
+sha256=7df15e1cda1557d10cde719b6359455aff9fbf47da99f13e568c25a7eaf3bb35
+aeneas=f5a4c58-dirty
+charon=0.1.232

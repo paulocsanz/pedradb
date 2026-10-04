@@ -184,10 +184,10 @@ def async_merge_policy
   | some pin => ok pin
 
 /-- [pedra_aeneas_client_axis_kernel::async_merge_policy_as_is]:
-    Source: '../../../crates/pedradb-core/src/client_axis_kernel.rs', lines 119:0-125:1
+    Source: '../../../crates/pedradb-core/src/client_axis_kernel.rs', lines 119:0-121:1
     Visibility: public -/
 def async_merge_policy_as_is
-  (writers : Std.Usize) (ncpu : Std.Usize) (forced : Option Bool) :
+  (_writers : Std.Usize) (_ncpu : Std.Usize) (forced : Option Bool) :
   Result Bool
   := do
   core.option.Option.Insts.CoreCmpPartialEqOption.eq core.cmp.PartialEqBool

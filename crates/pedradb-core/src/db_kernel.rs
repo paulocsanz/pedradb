@@ -65,14 +65,6 @@ pub fn lookup_tables_probed() -> u64 {
     LOOKUP_TABLES_PROBED.load(Ordering::Relaxed)
 }
 
-/// RFC-0306 boundary attribution: (was_sorted, park-path ns) per parked chunk.
-static BULK_BOUNDARY_DIAG: std::sync::Mutex<Vec<(bool, u64)>> =
-    std::sync::Mutex::new(Vec::new());
-
-/// RFC-0306 boundary attribution: take the per-chunk (was_sorted, ns) log.
-pub fn bulk_boundary_diag_take() -> Vec<(bool, u64)> {
-    std::mem::take(&mut *BULK_BOUNDARY_DIAG.lock().unwrap_or_else(|e| e.into_inner()))
-}
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -322,7 +314,6 @@ pub const DEFAULT_SST_PAYLOAD_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 /// chunk (v51). 4 was v50 **under** the write lock (regressed 0.91×); off
 /// lock it is 90→23 persists at 25M / 64 MiB.
 const BULK_MANIFEST_EVERY: u8 = 4;
-
 /// RFC-0306: bulk chunks self-tune to this ceiling (validated hydrate
 /// and read shape at every scale; see `bulk_chunk_cap`).
 const BULK_CHUNK_DEFAULT_BYTES: usize = 64 << 20;
@@ -353,21 +344,6 @@ fn sst_payload_budget_from_env() -> u64 {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_SST_PAYLOAD_BUDGET_BYTES)
-}
-
-/// Default plain-block cache budget (RFC-0305): 64 MiB of verified,
-/// decompressed block bodies shared across tables, sized to hold the
-/// get_hit working set at 10M under the 1 GiB knob-off control.
-pub const DEFAULT_PLAIN_BLOCK_BUDGET_BYTES: u64 = 64 * 1024 * 1024;
-
-/// `PEDRA_PLAIN_BLOCK_BUDGET` — plain-image block cache budget in bytes
-/// (bench A/B; the Rocks-shaped `set_block_cache` knob overrides at
-/// runtime). Unset or unparsable → [`DEFAULT_PLAIN_BLOCK_BUDGET_BYTES`].
-fn plain_block_budget_from_env() -> u64 {
-    std::env::var("PEDRA_PLAIN_BLOCK_BUDGET")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_PLAIN_BLOCK_BUDGET_BYTES)
 }
 
 /// MVCC history horizon (RFC-0046 P0.1).
@@ -1382,100 +1358,11 @@ struct UnappliedOp {
 /// the same tables sorted by `lo` key when the run is provably pairwise
 /// disjoint. Disjoint runs bisect to the single candidate table instead of
 /// walking every table's bounds + bloom.
-fn short(b: &[u8]) -> String {
-    String::from_utf8_lossy(&b[..b.len().min(8)]).into_owned()
-}
-
 struct SstRun {
     level: u32,
     tables_newest_first: Vec<usize>,
     disjoint_by_lo: Option<Vec<usize>>,
-    /// RFC-0306 P2: `disjoint_by_lo`'s bounds as one contiguous array of
-    /// fixed 32-byte slots. The bisection used to chase
-    /// `ssts[i].smallest_user_key()` — a fat-struct hop plus a `Bytes`
-    /// pointer deref per step — and at 355 tables every point get paid
-    /// ~2-3 cache misses x 9 steps in metadata that no longer fits LLC
-    /// (miss-in scaled 1.4µs @ 89 tables -> 10µs @ 355). Slot compare vs
-    /// the query key's first 31 bytes is EXACT whenever every stored `lo`
-    /// is <= 31 bytes (a longer shared prefix implies `lo` is a prefix of
-    /// the key, and prefix < whole in bytewise order — same verdict in
-    /// both compare forms). Longer `lo`s keep `None` and the chase path.
-    disjoint_los_flat: Option<Vec<Bound32>>,
-    /// RFC-0307 P1: the matching HI slots — `LevelRunStream` bisects the
-    /// FIRST candidate on this contiguous array instead of chasing
-    /// `ssts[fi].largest_user_key()` per step (the scan twin of the flat-LO
-    /// bisection).
-    disjoint_his_flat: Option<Vec<Bound32>>,
     has_range_tombstones: bool,
-}
-
-/// Fixed-stride inline bound key for the flat bisection array.
-#[derive(Clone, Copy)]
-struct Bound32 {
-    len: u8,
-    bytes: [u8; 31],
-}
-
-impl Bound32 {
-    fn of(lo: &[u8]) -> Option<Self> {
-        if lo.len() > 31 {
-            return None;
-        }
-        let mut bytes = [0u8; 31];
-        bytes[..lo.len()].copy_from_slice(lo);
-        Some(Self {
-            len: lo.len() as u8,
-            bytes,
-        })
-    }
-
-    /// `self <= key`, exact when every `lo` backing the array is <= 31 B.
-    #[inline]
-    fn le_key(&self, key: &[u8]) -> bool {
-        let lo = &self.bytes[..self.len as usize];
-        let k = &key[..key.len().min(31)];
-        // Equal prefixes mean `lo` is a prefix of `key` (len <= 31), and a
-        // proper prefix sorts below the whole key.
-        lo <= k
-    }
-
-    /// HI-slot compare for the scan's first-candidate bisection. `or_equal`
-    /// selects `hi <= key` (Excluded start) vs `hi < key` (Included start).
-    /// The strict form errs toward KEEPING one extra file when a 31-byte
-    /// prefix ties (a stored `hi` that is a prefix of `start` sorts strictly
-    /// below the whole key but compares equal here) — the per-table bounds
-    /// check in the probe stays as the fail-safe, so recall is preserved.
-    #[inline]
-    fn lt_key(&self, key: &[u8], or_equal: bool) -> bool {
-        let hi = &self.bytes[..self.len as usize];
-        let k = &key[..key.len().min(31)];
-        if or_equal {
-            hi <= k
-        } else {
-            hi < k
-        }
-    }
-}
-
-/// Contiguous `lo` slots parallel to `by_lo`, `None` when any `lo` > 31 B.
-fn flat_los(ssts: &[SstTable], by_lo: &[usize]) -> Option<Vec<Bound32>> {
-    let mut out = Vec::with_capacity(by_lo.len());
-    for &i in by_lo {
-        let lo = ssts.get(i)?.smallest_user_key()?;
-        out.push(Bound32::of(lo)?);
-    }
-    Some(out)
-}
-
-/// Contiguous `hi` slots parallel to `by_lo` (same exactness contract:
-/// a stored `hi` <= 31 B compares exactly against any key length).
-fn flat_his(ssts: &[SstTable], by_lo: &[usize]) -> Option<Vec<Bound32>> {
-    let mut out = Vec::with_capacity(by_lo.len());
-    for &i in by_lo {
-        let hi = ssts.get(i)?.largest_user_key()?;
-        out.push(Bound32::of(hi)?);
-    }
-    Some(out)
 }
 
 impl SstRun {
@@ -1533,7 +1420,7 @@ impl SstRun {
 /// from ~#SSTs to ~#levels + L0 + memtables, cutting sift levels per row.
 struct LevelRunStream<'a, E: Env> {
     db: &'a Db<E>,
-    files_by_lo: &'a [usize],
+    files_by_lo: Vec<usize>,
     next_file: usize,
     start: Bound<Bytes>,
     end: Bound<Bytes>,
@@ -1547,36 +1434,24 @@ struct LevelRunStream<'a, E: Env> {
 impl<'a, E: Env> LevelRunStream<'a, E> {
     fn new(
         db: &'a Db<E>,
-        files_by_lo: &'a [usize],
-        flat_his_arr: Option<&'a [Bound32]>,
+        files_by_lo: Vec<usize>,
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
         snapshot: SequenceNumber,
         resolve_values: bool,
     ) -> Self {
-        // RFC-0307 P1: contiguous HI slots first (same exactness contract
-        // as the point path; the strict form errs toward keeping one extra
-        // file — the per-table bounds check stays as the fail-safe).
-        let next_file = if let Some(his) = flat_his_arr {
-            match start {
-                Bound::Unbounded => 0,
-                Bound::Included(s) => his.partition_point(|hi| hi.lt_key(s, false)),
-                Bound::Excluded(s) => his.partition_point(|hi| hi.lt_key(s, true)),
-            }
-        } else {
-            match start {
-                Bound::Unbounded => 0,
-                Bound::Included(s) => files_by_lo.partition_point(|&fi| {
-                    db.ssts[fi]
-                        .largest_user_key()
-                        .is_some_and(|hi| hi.as_ref() < s)
-                }),
-                Bound::Excluded(s) => files_by_lo.partition_point(|&fi| {
-                    db.ssts[fi]
-                        .largest_user_key()
-                        .is_some_and(|hi| hi.as_ref() <= s)
-                }),
-            }
+        let next_file = match start {
+            Bound::Unbounded => 0,
+            Bound::Included(s) => files_by_lo.partition_point(|&fi| {
+                db.ssts[fi]
+                    .largest_user_key()
+                    .is_some_and(|hi| hi.as_ref() < s)
+            }),
+            Bound::Excluded(s) => files_by_lo.partition_point(|&fi| {
+                db.ssts[fi]
+                    .largest_user_key()
+                    .is_some_and(|hi| hi.as_ref() <= s)
+            }),
         };
         Self {
             db,
@@ -1750,7 +1625,6 @@ impl LiveMem {
         self.read().ord_probe()
     }
 
-    #[allow(dead_code)]
     fn insert(&self, key: InternalKey, value: Bytes) {
         self.write().insert(key, value);
     }
@@ -1858,9 +1732,6 @@ pub struct Db<E: Env = StdEnv> {
     /// Bounded SST payload residency (RFC-0042 v18). Budget `None` = legacy
     /// (every payload resident). Armed only by a bounded open.
     sst_payload_pool: Arc<crate::cache::SstPayloadPool>,
-    /// Shared plain-image block cache (RFC-0305): verified, decompressed
-    /// block bodies under one byte budget every point seek consults.
-    pub(crate) plain_block_cache: Arc<crate::cache::PlainBlockCache>,
     /// File source for evicted-payload reloads; `None` on a legacy open
     /// (the pool then never evicts — decode never fails for lack of a source).
     sst_source: Option<Arc<dyn crate::env::SstFileSource>>,
@@ -1993,8 +1864,6 @@ pub struct Db<E: Env = StdEnv> {
     /// the Db read lock every tick (12 workers × 1 kHz was a cthread_yield
     /// storm against the hydrate writer's write lock).
     parked_bulk_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-    /// RFC-0306: (verdict, valid_until) cache for cgroup pressure reads.
-    cgroup_pressure_cache: std::sync::Mutex<Option<(bool, std::time::Instant)>>,
     /// Chunks workers are encoding off-lock (not in `parked_bulk`).
     bulk_encodings: Vec<(u64, String, Arc<crate::bulk_run::BulkRun>)>,
     /// Bulk SST installs since the last MANIFEST persist (RFC-0159 P1.2).
@@ -2026,6 +1895,8 @@ pub struct Db<E: Env = StdEnv> {
     backpressure_config: crate::backpressure_kernel::BackpressureConfig,
     /// Compaction I/O rate limiter (RFC-0274 Pillar I).
     compaction_pacer: crate::backpressure_kernel::CompactionIoPacer,
+    /// Pending compaction pacing delay to execute outside write lock (RFC-0274 / RFC-0300).
+    pending_pacing_delay: Option<Duration>,
     /// Next pin id (monotonic; never reused for this process open).
     next_snapshot_pin_id: u64,
     /// Version-GC watermark: snapshots with `seq < earliest_readable_seq` are
@@ -2201,6 +2072,21 @@ impl Db<StdEnv> {
 }
 
 impl<E: Env> Db<E> {
+    /// RFC-0306 probe diagnostics: per-run (level, tables, disjoint-armed).
+    #[must_use]
+    pub fn sst_run_debug(&self) -> Vec<(u32, usize, bool)> {
+        self.sst_runs
+            .iter()
+            .map(|r| {
+                (
+                    r.level,
+                    r.tables_newest_first.len(),
+                    r.disjoint_by_lo.is_some(),
+                )
+            })
+            .collect()
+    }
+
     /// Default WAL sync policy from open options (`true` unless opened with `sync: false`).
     #[must_use]
     pub fn default_write_sync(&self) -> bool {
@@ -2423,13 +2309,8 @@ impl<E: Env> Db<E> {
 
     pub(crate) fn note_dirty_points(&self, ops: &[WriteOp]) {
         if ops.len() >= 32 || ops.iter().any(|op| op.kind == ValueType::RangeDeletion) {
-            // Fat apply / range: wholesale invalidation. RFC-0307 P0: clear
-            // the point cache HERE, not at the next publish — the deferred
-            // `point_cache_reset` flag left a window where a concurrent get
-            // served an answer invalidated by this very batch (range deletes
-            // change visibility of keys the batch never touched by name).
-            // `clear` is a gen-bump (O(1)); no key cloning either way.
-            self.point_cache.clear();
+            // Fat apply / range: gen-bump at publish. Do not clone 64 keys
+            // under the write lock just to discard them (RFC-0041 apply_mc4).
             self.point_cache_reset.store(true, Ordering::Relaxed);
             self.dirty_points.lock().clear();
             return;
@@ -2561,7 +2442,7 @@ impl<E: Env> Db<E> {
 
     fn rebuild_sst_sv(&mut self) {
         self.sst_sv = Arc::new(
-            self.sst_order_newest
+            self.sst_indices_newest_first()
                 .iter()
                 .filter_map(|&i| self.ssts.get(i).cloned())
                 .collect(),
@@ -3158,7 +3039,7 @@ impl<E: Env> Db<E> {
     /// table. Call at every point a table enters `self.ssts`.
     fn adopt_sst(&self, table: &SstTable) {
         if let Some(src) = &self.sst_source {
-            table.attach_payload_kit(src, &self.sst_payload_pool, &self.plain_block_cache);
+            table.attach_payload_kit(src, &self.sst_payload_pool);
         }
     }
 
@@ -3218,6 +3099,10 @@ impl<E: Env> Db<E> {
         let block_cache_bytes = self.block_cache.used_bytes() as usize;
         let entries_bytes = self.sst_cached_entries_bytes();
         let sst_meta_bytes: usize = self.ssts.iter().map(SstTable::metadata_memory_usage).sum();
+        // RFC-0306: the RFC-0159 bulk layers held gigabytes the pressure
+        // verdict could not see — a 250M hydrate OOM'd at 45.5 GiB with the
+        // kernel still saying Admit. Open run + parked queue + encodings.
+        let bulk_bytes = self.bulk_ram_bytes();
 
         active_mem
             .saturating_add(imm_mem)
@@ -3228,7 +3113,34 @@ impl<E: Env> Db<E> {
             .saturating_add(block_cache_bytes)
             .saturating_add(entries_bytes)
             .saturating_add(sst_meta_bytes)
-            .saturating_add(self.bulk_ram_bytes())
+            .saturating_add(bulk_bytes)
+    }
+
+    /// Bytes held by the latched bulk layers: open runs, the parked queue
+    /// and chunks mid-encode. O(#runs + queue + workers) with O(1) per
+    /// entry (`BulkRun::bytes` is tracked) — cheap enough for per-batch
+    /// admission on the hydrate writer.
+    #[must_use]
+    pub fn bulk_ram_bytes(&self) -> usize {
+        let runs: usize = self.bulk_runs.values().map(|r| r.bytes()).sum();
+        let parked: usize = self.parked_bulk.iter().map(|(_, r)| r.bytes()).sum();
+        let encoding: usize = self.bulk_encodings.iter().map(|(_, _, r)| r.bytes()).sum();
+        runs.saturating_add(parked).saturating_add(encoding)
+    }
+
+    /// Whether the bulk layers alone are at/above the RAM hard watermark
+    /// (per-batch hydrate admission gate; the full verdict adds the other
+    /// layers and runs on the 128-batch cadence).
+    #[must_use]
+    pub(crate) fn bulk_ram_over_hard(&self) -> bool {
+        let Some(budget) = self.max_ram_bytes.map(|b| b as u64) else {
+            return false;
+        };
+        if budget == 0 {
+            return false;
+        }
+        let (_, hard) = crate::ram_pressure_kernel::ram_watermarks(budget);
+        self.bulk_ram_bytes() as u64 >= hard
     }
 
     /// Configured maximum RAM budget in bytes.
@@ -3242,85 +3154,9 @@ impl<E: Env> Db<E> {
         self.max_ram_bytes = bytes.filter(|n| *n > 0);
     }
 
-
-    /// Bytes held by the latched bulk layers: open runs, the parked queue
-    /// and chunks mid-encode (RFC-0306 — the 250M hydrate OOM: these were
-    /// invisible to the pressure verdict).
-    #[must_use]
-    pub fn bulk_ram_bytes(&self) -> usize {
-        let runs: usize = self.bulk_runs.values().map(|r| r.bytes()).sum();
-        let parked: usize = self.parked_bulk.iter().map(|(_, r)| r.bytes()).sum();
-        let encoding: usize = self.bulk_encodings.iter().map(|(_, _, r)| r.bytes()).sum();
-        runs.saturating_add(parked).saturating_add(encoding)
-    }
-
-    /// RFC-0306 fail-safe: real cgroup memory pressure (page cache
-    /// included). True when memory.current sits at/above 90% of the
-    /// effective ceiling; cached for 250 ms so the per-batch hydrate gate
-    /// pays one file read per quarter second.
-    #[must_use]
-    pub fn cgroup_pressure_over_hard(&self) -> bool {
-        const CACHE_MS: u64 = 250;
-        let now = std::time::Instant::now();
-        let cached = self
-            .cgroup_pressure_cache
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if let Some((ok, until)) = *cached {
-            if now < until {
-                return ok;
-            }
-        }
-        let ceiling = pedradb_posix::effective_memory_limit_bytes();
-        let verdict = match ceiling {
-            Some(limit) if limit > 0 => {
-                let raw_hard = limit.saturating_mul(9) / 10;
-                std::fs::read_to_string("/sys/fs/cgroup/memory.current")
-                    .ok()
-                    .and_then(|t| t.trim().parse::<u64>().ok())
-                    .is_some_and(|cur| cur >= raw_hard)
-            }
-            _ => false,
-        };
-        let until = now + std::time::Duration::from_millis(CACHE_MS);
-        *self
-            .cgroup_pressure_cache
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some((verdict, until));
-        verdict
-    }
-
-    /// Whether the bulk layers alone are at/above the RAM hard watermark
-    /// (per-batch hydrate admission gate).
-    #[must_use]
-    pub fn bulk_ram_over_hard(&self) -> bool {
-        let Some(budget) = self.max_ram_bytes.map(|b| b as u64) else {
-            return false;
-        };
-        if budget == 0 {
-            return false;
-        }
-        let (_, hard) = crate::ram_pressure_kernel::ram_watermarks(budget);
-        self.bulk_ram_bytes() as u64 >= hard
-    }
-
     /// Count one hydrate-writer RAM throttle event (RFC-0306 bulk gate).
-    pub fn note_ram_throttle(&mut self) {
+    pub(crate) fn note_ram_throttle(&mut self) {
         self.ram_pressure_throttle_count = self.ram_pressure_throttle_count.saturating_add(1);
-    }
-    /// RFC-0306 probe diagnostics: per-run (level, tables, disjoint-armed).
-    #[must_use]
-    pub fn sst_run_debug(&self) -> Vec<(u32, usize, bool)> {
-        self.sst_runs
-            .iter()
-            .map(|r| {
-                (
-                    r.level,
-                    r.tables_newest_first.len(),
-                    r.disjoint_by_lo.is_some(),
-                )
-            })
-            .collect()
     }
 
     /// Current RAM pressure verdict for write admission.
@@ -3449,6 +3285,11 @@ impl<E: Env> Db<E> {
     pub fn set_compaction_rate_bytes_per_sec(&mut self, rate: u64) {
         self.backpressure_config.compaction_rate_bytes_per_sec = rate;
         self.compaction_pacer.set_rate(rate);
+    }
+
+    /// Take any accumulated compaction pacing delay so caller can sleep outside write lock (RFC-0274 / RFC-0300).
+    pub fn take_pending_pacing_delay(&mut self) -> Option<Duration> {
+        self.pending_pacing_delay.take()
     }
 
     /// Minimum sequence among open pins, if any.
@@ -3998,6 +3839,22 @@ impl<E: Env> Db<E> {
                 {
                     return true;
                 }
+            }
+        }
+        let fam = self.bulk_family_of_key(key);
+        if let Some(run) = self.bulk_runs.get(fam) {
+            if run.has_write_after(key, snapshot) {
+                return true;
+            }
+        }
+        for (f, run) in &self.parked_bulk {
+            if f == fam && run.has_write_after(key, snapshot) {
+                return true;
+            }
+        }
+        for (_, f, run) in &self.bulk_encodings {
+            if f == fam && run.has_write_after(key, snapshot) {
+                return true;
             }
         }
         false
@@ -4639,7 +4496,6 @@ impl<E: Env> Db<E> {
     }
 
     /// L0 newest → older → L1+ (same single-writer invariant as the mem hit).
-    #[allow(dead_code)]
     fn sst_indices_newest_first(&self) -> &[usize] {
         &self.sst_order_newest
     }
@@ -4663,82 +4519,9 @@ impl<E: Env> Db<E> {
     /// sorted (level asc, index desc), so levels come out contiguous and
     /// newest-first inside each run — the linear fallback inside `lookup`
     /// iterates exactly the flat order.
-    /// RFC-0308 Pilar B: merge consecutive same-level, concat-disjoint,
-    /// tombstone-free runs. Newest-first ordering inside each run keeps the
-    /// level's lookup order; concatenating by_lo arrays of two disjoint
-    /// sorted runs preserves sortedness, and `disjoint_sorted_by_lo` is
-    /// re-derived as the oracle (merge refuses anything not provably
-    /// disjoint by bounds).
-    fn merge_concat_disjoint_runs(
-        mut runs: Vec<SstRun>,
-        ssts: &[SstTable],
-    ) -> Vec<SstRun> {
-        let mut i = 0;
-        while i + 1 < runs.len() {
-            let (left, right) = runs.split_at_mut(i + 1);
-            let a = &mut left[i];
-            let b = &mut right[0];
-            let mergeable = a.level == b.level
-                && a.disjoint_by_lo.is_some()
-                && b.disjoint_by_lo.is_some()
-                && !a.has_range_tombstones
-                && !b.has_range_tombstones
-                && a.disjoint_los_flat.is_some()
-                && b.disjoint_los_flat.is_some()
-                && {
-                    // last(a).hi < first(b).lo, both via full bounds.
-                    let a_hi = a
-                        .disjoint_by_lo
-                        .as_ref()
-                        .and_then(|by| by.last())
-                        .and_then(|&ti| ssts.get(ti))
-                        .and_then(|t| t.largest_user_key().map(|b| Bytes::copy_from_slice(b)));
-                    let b_lo = b
-                        .disjoint_by_lo
-                        .as_ref()
-                        .and_then(|by| by.first())
-                        .and_then(|&ti| ssts.get(ti))
-                        .and_then(|t| t.smallest_user_key().map(|b| Bytes::copy_from_slice(b)));
-                    match (a_hi, b_lo) {
-                        (Some(hi), Some(lo)) => hi.as_ref() < lo.as_ref(),
-                        _ => false,
-                    }
-                };
-            if !mergeable {
-                i += 1;
-                continue;
-            }
-            // Concat newest-first order + by_lo + flat arrays.
-            let mut merged_by_lo: Vec<usize> = a
-                .disjoint_by_lo
-                .clone()
-                .unwrap_or_default();
-            merged_by_lo.extend_from_slice(b.disjoint_by_lo.as_deref().unwrap_or(&[]));
-            let mut merged_los = a.disjoint_los_flat.clone().unwrap_or_default();
-            merged_los.extend_from_slice(&b.disjoint_los_flat.clone().unwrap_or_default());
-            let mut merged_his = a.disjoint_his_flat.clone().unwrap_or_default();
-            merged_his.extend_from_slice(&b.disjoint_his_flat.clone().unwrap_or_default());
-            let mut merged_tables = std::mem::take(&mut a.tables_newest_first);
-            merged_tables.append(&mut b.tables_newest_first);
-            let level = a.level;
-            runs.remove(i + 1);
-            let merged = SstRun {
-                level,
-                tables_newest_first: merged_tables,
-                disjoint_by_lo: Some(merged_by_lo),
-                disjoint_los_flat: Some(merged_los),
-                disjoint_his_flat: Some(merged_his),
-                has_range_tombstones: false,
-            };
-            runs[i] = merged;
-            // Stay at i: the merged run may chain with the next one too.
-        }
-        runs
-    }
-
     fn rebuild_sst_runs(&mut self) {
         let mut runs: Vec<SstRun> = Vec::new();
-        for &sst_i in &self.sst_order_newest {
+        for &sst_i in self.sst_indices_newest_first() {
             let level = self.sst_levels.get(sst_i).copied().unwrap_or(0);
             match runs.last_mut() {
                 Some(run) if run.level == level => run.tables_newest_first.push(sst_i),
@@ -4746,8 +4529,6 @@ impl<E: Env> Db<E> {
                     level,
                     tables_newest_first: vec![sst_i],
                     disjoint_by_lo: None,
-                    disjoint_los_flat: None,
-                    disjoint_his_flat: None,
                     has_range_tombstones: false,
                 }),
             }
@@ -4755,27 +4536,11 @@ impl<E: Env> Db<E> {
         for run in &mut runs {
             run.disjoint_by_lo =
                 SstRun::disjoint_sorted_by_lo(&self.ssts, &run.tables_newest_first);
-            run.disjoint_los_flat = run
-                .disjoint_by_lo
-                .as_ref()
-                .and_then(|by_lo| flat_los(&self.ssts, by_lo));
-            run.disjoint_his_flat = run
-                .disjoint_by_lo
-                .as_ref()
-                .and_then(|by_lo| flat_his(&self.ssts, by_lo));
             run.has_range_tombstones = run
                 .tables_newest_first
                 .iter()
                 .any(|&i| self.ssts[i].has_range_tombstones());
         }
-        // RFC-0308 Pilar B: collapse consecutive same-level runs whose key
-        // ranges are concat-disjoint with no range tombstones on either
-        // side — compactions leave such splits, and every extra run costs
-        // one more stream + walk per scan/get. A tombstone carrier never
-        // merges (its span can reach past the table bounds), and the
-        // pairwise-disjoint oracle below stays the fail-safe: a merged run
-        // re-derives by_lo/flat arrays from scratch.
-        runs = Self::merge_concat_disjoint_runs(runs, &self.ssts);
         self.sst_runs = runs;
         self.refresh_hot_filter_pins();
     }
@@ -4830,51 +4595,16 @@ impl<E: Env> Db<E> {
                 let new_hi = self.ssts[new_idx].largest_user_key();
                 if let (Some(l_hi), Some(n_lo), Some(_)) = (last_hi, new_lo, new_hi) {
                     if n_lo > l_hi {
-                        match (
-                            Bound32::of(n_lo),
-                            Bound32::of(self.ssts[new_idx].largest_user_key().unwrap_or(&[])),
-                        ) {
-                            (Some(lo_slot), Some(hi_slot)) => {
-                                by_lo.push(new_idx);
-                                if let Some(flat) = run.disjoint_los_flat.as_mut() {
-                                    flat.push(lo_slot);
-                                }
-                                if let Some(flat) = run.disjoint_his_flat.as_mut() {
-                                    flat.push(hi_slot);
-                                }
-                            }
-                            _ => {
-                                by_lo.push(new_idx);
-                                run.disjoint_los_flat = None;
-                                run.disjoint_his_flat = None;
-                            }
-                        }
+                        by_lo.push(new_idx);
                     } else {
                         run.disjoint_by_lo =
                             SstRun::disjoint_sorted_by_lo(&self.ssts, &run.tables_newest_first);
-                        run.disjoint_los_flat = run
-                            .disjoint_by_lo
-                            .as_ref()
-                            .and_then(|by_lo| flat_los(&self.ssts, by_lo));
-                        run.disjoint_his_flat = run
-                            .disjoint_by_lo
-                            .as_ref()
-                            .and_then(|by_lo| flat_his(&self.ssts, by_lo));
                     }
                 } else {
                     run.disjoint_by_lo = None;
-                    run.disjoint_los_flat = None;
-                    run.disjoint_his_flat = None;
                 }
             } else if run.tables_newest_first.len() == 1 {
                 run.disjoint_by_lo = Some(vec![new_idx]);
-                run.disjoint_los_flat =
-                    flat_los(&self.ssts, run.disjoint_by_lo.as_deref().unwrap_or(&[]));
-                run.disjoint_his_flat =
-                    flat_his(&self.ssts, run.disjoint_by_lo.as_deref().unwrap_or(&[]));
-            } else {
-                run.disjoint_los_flat = None;
-                run.disjoint_his_flat = None;
             }
         } else {
             self.rebuild_sst_runs();
@@ -5443,44 +5173,13 @@ impl<E: Env> Db<E> {
         // Range tombstones from EVERY table (G2): a covering delete whose
         // start sits before `start` must still hide keys in the window,
         // including tables a grouped stream has not pulled from yet.
-        // RFC-0306 P2: a run whose summary says "no range tombstones"
-        // contributes nothing here — skip it wholesale. The per-table walk
-        // was O(#SSTs) fat-struct pointer chases per scan (886 tables at
-        // 250M ≈ 25-35µs of every prefix_scan). Guard: if the runs do not
-        // cover the whole inventory (any install path that has not rebuilt
-        // them yet), fall back to the global walk rather than risk missing
-        // a tombstone (a missed tombstone resurrects deleted keys).
-        let runs_cover_inventory = self
-            .sst_runs
-            .iter()
-            .map(|r| r.tables_newest_first.len())
-            .sum::<usize>()
-            == self.ssts.len();
-        if runs_cover_inventory {
-            for run in self.sst_runs.iter() {
-                if !run.has_range_tombstones {
-                    continue;
-                }
-                for &ti in run.tables_newest_first.iter() {
-                    let table = &self.ssts[ti];
-                    // RFC-0233 P2.3: skip disjoint files with no range
-                    // tombs (setup was 97% of deps_scan @10M walking every
-                    // SST).
-                    if !table.has_range_tombstones()
-                        && !table.overlaps_user_range(start, end)
-                    {
-                        continue;
-                    }
-                    table.collect_range_tombstones(snapshot, &mut range_dels);
-                }
+        for table in self.ssts.iter() {
+            // RFC-0233 P2.3: skip disjoint files with no range tombs (setup
+            // was 97% of deps_scan @10M walking every SST).
+            if !table.has_range_tombstones() && !table.overlaps_user_range(start, end) {
+                continue;
             }
-        } else {
-            for table in self.ssts.iter() {
-                if !table.has_range_tombstones() && !table.overlaps_user_range(start, end) {
-                    continue;
-                }
-                table.collect_range_tombstones(snapshot, &mut range_dels);
-            }
+            table.collect_range_tombstones(snapshot, &mut range_dels);
         }
         // A strictly disjoint level collapses into ONE lazy concatenated
         // stream ([`LevelRunStream`]): heap width drops from #SSTs to
@@ -5490,8 +5189,7 @@ impl<E: Env> Db<E> {
             if let Some(by_lo) = run.disjoint_by_lo.as_ref() {
                 streams.push(Box::new(LevelRunStream::new(
                     self,
-                    by_lo.as_slice(),
-                    run.disjoint_his_flat.as_deref(),
+                    by_lo.clone(),
                     start,
                     end,
                     snapshot,
@@ -6047,6 +5745,8 @@ impl<E: Env> Db<E> {
             self.env.copy_file(&wal_src, &dest.join(WAL_FILE_NAME))?;
         }
         // Large-value spill (RFC-0014 P2.2): SST/WAL may hold only VLG1 pointers.
+        // Flush userspace buffers so copied vlog files contain every referenced entry.
+        self.vlog_sync_pending()?;
         // F44: mid-GC MANIFEST may set `vlog_use_new` with live data in VALUES.vlog.new
         // and remapped SST offsets. Copying only the primary file leaves open falling
         // back to stale primary bytes → missing/wrong large values after restore.
@@ -6509,7 +6209,7 @@ impl<E: Env> Db<E> {
         let probe = crate::env::probe_available_bytes(&self.env, &self.dir);
         if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
             for (k, v) in taken.iter_internal() {
-                self.mem.write().insert(k.clone(), v.clone());
+                self.mem.insert(k.clone(), v.clone());
             }
             return Err(CoreError::DiskPressure { available, need });
         }
@@ -6518,7 +6218,7 @@ impl<E: Env> Db<E> {
             Ok(f) => f,
             Err(e) => {
                 for (k, v) in taken.iter_internal() {
-                    self.mem.write().insert(k.clone(), v.clone());
+                    self.mem.insert(k.clone(), v.clone());
                 }
                 return Err(self.fence_io_err(e));
             }
@@ -6529,7 +6229,7 @@ impl<E: Env> Db<E> {
         let pairs: Vec<_> = files.into_iter().map(|(t, num, _)| (t, num)).collect();
         if let Err(e) = self.install_ssts_at_levels(pairs, &[level]) {
             for (k, v) in taken.iter_internal() {
-                self.mem.write().insert(k.clone(), v.clone());
+                self.mem.insert(k.clone(), v.clone());
             }
             return Err(self.fence_io_err(e));
         }
@@ -6626,12 +6326,7 @@ impl<E: Env> Db<E> {
                     // RFC-0217 P1.1: no WAL frame — a rotate may only drop
                     // the segment once a publish covers this sequence.
                     self.walless_seq_high = self.walless_seq_high.max(seq);
-                    // RFC-0306 P1: the memtable is long-lived and this op
-                    // is overwritten every batch — stage views here would
-                    // pin every batch's staging backing until a mem flush
-                    // that a one-key cursor never triggers. Copy-owned.
-                    let value = escape_inline_value(Bytes::copy_from_slice(&value));
-                    let key = Bytes::copy_from_slice(&key);
+                    let value = escape_inline_value(value);
                     self.mem
                         .write()
                         .insert(InternalKey::new(key, seq, ValueType::Value), value);
@@ -6867,7 +6562,6 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
-
     fn bulk_append_puts(
         &mut self,
         family: &str,
@@ -6924,15 +6618,9 @@ impl<E: Env> Db<E> {
         };
         if over {
             if let Some(mut run) = self.bulk_runs.remove(family) {
-                let t_sort0 = std::time::Instant::now();
-                let was_sorted = run.is_sorted();
-                if !was_sorted {
+                if !run.is_sorted() {
                     run.sort();
                 }
-                BULK_BOUNDARY_DIAG
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .push((was_sorted, t_sort0.elapsed().as_nanos() as u64));
                 // Park so background workers and client assist encode SSTs off-lock.
                 self.parked_bulk
                     .push_back((family.to_string(), Arc::new(run)));
@@ -7082,6 +6770,7 @@ impl<E: Env> Db<E> {
     /// adopted (visible to reads) routes here; write-path cleanup of files
     /// that were never adopted never entered the cache.
     fn remove_db_file(&self, path: &Path) -> std::io::Result<()> {
+        self.sst_payload_pool.unregister(path);
         self.env.remove_file(path)?;
         self.sst_file_cache.invalidate(path);
         Ok(())
@@ -7521,8 +7210,6 @@ impl<E: Env> Db<E> {
 
     /// Bulk-run flush size: per-CF / global write buffer, clamped by
     /// `PEDRA_STAGE_MAX_BYTES` when set.
-    /// Bulk-run flush size: per-CF / global write buffer, clamped by
-    /// `PEDRA_STAGE_MAX_BYTES` when set.
     /// RFC-0306: bulk chunks self-tune to 64 MiB — no user knob. Larger
     /// staged chunks (a 256 MiB CF buffer) quadrupled parked-queue bytes,
     /// halved hydrate throughput on the bench box (1.04 vs 2.07+ M/s) and
@@ -7852,10 +7539,19 @@ impl<E: Env> Db<E> {
         // Recheck inflight while holding the WAL mutex so rotate cannot
         // truncate a just-written frame (Pebble-style split).
         {
-            let w = self.wal.lock();
+            let mut w = self.wal.lock();
             if self.commit_inflight.load(Ordering::Acquire) > 0 {
                 return Ok(());
             }
+            // RFC-0209 order rule (b): this decision is a barrier — staged
+            // group-commit bytes are segment content and must reach the
+            // sink before the emptiness check. Without the drain the
+            // drained watermark (`position`) is stale (F-CAMP-4), the
+            // segment looks empty, the rotate — and the MANIFEST pay-point
+            // that publishes the just-installed L0 — is skipped, and the
+            // L0 stays orphaned on disk (2026-10-03: the walless hydrate
+            // tail lost its durability exactly this way).
+            w.drain_staged()?;
             match crate::flush_kernel::wal_segment_is_empty(w.position()) {
                 true => return Ok(()),
                 false => {}
@@ -7962,7 +7658,14 @@ impl<E: Env> Db<E> {
         // SST is already durable: AppendApplyOk ⇒ flush, not fdatasync.
         match crate::write_admission_kernel::wal_commit_plan(false, false) {
             crate::write_admission_kernel::WalCommitPlan::AppendApplyOk => {
-                self.wal.lock().flush()?;
+                // F-CAMP-3: a failed drain here tears the tail AND leaves the
+                // frame staged; fencing (like every other WAL-write error)
+                // is what lets the archive heal trust `last_good`.
+                let drained = self.wal.lock().flush();
+                if let Err(e) = drained {
+                    self.durability_fenced = true;
+                    return Err(self.fence_io_err(e));
+                }
             }
             crate::write_admission_kernel::WalCommitPlan::AppendSyncApplyOk
             | crate::write_admission_kernel::WalCommitPlan::AppendSyncFence => {
@@ -7970,7 +7673,11 @@ impl<E: Env> Db<E> {
                     !crate::write_admission_kernel::fence_on_sync_fail(false, false),
                     "rotate discards WAL after SST durable ⇒ not required sync"
                 );
-                self.wal.lock().sync_data()?;
+                let synced = self.wal.lock().sync_data();
+                if let Err(e) = synced {
+                    self.durability_fenced = true;
+                    return Err(self.fence_io_err(e));
+                }
             }
         }
         // RFC-0217 P1.1: unpublished window or lazy-feed debt → the drained
@@ -7994,6 +7701,45 @@ impl<E: Env> Db<E> {
             let mut w = self.wal.lock();
             if self.commit_inflight.load(Ordering::Acquire) > 0 {
                 return Ok(());
+            }
+            // F-CAMP-3: a torn tail (ShortWrite/Interrupted mid-frame, failed
+            // rotate drain) archived as-is fail-stops reopen ("torn archived
+            // WAL segment") and the DB never opens again. Everything after
+            // `last_good` is not readable anyway; a re-anchored log (F171
+            // resync) keeps today's loud fail-stop because mid-log damage is
+            // corruption, not a torn append. The probe costs one sequential
+            // read of the segment per rotation.
+            match Wal::recover_prefix_span_on(&self.env, &wal_path) {
+                // Torn tail, no mid-log re-anchor: everything after
+                // `last_good` is unreadable debris (the fence refused any
+                // later append), so heal the segment before it becomes an
+                // archive. Do not gate on metadata_len — under a fault
+                // window the stat errs and a silent skip would archive the
+                // tear. F171 re-anchor = corruption class: archive as-is so
+                // reopen keeps failing loudly.
+                Ok((_, last_good, Some(_), None)) => {
+                    match self.env.open_append(&wal_path) {
+                        Ok(mut f) => {
+                            let r = f.set_len(last_good).and_then(|_| f.sync_data());
+                            if let Err(e) = r {
+                                drop(w);
+                                return Err(self.fence_io_err(CoreError::Io(e)));
+                            }
+                            tracing::warn!(
+                                healed_to = last_good,
+                                "WAL archive heal: truncated torn tail to last good record"
+                            );
+                        }
+                        Err(e) => {
+                            drop(w);
+                            return Err(self.fence_io_err(CoreError::Io(e)));
+                        }
+                    }
+                }
+                Ok((_, _, None, _)) | Ok((_, _, _, Some(_))) | Err(_) => {
+                    // Intact tail (e.g. SyncFail fence), F171 re-anchor, or
+                    // unreadable probe: keep today's behavior.
+                }
             }
             match self.env.rename(&wal_path, &arch) {
                 Ok(()) => {
@@ -9031,7 +8777,6 @@ impl<E: Env> Db<E> {
             .map(|source| crate::cache::PayloadKit {
                 source: Arc::clone(source),
                 pool: Arc::clone(&self.sst_payload_pool),
-                plain: Arc::clone(&self.plain_block_cache),
             });
         Ok(Some(PreparedL0Compact {
             inputs,
@@ -9231,72 +8976,75 @@ impl<E: Env> Db<E> {
         input_idxs: Vec<usize>,
         to_level: u32,
         options: CompactOptions,
-        filter: Option<&mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision>,
+        mut filter: Option<&mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision>,
     ) -> Result<()> {
-        let num = self.next_file_num;
-        // F177: tombstone dropping is only visibility-safe when this rewrite
-        // covers **every** live SST — otherwise an older version in a file
-        // outside the input resurrects once the tombstone is dropped. The
-        // landing level is irrelevant: if the input is the whole DB, the
-        // output is the whole DB. Partial rewrites keep tombstones. A
-        // caller-asserted `bottommost` (whole keyspace covered per family,
-        // RFC-0217 P1.2 filter route) ORs in — `Remove` decisions rely on
-        // the same condition.
         let tables: Vec<SstTable> = input_idxs.iter().map(|&i| self.ssts[i].clone()).collect();
-        let cf = tables
-            .first()
-            .map(|t| t.cf().to_string())
-            .unwrap_or_default();
+        if tables.is_empty() {
+            return Ok(());
+        }
+        let mut families = Vec::new();
+        for t in &tables {
+            let f = self.compact_family_key(t).to_string();
+            if !families.contains(&f) {
+                families.push(f);
+            }
+        }
         let whole_db = input_idxs.len() == self.ssts.len();
-        let family_ssts_count = self.ssts.iter().filter(|t| t.cf() == cf).count();
-        let whole_family = tables.len() == family_ssts_count && family_ssts_count > 0;
-        let bottommost = whole_db || (whole_family && to_level == MAX_LSM_LEVEL);
-        let mut gc = options.gc;
-        gc.bottommost = bottommost;
-        let options = CompactOptions { gc, ..options };
         let kit = self
             .sst_source
             .as_ref()
             .map(|source| crate::cache::PayloadKit {
                 source: Arc::clone(source),
                 pool: Arc::clone(&self.sst_payload_pool),
-                plain: Arc::clone(&self.plain_block_cache),
             });
-        // Whole-levels rewrites merge every file of two levels, so the
-        // writer's per-chunk transient (chunk body Vec + bloom + the
-        // post-write read-back) rides on top of the full live-set read
-        // traffic. Cap the chunk at 64 MiB logical — RocksDB's own L1
-        // target-file-size shape — so that transient stays small; a
-        // caller-set smaller target wins.
         let rewrite_split = self
             .compact_target_file_bytes
             .min(self.rewrite_chunk_target_bytes);
-        let new_tables: Vec<SstTable> = write_merged_tables(
-            &self.env,
-            &self.dir,
-            num,
-            &tables,
-            options.gc,
-            self.sync,
-            rewrite_split,
-            // Runs under the `&mut self` write lock and advances
-            // `next_file_num` after the write, so no other allocator can
-            // interleave: unlimited chunks are safe here.
-            usize::MAX,
-            kit.as_ref(),
-            // RFC-0217 P1.2: the decision's family argument is this
-            // rewrite's family (cf-decoded keys arrive encoded).
-            filter.map(|f| (cf.as_str(), f)),
-        )?
-        .into_iter()
-        .map(|t| t.with_cf(cf.clone()))
-        .collect();
+
+        let mut current_num = self.next_file_num;
+        let mut new_tables: Vec<SstTable> = Vec::new();
+
+        for cf in &families {
+            let fam_tables: Vec<SstTable> = tables.iter().filter(|t| self.compact_family_key(t) == cf).cloned().collect();
+            let family_ssts_count = self.ssts.iter().filter(|t| self.compact_family_key(t) == cf).count();
+            let whole_family = fam_tables.len() == family_ssts_count && family_ssts_count > 0;
+            let bottommost = whole_db || (whole_family && to_level == MAX_LSM_LEVEL);
+            let mut gc = options.gc;
+            gc.bottommost = bottommost;
+
+            let filter_arg = match filter.as_deref_mut() {
+                Some(f) => Some((if cf.is_empty() { "default" } else { cf.as_str() }, f as &mut dyn FnMut(&str, &[u8], &[u8]) -> crate::merge::CompactFilterDecision)),
+                None => None,
+            };
+
+            let written: Vec<SstTable> = write_merged_tables(
+                &self.env,
+                &self.dir,
+                current_num,
+                &fam_tables,
+                gc,
+                self.sync,
+                rewrite_split,
+                usize::MAX,
+                kit.as_ref(),
+                filter_arg,
+            )?
+            .into_iter()
+            .map(|t| if cf.is_empty() { t } else { t.with_cf(cf.clone()) })
+            .collect();
+
+            current_num += written.len() as u64;
+            new_tables.extend(written);
+        }
+
         for t in &new_tables {
             self.table_cache.insert(Arc::new(t.clone()));
         }
-        self.next_file_num = num + new_tables.len() as u64;
+        self.next_file_num = current_num;
 
-        // Compaction I/O rate limiter check (RFC-0274 Pillar I)
+        // Compaction I/O rate limiter check (RFC-0274 Pillar I, RFC-0300).
+        // Delay is recorded to be executed outside the exclusive write lock
+        // so concurrent readers and writers are not stalled during pacing.
         if self.backpressure_config.compaction_rate_bytes_per_sec > 0 {
             let now_nanos = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -9307,7 +9055,10 @@ impl<E: Env> Db<E> {
                 total_bytes = total_bytes.saturating_add(self.env.metadata_len(t.path()).unwrap_or(0));
             }
             if let Some(delay) = self.compaction_pacer.request_pacing_delay(total_bytes, now_nanos) {
-                std::thread::sleep(delay);
+                self.pending_pacing_delay = match self.pending_pacing_delay {
+                    Some(prev) => Some(prev.saturating_add(delay)),
+                    None => Some(delay),
+                };
             }
         }
 
@@ -9649,6 +9400,9 @@ impl<E: Env> Db<E> {
         if let Some(ref mut imm) = self.imm {
             imm.map_values(remap_fn);
         }
+        if let Some(ref mut pin) = self.flush_read_pin {
+            pin.map_values(remap_fn);
+        }
         for t in &mut self.parked_unflushed {
             if let Some(mt) = Arc::get_mut(t) {
                 mt.map_values(remap_fn);
@@ -9664,6 +9418,7 @@ impl<E: Env> Db<E> {
         }
         self.bytes_written_sst = self.bytes_written_sst.saturating_add(staged_bytes);
         for t in &self.ssts {
+            self.adopt_sst(t);
             self.table_cache.insert(Arc::new(t.clone()));
         }
         for path in old_paths {
@@ -9706,6 +9461,19 @@ impl<E: Env> Db<E> {
             while let Ok(Some((_, v))) = stream.next_entry() {
                 consider(&v);
             }
+        }
+        if let Some(ref p) = self.flush_read_pin {
+            for (_, v) in p.iter_internal() {
+                consider(v);
+            }
+        }
+        for t in &self.retired_pending {
+            for (_, v) in t.iter_internal() {
+                consider(v);
+            }
+        }
+        for (_, v) in self.retired_fold.iter_internal() {
+            consider(v);
         }
         let Some(ref handle) = self.vlog else {
             return Ok(Vec::new());
@@ -9913,6 +9681,9 @@ impl<E: Env> Db<E> {
         if let Some(ref mut imm) = self.imm {
             imm.map_values(remap_fn);
         }
+        if let Some(ref mut pin) = self.flush_read_pin {
+            pin.map_values(remap_fn);
+        }
         for t in &mut self.parked_unflushed {
             if let Some(mt) = Arc::get_mut(t) {
                 mt.map_values(remap_fn);
@@ -9968,6 +9739,19 @@ impl<E: Env> Db<E> {
                 consider(&v);
             }
         }
+        if let Some(ref p) = self.flush_read_pin {
+            for (_, v) in p.iter_internal() {
+                consider(v);
+            }
+        }
+        for t in &self.retired_pending {
+            for (_, v) in t.iter_internal() {
+                consider(v);
+            }
+        }
+        for (_, v) in self.retired_fold.iter_internal() {
+            consider(v);
+        }
         let Some(ref vlog) = self.vlog else {
             return Ok(Vec::new());
         };
@@ -10005,9 +9789,9 @@ impl<E: Env> Db<E> {
         let mut staged_paths = Vec::new();
         let mut bytes_written = 0u64;
 
-        let cleanup_staged = |env: &E, paths: &[PathBuf]| {
+        let cleanup_staged = |db: &Self, paths: &[PathBuf]| {
             for p in paths {
-                let _ = env.remove_file(p);
+                let _ = db.remove_db_file(p);
             }
         };
 
@@ -10041,12 +9825,12 @@ impl<E: Env> Db<E> {
                     drop(t);
                     if let Err(e) = self.env.rename(&tmp_path, &final_path) {
                         let _ = self.remove_db_file(&tmp_path);
-                        cleanup_staged(&self.env, &staged_paths);
+                        cleanup_staged(self, &staged_paths);
                         return Err(e.into());
                     }
                     if let Err(e) = self.sync_dir_if_required(&self.dir) {
                         let _ = self.remove_db_file(&final_path);
-                        cleanup_staged(&self.env, &staged_paths);
+                        cleanup_staged(self, &staged_paths);
                         return Err(e);
                     }
                     match SstTable::open_on(&self.env, &final_path) {
@@ -10061,14 +9845,14 @@ impl<E: Env> Db<E> {
                         }
                         Err(e) => {
                             let _ = self.remove_db_file(&final_path);
-                            cleanup_staged(&self.env, &staged_paths);
+                            cleanup_staged(self, &staged_paths);
                             return Err(e);
                         }
                     }
                 }
                 Err(e) => {
                     let _ = self.remove_db_file(&tmp_path);
-                    cleanup_staged(&self.env, &staged_paths);
+                    cleanup_staged(self, &staged_paths);
                     return Err(e);
                 }
             }
@@ -10203,96 +9987,6 @@ impl<E: Env> Db<E> {
     ///
     /// Merges point versions and range tombstones across all layers so a range
     /// delete in a newer layer correctly hides older puts.
-    /// RFC-0306 stale-read hunt: per-layer point view of `key` (diagnostics
-    /// only; called from the differential oracle's mismatch triage).
-    pub fn debug_lookup_trace(&self, key: &[u8]) -> String {
-        let mut out = String::new();
-        let layers = self.mem_layers();
-        for (i, table) in layers.iter().enumerate() {
-            let entry = table
-                .get_entry(key, MAX_SEQUENCE_NUMBER)
-                .map(|(seq, look)| format!("{seq}/{}", match look {
-                    Lookup::Found(v) => format!("Found({}B)", v.len()),
-                    Lookup::Deleted => "Del".into(),
-                    Lookup::NotFound => "NF".into(),
-                }))
-                .unwrap_or_else(|| "-".into());
-            let mut tombs = Vec::new();
-            table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
-            let tk: Vec<String> = tombs
-                .iter()
-                .filter(|t| t.covers(key))
-                .map(|t| format!("{}..{}@{}", short(t.start.as_ref()), short(t.end.as_ref()), t.sequence))
-                .collect();
-            out.push_str(&format!(
-                "  L{i} entry={entry} covering_tombs=[{}]\n",
-                tk.join(",")
-            ));
-        }
-        out.push_str(&format!(
-            "  ssts n={} runs={}\n",
-            self.ssts.len(),
-            self.sst_runs.len()
-        ));
-        for (ri, run) in self.sst_runs.iter().enumerate() {
-            out.push_str(&format!(
-                "  R{ri} level={} tables={} disjoint={:?} tombs={}\n",
-                run.level,
-                run.tables_newest_first.len(),
-                run.disjoint_by_lo.is_some(),
-                run.has_range_tombstones
-            ));
-            for &ti in run.tables_newest_first.iter() {
-                let t = &self.ssts[ti];
-                let entry = t
-                    .point_at(key, MAX_SEQUENCE_NUMBER)
-                    .map(|(seq, look)| format!("{seq}/{}", match look {
-                        Lookup::Found(v) => format!("Found({}B)", v.len()),
-                        Lookup::Deleted => "Del".into(),
-                        Lookup::NotFound => "NF".into(),
-                    }))
-                    .unwrap_or_else(|| "err".into());
-                // RFC-0306 hunt: the production probe is the seek chain.
-                // If it misses what `point_at` finds, the bug is seek
-                // recall, not tombstones.
-                let seek_entry = {
-                    let mut scratch = take_tls_point_seek_scratch();
-                    let (h1, h2) = crate::bloom_kernel::hash_pair(key);
-                    let r = t.point_at_seeking_with_hashes(
-                        key,
-                        MAX_SEQUENCE_NUMBER,
-                        &mut scratch,
-                        h1,
-                        h2,
-                    );
-                    put_tls_point_seek_scratch(scratch);
-                    r.ok()
-                        .flatten()
-                        .map(|(seq, look)| format!("{seq}/{}", match look {
-                            Lookup::Found(v) => format!("Found({}B)", v.len()),
-                            Lookup::Deleted => "Del".into(),
-                            Lookup::NotFound => "NF".into(),
-                        }))
-                        .unwrap_or_else(|| "err".into())
-                };
-                let mut tombs = Vec::new();
-                t.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
-                let covering: Vec<String> = tombs
-                    .iter()
-                    .filter(|t| t.covers(key))
-                    .map(|t| format!("seq{}", t.sequence))
-                    .collect();
-                out.push_str(&format!(
-                    "    T{ti} lo={:?} hi={:?} entry={entry} seek={seek_entry} covering_tombs=[{}]\n",
-                    t.smallest_user_key().map(|b| short(b)),
-                    t.largest_user_key().map(|b| short(b)),
-                    covering.join(",")
-                ));
-            }
-        }
-        out
-    }
-
     pub(crate) fn lookup(&self, key: &[u8], snapshot: SequenceNumber) -> Lookup {
         let mut best_point_seq: Option<SequenceNumber> = None;
         let mut best_point: Lookup = Lookup::NotFound;
@@ -10331,19 +10025,10 @@ impl<E: Env> Db<E> {
 
         let fam = self.bulk_family_of_key(key);
         let check_run = |run: &crate::bulk_run::BulkRun| -> Option<Lookup> {
-            // RFC-0307 P0: the range-tombstone verdict uses the entry's OWN
-            // sequence. The previous `point_seq = 0` placeholder let ANY
-            // covering tombstone hide a value NEWER than it while the key
-            // lived in a latched/parked bulk run — a put that revived a
-            // range-deleted key read back as None until the run settled
-            // into an SST (where seqs compare correctly). Flaky in the
-            // differential oracle because the latch only engages on an
-            // ascending-batch streak.
-            let (seq, look) = run.lookup_with_seq(key, snapshot)?;
-            match look {
+            match run.lookup(key, snapshot) {
                 Lookup::NotFound => None,
                 Lookup::Found(v) => {
-                    if range_deleted(key, seq, &range_tombs) {
+                    if range_deleted(key, 0, &range_tombs) {
                         Some(Lookup::Deleted)
                     } else {
                         Some(Lookup::Found(v))
@@ -10388,7 +10073,6 @@ impl<E: Env> Db<E> {
         let ssts = &self.ssts;
         let (key_h1, key_h2) = crate::bloom_kernel::hash_pair(key);
         let mut probe = |table: &SstTable| -> Option<(SequenceNumber, Lookup)> {
-            LOOKUP_TABLES_PROBED.fetch_add(1, Ordering::Relaxed);
             if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key()) {
                 if key < lo || key > hi {
                     return None;
@@ -10414,22 +10098,7 @@ impl<E: Env> Db<E> {
                     ssts[sst_i].collect_range_tombstones(snapshot, &mut range_tombs);
                 }
             }
-            if let (Some(flat), Some(by_lo)) =
-                (run.disjoint_los_flat.as_ref(), run.disjoint_by_lo.as_ref())
-            {
-                // RFC-0306 P2: contiguous fixed-stride bounds — the walk
-                // stays in one array instead of chasing a fat struct plus
-                // a `Bytes` deref per step. Verdicts match the chase path
-                // exactly (see `Bound32::le_key`).
-                let p = flat.partition_point(|slot| slot.le_key(key));
-                if p > 0 {
-                    if let Some((seq, look)) = probe(&ssts[by_lo[p - 1]]) {
-                        best_point_seq = Some(seq);
-                        best_point = look;
-                        break 'runs;
-                    }
-                }
-            } else if let Some(by_lo) = &run.disjoint_by_lo {
+            if let Some(by_lo) = &run.disjoint_by_lo {
                 // Sorted by `lo`, pairwise disjoint: the last table whose
                 // `lo <= key` is the only one that can hold `key` (every
                 // earlier `hi` sits below the next `lo`). The probe's own
@@ -10748,7 +10417,13 @@ impl<E: Env> Db<E> {
             let mut w = self.wal.lock();
             let sl = ops.as_slice();
             w.encode_write_op_batches(&[sl])?;
-            w.write_pending_frame()?;
+            // F-CAMP-1: failed WAL write tears the tail — fence like the G1
+            // path (10986) so no later Ok re-anchors past the hole (F171
+            // recovery would refuse the whole log).
+            if let Err(e) = w.write_pending_frame() {
+                drop(w);
+                return Err(self.fence_io_err(e));
+            }
             if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
                 st.wal_ns
                     .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -10894,7 +10569,12 @@ impl<E: Env> Db<E> {
         let (op, seq) = self.encode_async_one(&mut w, batch)?;
         let st = self.phase_stats.clone();
         let t1 = st.as_ref().map(|_| Instant::now());
-        w.write_pending_frame_lone()?;
+        // F-CAMP-1: same fence-on-WAL-write-error contract as commit_async_ops
+        // / commit_ops_with — a torn tail must not be re-anchored.
+        if let Err(e) = w.write_pending_frame_lone() {
+            drop(w);
+            return Err(self.fence_io_err(e));
+        }
         if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
             st.wal_ns
                 .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -10954,8 +10634,19 @@ impl<E: Env> Db<E> {
         let tw = st.as_ref().map(|_| std::time::Instant::now());
         let (n, sync_r) = {
             let mut w = self.wal.lock();
-            let n = w.encode_write_op_batches(&[sl])?;
+            let pos_before = w.position();
+            let n = match w.encode_write_op_batches(&[sl]) {
+                Ok(n) => n,
+                Err(e) => {
+                    let _ = w.discard_uncommitted(pos_before);
+                    return Err(e);
+                }
+            };
             let r = w.sync_data();
+            if r.is_err() {
+                let cur = w.position();
+                let _ = w.discard_uncommitted(cur);
+            }
             (n, r)
         };
         if let (Some(st), Some(tw)) = (st.as_ref(), tw) {
@@ -12480,10 +12171,12 @@ impl<E: Env> Db<E> {
         levels: &[u32],
     ) -> L0InstallUndo {
         let is_single_bulk = files.len() == 1 && levels.first().copied() == Some(MAX_LSM_LEVEL);
+        let installed_paths: Vec<PathBuf> =
+            files.iter().map(|(t, _)| t.path().to_path_buf()).collect();
         let undo = L0InstallUndo {
             prev_next: self.next_file_num,
             prev_manifest: self.manifest_file_num,
-            n: files.len(),
+            installed_paths,
         };
         let mut last_idx = 0usize;
         for (i, (table, file_num)) in files.into_iter().enumerate() {
@@ -12510,17 +12203,6 @@ impl<E: Env> Db<E> {
         }
         if is_single_bulk {
             self.incremental_append_bulk_sst(last_idx);
-            // RFC-0306: the bulk route never flushes, so the flush/compact
-            // DONTNEED sweep never runs. Once live SST bytes exceed the
-            // warm cap, drop the fresh chunk's page cache right here — a
-            // 250M hydrate (57 GiB written in a 47 GiB container) kept
-            // every written page resident and died at the cgroup wall.
-            if self.leftover_drop_pages() {
-                let p = self.ssts[last_idx].path().to_path_buf();
-                let _ = self.env.advise(&p, 0, 0, crate::env::AdviseKind::DontNeed);
-                self.leftover_dontneed_issued
-                    .fetch_add(1, Ordering::Relaxed);
-            }
         } else {
             self.note_sst_inventory_changed();
         }
@@ -12529,16 +12211,22 @@ impl<E: Env> Db<E> {
 
     /// Undo [`Self::apply_l0_install`] after a failed off-lock MANIFEST persist.
     pub fn undo_l0_install(&mut self, undo: L0InstallUndo) {
-        for _ in 0..undo.n {
-            if let Some(t) = self.ssts.last() {
-                let p = t.path().to_path_buf();
-                self.unsynced_ssts.retain(|x| x != &p);
-            }
-            let _ = self.ssts.pop();
-            let _ = self.sst_levels.pop();
+        for p in &undo.installed_paths {
+            self.unsynced_ssts.retain(|x| x != p);
         }
-        self.next_file_num = undo.prev_next;
-        self.manifest_file_num = undo.prev_manifest;
+        let mut retained_tables = Vec::new();
+        let mut retained_levels = Vec::new();
+        for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
+            if undo.installed_paths.iter().any(|p| t.path() == p.as_path()) {
+                continue;
+            }
+            retained_tables.push(t.clone());
+            retained_levels.push(lvl);
+        }
+        self.ssts = retained_tables;
+        self.sst_levels = retained_levels;
+        self.next_file_num = self.next_file_num.max(undo.prev_next);
+        self.manifest_file_num = self.manifest_file_num.max(undo.prev_manifest);
         self.note_sst_inventory_changed();
     }
 
@@ -12614,9 +12302,25 @@ impl<E: Env> Db<E> {
         for p in &undo.new_paths {
             let _ = self.remove_db_file(p);
         }
-        self.ssts = undo.prev_tables;
-        self.sst_levels = undo.prev_levels;
-        self.manifest_file_num = undo.prev_manifest;
+        let mut final_tables = Vec::new();
+        let mut final_levels = Vec::new();
+        for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
+            if !undo.new_paths.iter().any(|p| t.path() == p.as_path()) {
+                final_tables.push(t.clone());
+                final_levels.push(lvl);
+            }
+        }
+        for (t, &lvl) in undo.prev_tables.iter().zip(undo.prev_levels.iter()) {
+            if undo.old_paths.iter().any(|p| t.path() == p.as_path()) {
+                if !final_tables.iter().any(|existing| existing.path() == t.path()) {
+                    final_tables.push(t.clone());
+                    final_levels.push(lvl);
+                }
+            }
+        }
+        self.ssts = final_tables;
+        self.sst_levels = final_levels;
+        self.manifest_file_num = self.manifest_file_num.max(undo.prev_manifest);
         // F173: the GC watermark was raised before the failed install too —
         // restore it or live snapshots die with `SnapshotTooOld` and the next
         // manifest write installs the failed GC durably.
@@ -12679,7 +12383,7 @@ impl<E: Env> ManifestPersist<E> {
 pub struct L0InstallUndo {
     prev_next: u64,
     prev_manifest: u64,
-    n: usize,
+    installed_paths: Vec<PathBuf>,
 }
 
 /// Rollback token for [`Db::apply_prepared_l0_compact`].
@@ -13438,7 +13142,7 @@ fn load_ssts_scan<E: Env>(
     for (_, path) in files {
         let t = SstTable::open_on(env, path)?;
         if let Some(kit) = &kit {
-            t.attach_payload_kit(&kit.source, &kit.pool, &kit.plain);
+            t.attach_payload_kit(&kit.source, &kit.pool);
         }
         max_seq = max_seq.max(t.max_sequence());
         tables.push(t);
@@ -13754,6 +13458,9 @@ fn write_merged_tables_span<'a>(
             Err(e) => {
                 let _ = env.remove_file(&tmp_path);
                 for t in &out {
+                    if let Some(kit) = kit {
+                        kit.pool.unregister(t.path());
+                    }
                     let _ = env.remove_file(t.path());
                 }
                 return Err(e);
@@ -13763,6 +13470,9 @@ fn write_merged_tables_span<'a>(
             Ok(c) => c,
             Err(e) => {
                 for t in &out {
+                    if let Some(kit) = kit {
+                        kit.pool.unregister(t.path());
+                    }
                     let _ = env.remove_file(t.path());
                 }
                 return Err(e);
@@ -13776,7 +13486,7 @@ fn write_merged_tables_span<'a>(
         // (the 25M settle OOM at ~6 chunks). Idempotent with the
         // install-time `adopt_sst`.
         if let Some(kit) = kit {
-            chunk.attach_payload_kit(&kit.source, &kit.pool, &kit.plain);
+            chunk.attach_payload_kit(&kit.source, &kit.pool);
         }
         out.push(chunk);
         rewrite_trim_allocator();
@@ -13919,6 +13629,9 @@ fn write_merged_tables_parallel<E: Env + Sync>(
             Ok(tables) => out.extend(tables),
             Err(e) => {
                 for t in &out {
+                    if let Some(kit) = kit {
+                        kit.pool.unregister(t.path());
+                    }
                     let _ = env.remove_file(t.path());
                 }
                 return Err(e);
@@ -14177,6 +13890,29 @@ mod tests {
         assert!(!db.key_has_write_after(b"a", snap));
         assert_eq!(db.get(b"k"), None, "unapplied must not publish");
         assert_eq!(db.get(b"keep").as_deref(), Some(&b"1"[..]));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bulk_runs_are_visible_to_occ_key_has_write_after() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"existing", b"0").unwrap();
+        let snap = db.visible_sequence();
+
+        assert!(!db.key_has_write_after(b"bulk_key", snap));
+
+        let mut run = crate::bulk_run::BulkRun::default();
+        run.push(Bytes::from_static(b"bulk_key"), Bytes::from_static(b"val"), snap + 1);
+        run.sort();
+        db.bulk_runs.insert("default".to_string(), run);
+
+        assert!(
+            db.key_has_write_after(b"bulk_key", snap),
+            "key_has_write_after must detect concurrent writes in bulk_runs!"
+        );
+
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -15913,6 +15649,87 @@ mod tests {
     }
 
     #[test]
+    fn compact_blob_preserves_retired_cache_references() {
+        let dir = temp_dir();
+        let v1 = vec![0x33u8; 1800];
+        let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+        db.set_vlog_rotate_bytes(Some(1000));
+        db.put(b"pinned_key", &v1).unwrap();
+        let retired_mem = db.mem.read().clone();
+
+        // Flush so an L0 table exists covering the retired cache
+        db.flush().unwrap();
+        db.retire_mem_as_l0_cache(retired_mem);
+
+        db.rotate_blob().unwrap();
+        let sealed = db
+            .blob_file_nums()
+            .into_iter()
+            .find(|n| *n != db.blob_active() && *n != 0)
+            .expect("sealed numbered blob");
+
+        // Mechanical RED proof: collect_vlog_live_for_file MUST find the blob reference in retired_pending!
+        let live = db.collect_vlog_live_for_file(sealed).unwrap();
+        assert!(
+            !live.is_empty(),
+            "collect_vlog_live_for_file MUST scan retired_pending and retired_fold to prevent dangling pointers!"
+        );
+
+        let st = db.compact_blob(sealed).unwrap();
+        assert_eq!(st.live_records, 1, "compact_blob must rewrite the live blob from retired cache");
+
+        // Verify the pointer in retired_pending was actually remapped to the new blob file!
+        let mut found_remapped = false;
+        for (_, val) in db.retired_pending[0].iter_internal() {
+            if let Some(ptr) = vlog::decode_vlog_ptr(val.as_ref()) {
+                assert_ne!(ptr.file_num, sealed, "blob pointer must be remapped away from deleted sealed file");
+                found_remapped = true;
+                // Reading the remapped pointer from disk must succeed and match v1!
+                let read_val = db.resolve_stored_value(val.clone()).expect("remapped blob must be readable");
+                assert_eq!(read_val.as_ref(), v1.as_slice());
+            }
+        }
+        assert!(found_remapped, "retired_pending must have remapped pointer");
+
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compact_vlog_preserves_retired_cache_references() {
+        let dir = temp_dir();
+        let v1 = vec![0x55u8; 1800];
+        let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+        db.put(b"vlog_pinned_key", &v1).unwrap();
+        let retired_mem = db.mem.read().clone();
+
+        db.flush().unwrap();
+        db.retire_mem_as_l0_cache(retired_mem);
+
+        let live = db.collect_vlog_live_payloads().unwrap();
+        assert!(
+            !live.is_empty(),
+            "collect_vlog_live_payloads MUST scan retired_pending and retired_fold"
+        );
+
+        let st = db.compact_vlog().unwrap();
+        assert_eq!(st.live_records, 1, "compact_vlog must rewrite the live record from retired cache");
+
+        let mut found_remapped = false;
+        for (_, val) in db.retired_pending[0].iter_internal() {
+            if let Some((_off, _len, _crc)) = vlog::decode_vlog_ref(val.as_ref()) {
+                found_remapped = true;
+                let read_val = db.resolve_stored_value(val.clone()).expect("remapped vlog must be readable");
+                assert_eq!(read_val.as_ref(), v1.as_slice());
+            }
+        }
+        assert!(found_remapped, "retired_pending must have remapped vlog ref");
+
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn compact_blob_auto_picks_worst_ratio() {
         let dir = temp_dir();
         let v1 = vec![0xAAu8; 1800];
@@ -17123,6 +16940,45 @@ mod tests {
         assert_eq!(lock_after.len(), 1, "lock compacted to one file");
         assert_eq!(db.get(b"lock\0a").as_deref(), Some(b"1".as_ref()));
         assert_eq!(db.get(b"default\0a").as_deref(), Some(b"1".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rewrite_ssts_preserves_multiple_column_families_and_does_not_contaminate_tags() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_physical_cfs(vec!["default".into(), "lock".into()]);
+        db.set_defer_auto_compact(true);
+        db.put(b"lock\0a", b"1").unwrap();
+        db.put(b"default\0a", b"1").unwrap();
+        db.flush().unwrap();
+        db.put(b"lock\0b", b"2").unwrap();
+        db.put(b"default\0b", b"2").unwrap();
+        db.flush().unwrap();
+
+        assert!(db.live_sst_meta().iter().any(|m| m.cf == "default"));
+        assert!(db.live_sst_meta().iter().any(|m| m.cf == "lock"));
+
+        // Rewrite all SSTs (like compact_horizon / auto_compact does)
+        let all_idxs: Vec<usize> = (0..db.ssts.len()).collect();
+        db.rewrite_ssts(all_idxs, MAX_LSM_LEVEL, CompactOptions::default(), None).unwrap();
+
+        let cfs_after: std::collections::HashSet<String> = db
+            .live_sst_meta()
+            .into_iter()
+            .map(|m| m.cf)
+            .collect();
+
+        assert!(
+            cfs_after.contains("default"),
+            "default CF SSTs must not be overwritten by lock CF tag during multi-CF rewrite: {cfs_after:?}"
+        );
+        assert!(
+            cfs_after.contains("lock"),
+            "lock CF SSTs must be preserved with their own tag during multi-CF rewrite: {cfs_after:?}"
+        );
+
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -18552,6 +18408,161 @@ mod tests {
 
     /// F20: auto-compact must preserve versions needed by held snapshots.
     #[test]
+    fn write_merged_tables_error_unregisters_partial_chunks_from_payload_pool() {
+        struct F {
+            inner: <StdEnv as Env>::File,
+        }
+        impl std::io::Read for F {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.inner.read(buf)
+            }
+        }
+        impl std::io::Write for F {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.inner.write(buf)
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.inner.flush()
+            }
+        }
+        impl std::io::Seek for F {
+            fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+                self.inner.seek(pos)
+            }
+        }
+        impl EnvFile for F {
+            fn sync_data(&mut self) -> std::io::Result<()> {
+                self.inner.sync_data()
+            }
+            fn sync_all(&mut self) -> std::io::Result<()> {
+                self.inner.sync_all()
+            }
+            fn set_len(&mut self, len: u64) -> std::io::Result<()> {
+                self.inner.set_len(len)
+            }
+            fn len(&mut self) -> std::io::Result<u64> {
+                self.inner.len()
+            }
+        }
+        #[derive(Clone)]
+        struct FailTmpEnv {
+            inner: StdEnv,
+            remaining: std::rc::Rc<std::cell::Cell<usize>>,
+        }
+        impl Env for FailTmpEnv {
+            type File = F;
+            fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+                self.inner.create_dir_all(path)
+            }
+            fn create(&self, path: &Path) -> std::io::Result<Self::File> {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name.ends_with(".sst.tmp") {
+                    let left = self.remaining.get();
+                    if left == 0 {
+                        return Err(std::io::Error::other("injected sst.tmp create fail (compact)"));
+                    }
+                    self.remaining.set(left - 1);
+                }
+                Ok(F {
+                    inner: self.inner.create(path)?,
+                })
+            }
+            fn open_append(&self, path: &Path) -> std::io::Result<Self::File> {
+                Ok(F { inner: self.inner.open_append(path)? })
+            }
+            fn open_read(&self, path: &Path) -> std::io::Result<Self::File> {
+                Ok(F { inner: self.inner.open_read(path)? })
+            }
+            fn sync_dir(&self, path: &Path) -> std::io::Result<()> {
+                self.inner.sync_dir(path)
+            }
+            fn read_dir_names(&self, path: &Path) -> std::io::Result<Vec<String>> {
+                self.inner.read_dir_names(path)
+            }
+            fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+                self.inner.remove_file(path)
+            }
+            fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+                self.inner.rename(from, to)
+            }
+            fn exists(&self, path: &Path) -> bool {
+                self.inner.exists(path)
+            }
+            fn metadata_len(&self, path: &Path) -> std::io::Result<u64> {
+                self.inner.metadata_len(path)
+            }
+        }
+
+        let dir = temp_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(10 * 1024 * 1024)));
+        pool.arm();
+        let src: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
+        let kit = crate::cache::PayloadKit {
+            source: Arc::clone(&src),
+            pool: Arc::clone(&pool),
+        };
+
+        // Create 2 input tables with data
+        let mut t1_entries = Vec::new();
+        for i in 0..100u32 {
+            let k = crate::key::InternalKey::new(format!("k_{i:04}").into_bytes(), 10, crate::key::ValueType::Value);
+            t1_entries.push(Ok((k, Bytes::from(vec![0xAA; 500]))));
+        }
+        let t1_path = dir.join("000001.sst");
+        let t1 = crate::sst::write_sst_try_sorted_on(&StdEnv, &t1_path, &mut t1_entries.into_iter(), 100).unwrap();
+
+        let mut t2_entries = Vec::new();
+        for i in 100..200u32 {
+            let k = crate::key::InternalKey::new(format!("k_{i:04}").into_bytes(), 20, crate::key::ValueType::Value);
+            t2_entries.push(Ok((k, Bytes::from(vec![0xBB; 500]))));
+        }
+        let t2_path = dir.join("000002.sst");
+        let t2 = crate::sst::write_sst_try_sorted_on(&StdEnv, &t2_path, &mut t2_entries.into_iter(), 100).unwrap();
+
+        let tables = vec![t1, t2];
+
+        // FailTmpEnv allows creating 1 chunk, then fails on chunk 2
+        let env = FailTmpEnv {
+            inner: StdEnv,
+            remaining: std::rc::Rc::new(std::cell::Cell::new(1)),
+        };
+
+        let mut next = 10u64;
+        let mut alloc = || {
+            let n = next;
+            next += 1;
+            n
+        };
+
+        // Split target small (8 KB) so multiple chunks are produced
+        let res = write_merged_tables_span(
+            &env,
+            &dir,
+            &tables,
+            crate::merge::CompactGcOptions::default(),
+            false,
+            8 * 1024,
+            10,
+            Some(&kit),
+            None,
+            None,
+            &mut alloc,
+            0,
+            None,
+        );
+
+        assert!(res.is_err(), "write_merged_tables_span must fail after chunk 1");
+        assert_eq!(
+            pool.resident_bytes(),
+            0,
+            "failed compaction must not leak resident bytes of aborted partial chunks in SstPayloadPool"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn auto_compact_preserves_snapshot_history() {
         let dir = temp_dir();
         let mut db = Db::open_with(
@@ -19903,6 +19914,60 @@ mod tests {
             Some(big.as_slice()),
             "checkpoint must include VALUES.vlog so VLG1 resolves (got {:?})",
             got.as_ref().map(|b| b.len())
+        );
+        restored.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&ckpt);
+    }
+
+    #[test]
+    fn checkpoint_without_flush_preserves_buffered_vlog_values() {
+        let dir = temp_dir();
+        let ckpt = temp_dir();
+        let big = vec![0xCDu8; 4096];
+        {
+            let mut db = Db::open_with(
+                &dir,
+                OpenOptions {
+                    wal_full_fsync: false,
+                    history: Default::default(),
+                    wal_recovery: Default::default(),
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: Some(512),
+                    sst_payload_budget_bytes: None,
+                },
+            )
+            .unwrap();
+            // Put large value without calling db.flush()
+            db.put(b"buffered_huge", &big).unwrap();
+            db.create_checkpoint(&ckpt).unwrap();
+            db.close().unwrap();
+        }
+        let restored = Db::open_with(
+            &ckpt,
+            OpenOptions {
+                wal_full_fsync: false,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: false,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
+            },
+        )
+        .unwrap();
+        let got = restored.get(b"buffered_huge");
+        assert_eq!(
+            got.as_deref(),
+            Some(big.as_slice()),
+            "checkpoint must flush vlog buffers so large values resolve on restore without manual flush"
         );
         restored.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
@@ -23560,6 +23625,33 @@ mod tests {
     /// RFC-0305 pre_sorted: a trusted ascending append keeps the run
     /// sorted; a lying trusted append still flags disorder (the flush
     /// oracle sorts either way).
+    /// RFC-0306: bulk chunks self-tune — a 256 MiB CF buffer yields a
+    /// 64 MiB chunk cap without any env; PEDRA_STAGE_MAX_BYTES only lowers.
+    #[test]
+    fn bulk_chunk_cap_self_tunes_to_64mib() {
+        let dir = temp_dir();
+        let mut db = Db::<StdEnv>::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_cf_write_buffer("data", 256 << 20);
+        let cap = db.bulk_chunk_cap().unwrap_or(0);
+        assert_eq!(
+            cap,
+            64 << 20,
+            "256 MiB CF buffer must self-tune to the 64 MiB chunk ceiling"
+        );
+        // Smaller global cap stays respected (min semantics).
+        db.set_cf_write_buffer("data", 8 << 20);
+        assert_eq!(db.bulk_chunk_cap().unwrap_or(0), 8 << 20);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn bulk_append_pre_sorted_flag_tracks_order() {
         let dir = temp_dir();
@@ -24173,30 +24265,6 @@ mod tests {
 
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn bulk_chunk_cap_self_tunes_to_64mib() {
-        let dir = temp_dir();
-        let mut db = Db::<StdEnv>::open_with(
-            &dir,
-            OpenOptions {
-                sync: false,
-                ..OpenOptions::default()
-            },
-        )
-        .unwrap();
-        db.set_cf_write_buffer("data", 256 << 20);
-        let cap = db.bulk_chunk_cap().unwrap_or(0);
-        assert_eq!(
-            cap,
-            64 << 20,
-            "256 MiB CF buffer must self-tune to the 64 MiB chunk ceiling"
-        );
-        // Smaller global cap stays respected (min semantics).
-        db.set_cf_write_buffer("data", 8 << 20);
-        assert_eq!(db.bulk_chunk_cap().unwrap_or(0), 8 << 20);
-        db.close().unwrap();
     }
 }
 
