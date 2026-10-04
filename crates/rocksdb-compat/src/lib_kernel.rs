@@ -184,6 +184,9 @@ impl From<CoreError> for Error {
             // host persisters; an I/O durability condition.
             CoreError::ManifestCommittedUnsynced { .. } => ErrorKind::Io,
             CoreError::DiskPressure { .. } => ErrorKind::Io,
+            // Poisoned engine state (a worker panicked into a fail-stop):
+            // not retryable by the caller — Other, never silent.
+            CoreError::DbPoisoned { .. } => ErrorKind::Other,
         };
         Self {
             msg: e.to_string(),

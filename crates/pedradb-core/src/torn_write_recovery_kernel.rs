@@ -243,6 +243,7 @@ pub fn recover_frames(buf: &[u8]) -> RecoveredLogReport {
 }
 
 /// Recovers all consecutive intact frames with strict sequence monotonicity enforcement.
+#[allow(dead_code)]
 pub(crate) fn recover_frames_strict(buf: &[u8]) -> RecoveredLogReport {
     let mut offset = 0;
     let mut frames = Vec::new();

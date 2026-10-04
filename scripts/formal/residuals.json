@@ -282,8 +282,8 @@
       "crates/rocksdb-compat/src/txn_kernel.rs"
     ],
     "kernel_files": 264,
-    "kernel_loc": 154261,
-    "handler_loc": 91055,
+    "kernel_loc": 154890,
+    "handler_loc": 91058,
     "db_rs_extracted": true,
     "proof_depth": {
       "extract": 0,
@@ -2932,6 +2932,10 @@
         "classify_blob",
         "new",
         "remove_inflight_txn_blob",
+        "try_add_active_lsm_blob",
+        "try_add_inflight_txn_blob",
+        "try_add_staged_compaction_blob",
+        "try_new",
         "verify_reclamation_safety"
       ],
       "crates/pedradb-core/src/vlog_hole_alignment_kernel.rs": [
@@ -2952,6 +2956,11 @@
         "append",
         "gc_migrate_blobs",
         "new",
+        "try_append",
+        "try_gc_migrate_blobs",
+        "try_new",
+        "try_verify_pointer",
+        "try_verify_referential_integrity",
         "verify_pointer",
         "verify_referential_integrity"
       ],
@@ -3711,10 +3720,7 @@
       ]
     },
     "single_artifact": 172,
-    "data_fate": 0,
-    "mirror_unenrolled": [
-      "crates/pedradb-core/src/prefix_kernel.rs"
-    ]
+    "data_fate": 0
   },
   "residuals": [
     {

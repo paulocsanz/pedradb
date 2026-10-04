@@ -741,6 +741,8 @@ TCB_FREEZE_ALLOWLIST: dict[str, str] = {
         "RFC-0328 Domain bounds, newtypes & closed algebraic barriers",
     "crates/pedradb-core/src/mutation_switch_kernel.rs":
         "RFC-0329 Zero-recompile mutation switching and anti-vacuity kernel",
+    "crates/pedradb-core/src/prefix_kernel.rs":
+        "RFC-0331 public mirror: dst_plant in internal pedradb-store pruned from mirror catalog",
     "crates/pedradb-core/src/history_kernel.rs":
         "A2a glob rename 2026-09-14; trampoline/glue not a decision kernel",
     "crates/pedradb-core/src/host_kernel.rs":
