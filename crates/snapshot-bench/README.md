@@ -41,6 +41,7 @@ Env knobs (same names as upstream):
 | `SLIPSTREAM_BENCH_CACHE_BYTES` | backend default (1 GiB) | block-cache budget, same for every backend |
 | `SLIPSTREAM_BENCH_BACKENDS` | all | comma list: `fjall,rocksdb,pedradb` |
 | `SLIPSTREAM_BENCH_SEQUENTIAL` | auto at ≥ 50M | one backend on disk at a time |
+| `SLIPSTREAM_BENCH_SHUFFLE` | off | `1` Fisher–Yates the backend order (seed via `SLIPSTREAM_BENCH_SHUFFLE_SEED` or clock) |
 
 `SLIPSTREAM_BACKENDS` is **not** read by this harness — exporting it
 silently runs every enabled backend in one process. Gate one backend per
