@@ -246,13 +246,12 @@ impl PedraDbReader {
         let keys: Vec<&str> = keys.into_iter().collect();
         let pairs: Vec<(&rocksdb_compat::ColumnFamily, &str)> =
             keys.iter().map(|k| (&self.cf_data, *k)).collect();
-        let raws = self
-            .db
-            .multi_get_cf_bytes(pairs)
-            .map_err(map_pedradb)?;
+        // rocksdb-compat returns Vec<Result<Option<Bytes>>> (per-key Result),
+        // matching rust-rocksdb MultiGet — not a single outer Result.
+        let raws = self.db.multi_get_cf_bytes(pairs);
         keys.iter()
             .zip(raws)
-            .map(|(k, r)| match r {
+            .map(|(k, r)| match r.map_err(map_pedradb)? {
                 Some(raw) => Ok(Some(decode_entry(k, &raw)?)),
                 None => Ok(None),
             })
