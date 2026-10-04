@@ -420,7 +420,22 @@ pub fn parse_current_pointer(text: &str) -> Result<(String, Option<u32>)> {
 ///
 /// # Errors
 /// I/O while writing.
+/// MANIFEST rewrites (file + CURRENT swap) since the last reset.
+static MANIFEST_STORES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// MANIFEST rewrite count since the last reset.
+#[must_use]
+pub fn manifest_stores_count() -> u64 {
+    MANIFEST_STORES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Reset the MANIFEST rewrite counter.
+pub fn reset_manifest_stores_count() {
+    MANIFEST_STORES.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn store<E: Env>(env: &E, dir: &Path, vs: &VersionSet, sync: bool) -> Result<()> {
+    MANIFEST_STORES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let man_name = format!("{MANIFEST_PREFIX}{:06}", vs.manifest_file_num);
     let man_tmp = dir.join(format!("{man_name}.tmp"));
     let man_final = dir.join(&man_name);

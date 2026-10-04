@@ -30,6 +30,8 @@ pub enum DomainBoundsError {
     },
     /// Denominador zero em cálculo de proporção/taxa.
     ZeroDenominator,
+    /// Injeção do delimitador de namespace ("::") em identificador de tenant é proibida.
+    DelimiterInTenantId,
     /// Overflow aritmético em cálculo de taxa/proporção.
     ArithmeticOverflow,
 }
@@ -45,6 +47,7 @@ impl std::fmt::Display for DomainBoundsError {
             Self::ZeroSequenceForbidden => write!(f, "Sequence number 0 is structurally forbidden (must be >= 1)"),
             Self::EmptyTenantIdForbidden => write!(f, "Tenant ID cannot be empty"),
             Self::NullByteInTenantId { position } => write!(f, "Tenant ID contains illegal null byte at offset {position}"),
+            Self::DelimiterInTenantId => write!(f, "Tenant ID cannot contain namespace delimiter '::'"),
             Self::ZeroDenominator => write!(f, "Ratio denominator cannot be zero"),
             Self::ArithmeticOverflow => write!(f, "Arithmetic overflow during domain bound calculation"),
         }
@@ -249,7 +252,7 @@ impl DomainSequence {
 pub struct ValidTenantId(String);
 
 impl ValidTenantId {
-    /// Constrói um `ValidTenantId`, rejeitando strings vazias e bytes nulos.
+    /// Constrói um `ValidTenantId`, rejeitando strings vazias, bytes nulos e injeção do delimitador "::".
     pub fn try_new(id: impl Into<String>) -> Result<Self, DomainBoundsError> {
         let s = id.into();
         if s.is_empty() {
@@ -257,6 +260,9 @@ impl ValidTenantId {
         }
         if let Some(pos) = s.bytes().position(|b| b == 0) {
             return Err(DomainBoundsError::NullByteInTenantId { position: pos });
+        }
+        if s.contains("::") {
+            return Err(DomainBoundsError::DelimiterInTenantId);
         }
         Ok(Self(s))
     }
@@ -290,6 +296,25 @@ impl ValidTenantId {
     pub fn owns_physical_key(&self, key: &[u8]) -> bool {
         let prefix = self.canonical_prefix();
         key.starts_with(&prefix)
+    }
+}
+
+/// Identificador de arquivo SSTable estritamente positivo (>= 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DomainFileId(NonZeroU64);
+
+impl DomainFileId {
+    /// Tenta construir um `DomainFileId`, rejeitando 0.
+    pub fn try_new(val: u64) -> Result<Self, DomainBoundsError> {
+        NonZeroU64::new(val)
+            .map(Self)
+            .ok_or(DomainBoundsError::ZeroSequenceForbidden)
+    }
+
+    /// Retorna o valor numérico em `u64`.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0.get()
     }
 }
 
@@ -417,5 +442,26 @@ mod tests {
 
         let scaled = p.apply_to(100_000).expect("valid");
         assert_eq!(scaled, 50_000);
+    }
+
+    #[test]
+    fn test_domain_bounds_structural_invariants_red_to_green() {
+        // 1. Delimiter injection in Tenant ID rejected
+        assert_eq!(
+            ValidTenantId::try_new("tenant::evil"),
+            Err(DomainBoundsError::DelimiterInTenantId)
+        );
+        assert_eq!(
+            ValidTenantId::try_new("a::b::c"),
+            Err(DomainBoundsError::DelimiterInTenantId)
+        );
+
+        // 2. DomainFileId rejects 0
+        assert_eq!(
+            DomainFileId::try_new(0),
+            Err(DomainBoundsError::ZeroSequenceForbidden)
+        );
+        let fid = DomainFileId::try_new(42).unwrap();
+        assert_eq!(fid.get(), 42);
     }
 }

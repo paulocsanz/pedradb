@@ -24,6 +24,8 @@ pub enum IoScheduleError {
     DeficitExceeded { requested: u32, available: i64 },
     /// Throttle percentage must be between 0 and 100.
     InvalidThrottlePercentage(u32),
+    /// Requested I/O bytes must be strictly greater than zero.
+    ZeroRequestBytes,
 }
 
 impl core::fmt::Display for IoScheduleError {
@@ -34,9 +36,12 @@ impl core::fmt::Display for IoScheduleError {
                 write!(f, "I/O request {} bytes exceeds available deficit {}", requested, available)
             }
             Self::InvalidThrottlePercentage(p) => write!(f, "Throttle percentage {} must be <= 100", p),
+            Self::ZeroRequestBytes => write!(f, "Requested I/O bytes cannot be zero in DRR scheduling"),
         }
     }
 }
+
+impl std::error::Error for IoScheduleError {}
 
 /// Manages Deficit Round-Robin (DRR) bandwidth budgeting across I/O traffic classes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,6 +88,9 @@ impl CloudIoScheduler {
 
     /// Admits an I/O request, deducting from the class's deficit counter.
     pub fn admit(&mut self, class: IoTrafficClass, bytes: u32) -> Result<(), IoScheduleError> {
+        if bytes == 0 {
+            return Err(IoScheduleError::ZeroRequestBytes);
+        }
         let idx = class as usize;
         let req = bytes as i64;
         if self.deficit_bytes[idx] < req {
@@ -144,3 +152,46 @@ impl CloudIoScheduler {
         self.quantum_bytes.iter().all(|&q| q > 0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cloud_multitenant_fair_io_structural_invariants_red_to_green() {
+        // Invariant 1: Zero quantum rejected fail-closed
+        assert_eq!(
+            CloudIoScheduler::new(0, 1024, 1024),
+            Err(IoScheduleError::ZeroQuantum)
+        );
+
+        let mut scheduler = CloudIoScheduler::new(4096, 4096, 4096).unwrap();
+
+        // Invariant 2: Zero-byte admission rejected
+        assert_eq!(
+            scheduler.admit(IoTrafficClass::InteractiveRead, 0),
+            Err(IoScheduleError::ZeroRequestBytes)
+        );
+
+        // Invariant 3: Deficit exceeded rejected
+        assert_eq!(
+            scheduler.admit(IoTrafficClass::InteractiveRead, 5000),
+            Err(IoScheduleError::DeficitExceeded {
+                requested: 5000,
+                available: 4096
+            })
+        );
+
+        // Invariant 4: Normal admission succeeds and updates admitted bytes
+        assert!(scheduler.admit(IoTrafficClass::InteractiveRead, 2048).is_ok());
+        assert_eq!(scheduler.total_bytes_admitted(IoTrafficClass::InteractiveRead), 2048);
+        assert_eq!(scheduler.current_deficit(IoTrafficClass::InteractiveRead), 2048);
+
+        // Invariant 5: Invalid throttle percentage (> 100) rejected
+        assert_eq!(
+            scheduler.throttle_compaction(101),
+            Err(IoScheduleError::InvalidThrottlePercentage(101))
+        );
+    }
+}
+

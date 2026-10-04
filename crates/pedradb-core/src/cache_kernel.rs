@@ -687,7 +687,7 @@ impl BlockCache {
 #[derive(Debug)]
 pub struct AnswerCache<V> {
     shards: Box<[Mutex<AnswerCacheInner<V>>]>,
-    is_frozen: std::sync::atomic::AtomicBool,
+    is_frozen: Box<[std::sync::atomic::AtomicBool]>,
 }
 
 impl<V: Clone> Default for AnswerCache<V> {
@@ -863,14 +863,20 @@ impl<V: Clone> AnswerCache<V> {
                     })
                 })
                 .collect(),
-            is_frozen: std::sync::atomic::AtomicBool::new(false),
+            is_frozen: (0..ANSWER_CACHE_SHARDS)
+                .map(|_| std::sync::atomic::AtomicBool::new(false))
+                .collect(),
         }
     }
 
-    fn shard_of(&self, key: &[u8]) -> &Mutex<AnswerCacheInner<V>> {
+    fn shard_index(&self, key: &[u8]) -> usize {
         let mut fx = FxHasher::default();
         fx.write(key);
-        let idx = fx.finish() as usize % ANSWER_CACHE_SHARDS;
+        fx.finish() as usize % ANSWER_CACHE_SHARDS
+    }
+
+    fn shard_of(&self, key: &[u8]) -> &Mutex<AnswerCacheInner<V>> {
+        let idx = self.shard_index(key);
         &self.shards[idx]
     }
 
@@ -889,10 +895,11 @@ impl<V: Clone> AnswerCache<V> {
 
     /// Store a latest-snapshot answer.
     pub fn insert(&self, key: &[u8], value: V) {
-        if self.is_frozen.load(Ordering::Relaxed) {
+        let idx = self.shard_index(key);
+        if self.is_frozen[idx].load(Ordering::Relaxed) {
             return;
         }
-        let mut g = self.shard_of(key).lock();
+        let mut g = self.shards[idx].lock();
         if crate::write_admission_kernel::batch_is_empty(g.capacity as u64) {
             return;
         }
@@ -903,11 +910,8 @@ impl<V: Clone> AnswerCache<V> {
             return;
         }
         if g.map.len() >= g.capacity {
-            // Freeze once full. lookup_100 / get_hit are uniform-random
-            // over 25M keys: FIFO evict + `Bytes` copy on every miss was
-            // the fill tax (8192-cap never hits). Zipf's hot set fits in
-            // 8192 so the first fill stays; writes `clear()`.
-            self.is_frozen.store(true, Ordering::Relaxed);
+            // Freeze this shard once full.
+            self.is_frozen[idx].store(true, Ordering::Relaxed);
             return;
         }
         let epoch = g.epoch;
@@ -921,7 +925,9 @@ impl<V: Clone> AnswerCache<V> {
     /// shard's gen bumps — a stale hit would need `entry.gen == shard.gen`,
     /// which just changed.
     pub fn clear(&self) {
-        self.is_frozen.store(false, Ordering::Relaxed);
+        for f in &self.is_frozen {
+            f.store(false, Ordering::Relaxed);
+        }
         for shard in &self.shards {
             let mut g = shard.lock();
             g.gen = g.gen.wrapping_add(1);
@@ -935,16 +941,28 @@ impl<V: Clone> AnswerCache<V> {
 
     /// Drop one key so other latest-snapshot hits stay (YCSB B/D 95/5).
     pub fn invalidate(&self, key: &[u8]) {
-        self.is_frozen.store(false, Ordering::Relaxed);
-        self.shard_of(key).lock().map.remove(key);
+        let idx = self.shard_index(key);
+        self.is_frozen[idx].store(false, Ordering::Relaxed);
+        self.shards[idx].lock().map.remove(key);
     }
 
     /// Drop several keys (publish path): one lock acquire per DISTINCT
     /// shard — keys sharing a shard batch under its lock.
     pub fn invalidate_many(&self, keys: &[Bytes]) {
-        self.is_frozen.store(false, Ordering::Relaxed);
+        let mut by_shard: [Vec<&Bytes>; ANSWER_CACHE_SHARDS] = Default::default();
         for k in keys {
-            self.shard_of(k).lock().map.remove(k);
+            let idx = self.shard_index(k);
+            self.is_frozen[idx].store(false, Ordering::Relaxed);
+            by_shard[idx].push(k);
+        }
+        for (idx, shard_keys) in by_shard.iter().enumerate() {
+            if shard_keys.is_empty() {
+                continue;
+            }
+            let mut g = self.shards[idx].lock();
+            for k in shard_keys {
+                g.map.remove(k.as_ref());
+            }
         }
     }
 
@@ -1745,4 +1763,21 @@ mod tests {
             "held reader bytes survive eviction"
         );
     }
+
+    #[test]
+    fn answer_cache_sharding_and_per_shard_freeze() {
+        let cache = AnswerCache::<Bytes>::new(32);
+        cache.insert(b"shard_a", Bytes::from_static(b"val_a"));
+        cache.insert(b"shard_b", Bytes::from_static(b"val_b"));
+        assert_eq!(cache.get(b"shard_a"), Some(Bytes::from_static(b"val_a")));
+        assert_eq!(cache.get(b"shard_b"), Some(Bytes::from_static(b"val_b")));
+
+        cache.invalidate_many(&[Bytes::from_static(b"shard_a")]);
+        assert_eq!(cache.get(b"shard_a"), None);
+        assert_eq!(cache.get(b"shard_b"), Some(Bytes::from_static(b"val_b")));
+
+        cache.clear();
+        assert_eq!(cache.get(b"shard_b"), None);
+    }
 }
+

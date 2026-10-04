@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeSet;
+use std::fmt;
 
 /// Error conditions representing violations of Bloom filter soundness invariants.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,7 +40,49 @@ pub enum BloomSoundnessViolation {
         /// Index of the cleared bit.
         bit_index: u64,
     },
+    /// Bit capacity cannot be zero.
+    ZeroBitsCapacity,
+    /// Declared bit capacity exceeds safe architectural limit.
+    ExcessiveBitsCapacity {
+        bits: u32,
+        max_allowed: u32,
+    },
 }
+
+impl fmt::Display for BloomSoundnessViolation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::FalseNegativeDetected { key, missing_bit_index } => {
+                write!(
+                    f,
+                    "False negative detected for key {:?}: probe bit {} was clear",
+                    key, missing_bit_index
+                )
+            }
+            Self::InvalidProbeCount { k, max_allowed } => {
+                write!(f, "Invalid probe count: {k} (max allowed {max_allowed})")
+            }
+            Self::BitVectorTruncation { declared_bits, actual_bytes } => {
+                write!(
+                    f,
+                    "Bit vector truncation: declared {declared_bits} bits, but only {actual_bytes} bytes provided"
+                )
+            }
+            Self::MonotonicityViolation { bit_index } => {
+                write!(f, "Monotonicity violation: bit {bit_index} was cleared")
+            }
+            Self::ZeroBitsCapacity => write!(f, "Bit capacity must be strictly positive (> 0)"),
+            Self::ExcessiveBitsCapacity { bits, max_allowed } => {
+                write!(
+                    f,
+                    "Excessive bit capacity: {bits} bits exceeds maximum limit {max_allowed}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for BloomSoundnessViolation {}
 
 /// Computes a standard 64-bit pair of hashes for Kirsch-Mitzenmacher double-hashing.
 #[must_use]
@@ -83,6 +126,16 @@ pub struct VerifiedBloomBitset {
 impl VerifiedBloomBitset {
     /// Creates a new verified bitset with bounded parameters.
     pub fn new(nbits: u32, k: u32) -> Result<Self, BloomSoundnessViolation> {
+        if nbits == 0 {
+            return Err(BloomSoundnessViolation::ZeroBitsCapacity);
+        }
+        const MAX_BITS: u32 = 1 << 30; // 1 Gi-bits = 128 MiB
+        if nbits > MAX_BITS {
+            return Err(BloomSoundnessViolation::ExcessiveBitsCapacity {
+                bits: nbits,
+                max_allowed: MAX_BITS,
+            });
+        }
         const MAX_K: u32 = 30;
         if k == 0 || k > MAX_K {
             return Err(BloomSoundnessViolation::InvalidProbeCount {
@@ -115,7 +168,7 @@ impl VerifiedBloomBitset {
     #[must_use]
     pub fn test_bit(&self, idx: u64) -> bool {
         if self.nbits == 0 {
-            return true;
+            return false;
         }
         let bit = idx % u64::from(self.nbits);
         let byte_idx = (bit / 8) as usize;
@@ -218,3 +271,50 @@ impl BloomSoundnessOracle {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bloom_soundness_structural_invariants_red_to_green() {
+        // Invariant 1: nbits == 0 rejected fail-closed with ZeroBitsCapacity
+        assert_eq!(
+            VerifiedBloomBitset::new(0, 5),
+            Err(BloomSoundnessViolation::ZeroBitsCapacity)
+        );
+
+        // Invariant 2: Excessive bits capacity (> 1 << 30) rejected
+        assert_eq!(
+            VerifiedBloomBitset::new((1 << 30) + 1, 5),
+            Err(BloomSoundnessViolation::ExcessiveBitsCapacity {
+                bits: (1 << 30) + 1,
+                max_allowed: 1 << 30,
+            })
+        );
+
+        // Invariant 3: Invalid probe counts (k == 0 or k > 30) rejected
+        assert_eq!(
+            VerifiedBloomBitset::new(1024, 0),
+            Err(BloomSoundnessViolation::InvalidProbeCount {
+                k: 0,
+                max_allowed: 30,
+            })
+        );
+        assert_eq!(
+            VerifiedBloomBitset::new(1024, 31),
+            Err(BloomSoundnessViolation::InvalidProbeCount {
+                k: 31,
+                max_allowed: 30,
+            })
+        );
+
+        // Invariant 4: Zero false negative guarantee holds for valid inserted keys
+        let mut bitset = VerifiedBloomBitset::new(1024, 4).unwrap();
+        let key = b"invariant_test_key";
+        bitset.insert_key(key);
+        assert!(bitset.may_contain(key));
+        assert!(BloomSoundnessOracle::verify_zero_false_negatives(&bitset, &[key.to_vec()]).is_ok());
+    }
+}
+

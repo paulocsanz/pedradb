@@ -138,6 +138,7 @@ its reads one run (3 Sep); 100M is three runs (5 Sep).
 |---|---:|---:|---:|---:|
 | Load | **1.82×** | **1.03×** | 1.02× | **1.27×** |
 | Settle | **2.50×** | **7.67×** | **27×** | **81×** |
+| Total ingest (load + settle) | **1.85×** | **1.13×** | 1.03× | **1.73×** |
 | Point read | **1.44×** | tie | **1.14×** | **1.07×** |
 | Prefix scan | **1.64×** | **1.31×** | **1.34×** | **1.05×** |
 | 100-key read | **1.36×** | **1.07×** | — ¹ | **1.14×** |
@@ -145,8 +146,12 @@ its reads one run (3 Sep); 100M is three runs (5 Sep).
 | Absent-key probe (p50) | — ² | — ² | — ² | **2.71×** |
 
 25M load is parity inside ±3 s of host noise. 10M point read: the
-intervals overlap. At 100M the absent-key probe is 211 ns vs 571 ns
-(p99: 231–311 ns vs 842 ns–2.4 µs).
+intervals overlap. Total ingest combines the load loop and post-load
+flush + compaction drain (Settle): at 100M keys, PedraDB finishes the
+entire ingest in **120.1s vs 207.8s (1.73×)** because its bulk writer
+builds settled levels during ingest, while RocksDB defers compactions
+to background threads and drains them during settle (56.5s). At 100M the
+absent-key probe is 211 ns vs 571 ns (p99: 231–311 ns vs 842 ns–2.4 µs).
 
 ¹ Refused: Rocks measured outside its own band on every attempt.
 ² The 2 Sep values predate the per-column-family envelope fix — 10M was
@@ -164,11 +169,12 @@ peer (same binary, both sides buffering the measured window, 21 Sep).
 | Overwrite, 25M keys | Rocks | **1.32×** | 1.06× | 2 of 3 ³ |
 | Batched writes | Rocks | **1.23×** | 1.19× | 3/3 |
 | Read-heavy mix, 95% reads | Rocks | **1.13×** | 1.00× | 3/3 |
-| Missing-key lookup, 100M keys | Rocks | **17.6×** | 14.4× | 2 of 3 ³ |
+| Missing-key lookup, 100M keys | Rocks | **17.6×** ⁴ | 14.4× | 2 of 3 ³ |
 | Random read/write, 1M keys | fjall | **1.03×** | 1.02× | 3/3 |
 | Scan, 1,024 keys | fjall | **1.09×** | 0.996× | 3/3 |
 
 ³ One round discarded: the Rocks canary sat under that wave's floor.
+⁴ Feature delta: RocksDB `Options::default()` has no Bloom filter configured. With a matching 10 bits/key Bloom filter configured in RocksDB (`ROCKS_PARITY_ROCKS_BLOOM=10`), this missing-key probe cell operates at parity (~1.0×).
 
 ### Named losses
 

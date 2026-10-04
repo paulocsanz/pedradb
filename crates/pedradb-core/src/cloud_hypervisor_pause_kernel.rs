@@ -29,6 +29,8 @@ impl core::fmt::Display for HypervisorPauseError {
     }
 }
 
+impl std::error::Error for HypervisorPauseError {}
+
 /// Outcome of a scheduler step observation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PauseObservation {
@@ -126,4 +128,50 @@ impl HypervisorPauseDetector {
     pub fn verify_internal_invariants(&self) -> bool {
         self.max_tolerated_pause_ns > 0
     }
+
+    /// Autonomically clears quarantine status after a sustained sequence of healthy scheduler ticks.
+    pub fn clear_quarantine_after_healthy_ticks(&mut self, healthy_ticks: u64, min_required: u64) -> bool {
+        if self.is_quarantined && min_required > 0 && healthy_ticks >= min_required {
+            self.is_quarantined = false;
+            true
+        } else {
+            false
+        }
+    }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cloud_hypervisor_pause_structural_invariants_red_to_green() {
+        // Invariant 1: Zero tolerance threshold rejected fail-closed
+        assert_eq!(
+            HypervisorPauseDetector::new(100, 0),
+            Err(HypervisorPauseError::ZeroTolerance)
+        );
+
+        // Invariant 2: Monotonic clock regression rejected
+        let mut detector = HypervisorPauseDetector::new(1_000_000, 50_000_000).unwrap();
+        assert_eq!(
+            detector.observe_step(500_000, 1),
+            Err(HypervisorPauseError::MonotonicClockRegression {
+                last_ts_ns: 1_000_000,
+                attempted_ts_ns: 500_000,
+            })
+        );
+
+        // Invariant 3: Autonomic quarantine on preemption jump
+        let pause = detector.observe_step(100_000_000, 0).unwrap();
+        assert!(matches!(pause, PauseObservation::HypervisorPauseDetected { .. }));
+        assert!(detector.is_quarantined());
+
+        // Invariant 4: Autonomic self-reconciliation after sufficient healthy ticks
+        assert!(!detector.clear_quarantine_after_healthy_ticks(5, 10)); // insufficient
+        assert!(detector.is_quarantined());
+        assert!(detector.clear_quarantine_after_healthy_ticks(10, 10)); // sufficient
+        assert!(!detector.is_quarantined());
+    }
+}
+

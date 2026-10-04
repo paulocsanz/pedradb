@@ -328,8 +328,21 @@ def main() -> int:
             print(f"HYGIENE FAIL: {rel} links removed sibling doc: {m.group(0)}")
             bad = True
 
+    # Benchmark & Verification disclosure honesty invariants
+    readme_path = ROOT / "scripts/public_assets/README.md"
+    if not readme_path.is_file():
+        readme_path = ROOT / "README.md"
+    if readme_path.is_file():
+        txt = readme_path.read_text(encoding="utf-8")
+        if "17.6×" in txt and not ("no bloom filter" in txt.lower() and ("parity" in txt.lower() or "~1.0" in txt)):
+            print("HYGIENE FAIL: README missing-key 17.6x win must disclose bloomless peer")
+            bad = True
+        if "81×" in txt and not ("1.73×" in txt or "total ingest" in txt.lower()):
+            print("HYGIENE FAIL: README 81x settle win must disclose composite total ingest (1.73x)")
+            bad = True
+
     if not bad:
-        print("hygiene: clean (no internal scaffolding, no dangling internal links)")
+        print("hygiene: clean (no internal scaffolding, no dangling internal links, disclosures honest)")
     return 1 if bad else 0
 
 

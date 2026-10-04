@@ -51,6 +51,8 @@ pub enum SuperblockError {
     ZeroEpoch,
     /// Reserved superblock bytes (40..60) must be zero.
     ReservedBytesNonZero,
+    /// Byte slice does not match required 64-byte superblock size.
+    SliceLengthMismatch { expected: usize, actual: usize },
 }
 
 impl fmt::Display for SuperblockError {
@@ -68,6 +70,9 @@ impl fmt::Display for SuperblockError {
             Self::NilUuid => write!(f, "File UUID cannot be all zeroes"),
             Self::ZeroEpoch => write!(f, "File creation epoch cannot be zero"),
             Self::ReservedBytesNonZero => write!(f, "Reserved superblock bytes must be zero"),
+            Self::SliceLengthMismatch { expected, actual } => {
+                write!(f, "Superblock slice length mismatch: expected {expected} bytes, got {actual}")
+            }
         }
     }
 }
@@ -206,4 +211,61 @@ impl FileSuperblock {
         }
         Ok(())
     }
+
+    /// Deserializes and validates checksum and fields of a byte slice.
+    pub fn try_decode_slice(bytes: &[u8]) -> Result<Self, SuperblockError> {
+        if bytes.len() != SUPERBLOCK_SIZE {
+            return Err(SuperblockError::SliceLengthMismatch {
+                expected: SUPERBLOCK_SIZE,
+                actual: bytes.len(),
+            });
+        }
+        let mut arr = [0u8; SUPERBLOCK_SIZE];
+        arr.copy_from_slice(bytes);
+        Self::decode(&arr)
+    }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_file_identity_superblock_structural_invariants_red_to_green() {
+        let uuid = [7u8; 16];
+        let sb = FileSuperblock::try_new(uuid, 100, 1).unwrap();
+        let encoded = sb.encode();
+
+        // 1. Slice length mismatch cleanly rejected
+        assert_eq!(
+            FileSuperblock::try_decode_slice(&encoded[..63]),
+            Err(SuperblockError::SliceLengthMismatch {
+                expected: 64,
+                actual: 63,
+            })
+        );
+        assert_eq!(
+            FileSuperblock::try_decode_slice(&[0u8; 100]),
+            Err(SuperblockError::SliceLengthMismatch {
+                expected: 64,
+                actual: 100,
+            })
+        );
+
+        // 2. Valid decode matches original
+        let decoded = FileSuperblock::try_decode_slice(&encoded).unwrap();
+        assert_eq!(decoded.file_number, 100);
+        assert_eq!(decoded.file_uuid, uuid);
+        assert_eq!(decoded.verify_handshake(100, uuid), Ok(()));
+
+        // 3. Handshake mismatches
+        assert_eq!(
+            decoded.verify_handshake(101, uuid),
+            Err(SuperblockError::FileNumberMismatch {
+                expected: 101,
+                actual: 100,
+            })
+        );
+    }
+}
+

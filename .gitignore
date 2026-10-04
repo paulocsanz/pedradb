@@ -40,3 +40,4 @@ progress-*.jsonl
 
 # scale-ladder campaign output (tarballed and handed back, never committed)
 bench-results/
+/target-powerloss/

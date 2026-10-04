@@ -28,6 +28,10 @@ pub enum HardwareLiarViolation {
         expected_crc: u32,
         found_crc: u32,
     },
+    /// Epoch 0 is reserved and invalid for durability barrier.
+    ZeroEpochHazard,
+    /// Nil nonce (all zeroes) provides zero entropy.
+    NilNonceHazard,
 }
 
 impl fmt::Display for HardwareLiarViolation {
@@ -52,6 +56,8 @@ impl fmt::Display for HardwareLiarViolation {
                     "Canary block corrupted at epoch {epoch}: expected CRC 0x{expected_crc:08x}, found 0x{found_crc:08x}"
                 )
             }
+            Self::ZeroEpochHazard => write!(f, "Hardware canary epoch cannot be 0"),
+            Self::NilNonceHazard => write!(f, "Hardware canary nonce cannot be nil (all zeros)"),
         }
     }
 }
@@ -67,6 +73,17 @@ pub struct HardwareCanaryEntry {
 }
 
 impl HardwareCanaryEntry {
+    /// Safely creates a new canary entry, rejecting epoch 0 and nil nonce.
+    pub fn try_new(epoch: u64, nonce: [u8; 16]) -> Result<Self, HardwareLiarViolation> {
+        if epoch == 0 {
+            return Err(HardwareLiarViolation::ZeroEpochHazard);
+        }
+        if nonce == [0u8; 16] {
+            return Err(HardwareLiarViolation::NilNonceHazard);
+        }
+        Ok(Self::new(epoch, nonce))
+    }
+
     /// Creates a new canary entry and computes its CRC.
     #[must_use]
     pub fn new(epoch: u64, nonce: [u8; 16]) -> Self {
@@ -106,12 +123,31 @@ impl HardwareLiarResilienceJudge {
         }
     }
 
-    /// Records that an epoch barrier with the given nonce was successfully fsynced.
-    pub fn register_fsynced_barrier(&mut self, canary: HardwareCanaryEntry) {
+    /// Validates and records that an epoch barrier with the given nonce was successfully fsynced.
+    pub fn try_register_fsynced_barrier(&mut self, canary: HardwareCanaryEntry) -> Result<(), HardwareLiarViolation> {
+        if canary.epoch == 0 {
+            return Err(HardwareLiarViolation::ZeroEpochHazard);
+        }
+        if canary.nonce == [0u8; 16] {
+            return Err(HardwareLiarViolation::NilNonceHazard);
+        }
+        if !canary.verify_checksum() {
+            return Err(HardwareLiarViolation::CorruptedCanaryBlock {
+                epoch: canary.epoch,
+                expected_crc: HardwareCanaryEntry::new(canary.epoch, canary.nonce).checksum,
+                found_crc: canary.checksum,
+            });
+        }
         if canary.epoch >= self.last_fsynced_epoch {
             self.last_fsynced_epoch = canary.epoch;
             self.last_fsynced_nonce = canary.nonce;
         }
+        Ok(())
+    }
+
+    /// Records that an epoch barrier with the given nonce was successfully fsynced.
+    pub fn register_fsynced_barrier(&mut self, canary: HardwareCanaryEntry) {
+        let _ = self.try_register_fsynced_barrier(canary);
     }
 
     /// Verifies that a recovered record's dependency matches the physical canary on disk.
@@ -157,3 +193,43 @@ impl HardwareLiarResilienceJudge {
         self.last_fsynced_epoch
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hardware_liar_resilience_structural_invariants_red_to_green() {
+        // 1. Zero epoch rejected
+        assert_eq!(
+            HardwareCanaryEntry::try_new(0, [1u8; 16]),
+            Err(HardwareLiarViolation::ZeroEpochHazard)
+        );
+
+        // 2. Nil nonce rejected
+        assert_eq!(
+            HardwareCanaryEntry::try_new(1, [0u8; 16]),
+            Err(HardwareLiarViolation::NilNonceHazard)
+        );
+
+        // 3. Valid canary entry
+        let canary = HardwareCanaryEntry::try_new(5, [9u8; 16]).unwrap();
+        assert!(canary.verify_checksum());
+
+        // 4. Judge registers barrier and detects fsync lie
+        let mut judge = HardwareLiarResilienceJudge::new();
+        assert_eq!(judge.try_register_fsynced_barrier(canary), Ok(()));
+        assert_eq!(judge.last_fsynced_epoch(), 5);
+
+        // Physical canary has epoch 4, but recovered record claims epoch 5 -> Fsync lie!
+        let stale_canary = HardwareCanaryEntry::try_new(4, [8u8; 16]).unwrap();
+        assert_eq!(
+            judge.verify_post_crash_canary(&stale_canary, 5),
+            Err(HardwareLiarViolation::FsyncLieDetected {
+                claimed_epoch: 5,
+                physical_canary_epoch: 4,
+            })
+        );
+    }
+}
+

@@ -36,6 +36,7 @@ pub enum ContinuityError {
     SequenceGapDetected { expected: u64, got: u64 },
     SnapshotOutdated { current_seq: u64, snapshot_seq: u64 },
     CorruptSnapshotSequence,
+    EmptyKeyInSnapshot,
     EmptyKeyInDelta { sequence: u64 },
     InvalidDeltaSequence { sequence: u64 },
     SequenceOverflow,
@@ -52,6 +53,9 @@ impl fmt::Display for ContinuityError {
             }
             Self::CorruptSnapshotSequence => {
                 write!(f, "Corrupted snapshot sequence 0 on non-empty dataset")
+            }
+            Self::EmptyKeyInSnapshot => {
+                write!(f, "Empty key in snapshot is structurally forbidden")
             }
             Self::EmptyKeyInDelta { sequence } => {
                 write!(f, "Empty key in delta at sequence {sequence}")
@@ -78,6 +82,11 @@ impl FederatedFoldState {
         let entries_vec: Vec<(Bytes, Bytes)> = data.into_iter().collect();
         if snapshot_seq == 0 && (!entries_vec.is_empty() || !self.entries.is_empty()) {
             return Err(ContinuityError::CorruptSnapshotSequence);
+        }
+        for (k, _) in &entries_vec {
+            if k.is_empty() {
+                return Err(ContinuityError::EmptyKeyInSnapshot);
+            }
         }
         // Snapshots mais antigos que o estado atual são rejeitados fail-closed
         if snapshot_seq < self.last_sequence {
@@ -158,3 +167,57 @@ pub fn apply_deltas_as_is_ignore_gaps(state: &mut FederatedFoldState, deltas: &[
         state.last_sequence = state.last_sequence.max(delta.sequence);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_federated_cursor_continuity_structural_invariants_red_to_green() {
+        let mut state = FederatedFoldState::default();
+
+        // 1. Empty key in snapshot rejected
+        let bad_snap = vec![(Bytes::new(), Bytes::from_static(b"val"))];
+        assert_eq!(
+            state.apply_atomic_snapshot(1, bad_snap),
+            Err(ContinuityError::EmptyKeyInSnapshot)
+        );
+
+        // 2. Corrupt snapshot sequence 0 on non-empty dataset
+        let non_empty = vec![(Bytes::from_static(b"key1"), Bytes::from_static(b"val1"))];
+        assert_eq!(
+            state.apply_atomic_snapshot(0, non_empty.clone()),
+            Err(ContinuityError::CorruptSnapshotSequence)
+        );
+
+        // 3. Valid snapshot works
+        assert_eq!(state.apply_atomic_snapshot(10, non_empty), Ok(()));
+        assert_eq!(state.last_sequence, 10);
+
+        // 4. Stale snapshot rejected
+        assert_eq!(
+            state.apply_atomic_snapshot(5, vec![]),
+            Err(ContinuityError::SnapshotOutdated {
+                current_seq: 10,
+                snapshot_seq: 5,
+            })
+        );
+
+        // 5. Delta sequence gap rejected
+        let gap_deltas = vec![SequencedDelta {
+            sequence: 12, // expected 11
+            op: DeltaOp::Put {
+                key: Bytes::from_static(b"key2"),
+                value: Bytes::from_static(b"val2"),
+            },
+        }];
+        assert_eq!(
+            state.apply_deltas(&gap_deltas),
+            Err(ContinuityError::SequenceGapDetected {
+                expected: 11,
+                got: 12,
+            })
+        );
+    }
+}
+

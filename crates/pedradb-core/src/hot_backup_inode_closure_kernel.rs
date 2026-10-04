@@ -37,6 +37,17 @@ pub enum BackupIncompletenessViolation {
         /// ID inválido.
         file_id: u64,
     },
+    /// Sequência do MANIFEST é zero ou inválida.
+    ZeroManifestSequence,
+    /// Ponteiro CURRENT está vazio ou ausente.
+    MissingCurrentPointer,
+    /// Ponteiro CURRENT aponta para um MANIFEST divergente da versão do backup.
+    DivergentCurrentPointer {
+        /// Nome esperado do MANIFEST.
+        expected: String,
+        /// Alvo apontado pelo CURRENT.
+        target: String,
+    },
 }
 
 impl fmt::Display for BackupIncompletenessViolation {
@@ -60,6 +71,18 @@ impl fmt::Display for BackupIncompletenessViolation {
             Self::InvalidReferencedSstId { file_id } => {
                 write!(f, "Invalid referenced SST file ID {file_id} (must be non-zero)")
             }
+            Self::ZeroManifestSequence => {
+                write!(f, "Invalid MANIFEST sequence number 0 (must be > 0)")
+            }
+            Self::MissingCurrentPointer => {
+                write!(f, "Missing or empty CURRENT pointer in backup")
+            }
+            Self::DivergentCurrentPointer { expected, target } => {
+                write!(
+                    f,
+                    "Divergent CURRENT pointer: expected {expected}, but CURRENT points to {target}"
+                )
+            }
         }
     }
 }
@@ -67,12 +90,33 @@ impl fmt::Display for BackupIncompletenessViolation {
 impl std::error::Error for BackupIncompletenessViolation {}
 
 /// Descritor do estado do catálogo no momento do congelamento do checkpoint.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManifestSnapshotView {
     /// Versão sequencial do MANIFEST.
     pub manifest_seq: u64,
     /// Conjunto de IDs de arquivos SST ativos referenciados nesta versão.
     pub referenced_sst_ids: HashSet<u64>,
+}
+
+impl ManifestSnapshotView {
+    /// Cria uma nova visão de snapshot de MANIFEST validando integridade estrutural.
+    pub fn try_new(
+        manifest_seq: u64,
+        referenced_sst_ids: HashSet<u64>,
+    ) -> Result<Self, BackupIncompletenessViolation> {
+        if manifest_seq == 0 {
+            return Err(BackupIncompletenessViolation::ZeroManifestSequence);
+        }
+        for &sst_id in &referenced_sst_ids {
+            if sst_id == 0 {
+                return Err(BackupIncompletenessViolation::InvalidReferencedSstId { file_id: 0 });
+            }
+        }
+        Ok(Self {
+            manifest_seq,
+            referenced_sst_ids,
+        })
+    }
 }
 
 /// Descritor do diretório de backup gerado com hard-links físicos.
@@ -115,7 +159,10 @@ impl HotBackupClosureOracle {
         manifest_view: &ManifestSnapshotView,
         backup_state: &BackupDirectoryState,
     ) -> Result<(), BackupIncompletenessViolation> {
-        // 0. Valida sanidade dos IDs de SST referenciados no MANIFEST
+        // 0. Valida sanidade da sequência do MANIFEST e dos IDs de SST referenciados
+        if manifest_view.manifest_seq == 0 {
+            return Err(BackupIncompletenessViolation::ZeroManifestSequence);
+        }
         for &sst_id in &manifest_view.referenced_sst_ids {
             if sst_id == 0 {
                 return Err(BackupIncompletenessViolation::InvalidReferencedSstId { file_id: 0 });
@@ -133,9 +180,7 @@ impl HotBackupClosureOracle {
             .collect();
 
         let has_matching_manifest = manifest_files.iter().any(|f| {
-            **f == expected_manifest_fmt
-                || **f == expected_manifest_plain
-                || (**f == "MANIFEST" && manifest_view.manifest_seq == 0)
+            **f == expected_manifest_fmt || **f == expected_manifest_plain
         });
 
         if !has_matching_manifest {
@@ -147,9 +192,7 @@ impl HotBackupClosureOracle {
             let conflicting = manifest_files
                 .iter()
                 .find(|f| {
-                    ***f != expected_manifest_fmt
-                        && ***f != expected_manifest_plain
-                        && !(***f == "MANIFEST" && manifest_view.manifest_seq == 0)
+                    ***f != expected_manifest_fmt && ***f != expected_manifest_plain
                 })
                 .unwrap_or(&manifest_files[1]);
 
@@ -188,5 +231,110 @@ impl HotBackupClosureOracle {
         }
 
         Ok(())
+    }
+
+    /// Valida que o ponteiro CURRENT do backup aponta exatamente para o MANIFEST canônico desta versão.
+    pub fn verify_current_pointer_alignment(
+        manifest_view: &ManifestSnapshotView,
+        current_target: &str,
+    ) -> Result<(), BackupIncompletenessViolation> {
+        if manifest_view.manifest_seq == 0 {
+            return Err(BackupIncompletenessViolation::ZeroManifestSequence);
+        }
+        let target = current_target.trim();
+        if target.is_empty() {
+            return Err(BackupIncompletenessViolation::MissingCurrentPointer);
+        }
+        let expected_fmt = format!("MANIFEST-{:06}", manifest_view.manifest_seq);
+        let expected_plain = format!("MANIFEST-{}", manifest_view.manifest_seq);
+        if target != expected_fmt && target != expected_plain {
+            return Err(BackupIncompletenessViolation::DivergentCurrentPointer {
+                expected: expected_fmt,
+                target: target.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Valida o fecho topológico completo incluindo o arquivo CURRENT e seu apontador canônico.
+    pub fn verify_complete_backup_with_current(
+        manifest_view: &ManifestSnapshotView,
+        backup_state: &BackupDirectoryState,
+        current_target: &str,
+    ) -> Result<(), BackupIncompletenessViolation> {
+        Self::verify_backup_topological_closure(manifest_view, backup_state)?;
+        if !backup_state.files.contains("CURRENT") {
+            return Err(BackupIncompletenessViolation::MissingCurrentPointer);
+        }
+        Self::verify_current_pointer_alignment(manifest_view, current_target)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hot_backup_inode_closure_structural_invariants_red_to_green() {
+        let mut ssts = HashSet::new();
+        ssts.insert(10);
+        ssts.insert(20);
+
+        // 1. Zero manifest_seq hazard
+        assert_eq!(
+            ManifestSnapshotView::try_new(0, ssts.clone()),
+            Err(BackupIncompletenessViolation::ZeroManifestSequence)
+        );
+
+        let manifest = ManifestSnapshotView::try_new(42, ssts).unwrap();
+
+        // 2. Complete backup setup with CURRENT
+        let mut backup = BackupDirectoryState::default();
+        backup.add_file("MANIFEST-000042");
+        backup.add_file("000010.sst");
+        backup.add_file("000020.sst");
+        backup.add_file("CURRENT");
+
+        // Valid complete backup
+        assert!(HotBackupClosureOracle::verify_complete_backup_with_current(
+            &manifest,
+            &backup,
+            "MANIFEST-000042\n"
+        ).is_ok());
+
+        // 3. Divergent CURRENT pointer
+        let div_err = HotBackupClosureOracle::verify_complete_backup_with_current(
+            &manifest,
+            &backup,
+            "MANIFEST-000099"
+        );
+        assert!(matches!(
+            div_err,
+            Err(BackupIncompletenessViolation::DivergentCurrentPointer { .. })
+        ));
+
+        // 4. Missing CURRENT file
+        let mut no_curr = backup.clone();
+        no_curr.files.remove("CURRENT");
+        let miss_curr = HotBackupClosureOracle::verify_complete_backup_with_current(
+            &manifest,
+            &no_curr,
+            "MANIFEST-000042"
+        );
+        assert_eq!(
+            miss_curr,
+            Err(BackupIncompletenessViolation::MissingCurrentPointer)
+        );
+
+        // 5. Zero manifest_seq in topological closure
+        let zero_view = ManifestSnapshotView {
+            manifest_seq: 0,
+            referenced_sst_ids: HashSet::new(),
+        };
+        assert_eq!(
+            HotBackupClosureOracle::verify_backup_topological_closure(&zero_view, &backup),
+            Err(BackupIncompletenessViolation::ZeroManifestSequence)
+        );
     }
 }

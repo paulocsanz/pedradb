@@ -7,6 +7,47 @@
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+
+/// Erros estruturais no catálogo e deltas do MANIFEST.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManifestCollapseError {
+    /// Número de arquivo 0 é inválido.
+    ZeroFileNumber,
+    /// Nível excede o limite máximo permitido (7).
+    LevelOutOfBounds { level: usize, max: usize },
+    /// Intervalo de chaves invertido (`min_key > max_key`).
+    InvertedKeyRange { min_key: Vec<u8>, max_key: Vec<u8> },
+    /// Número do arquivo igual ou maior que `next_file_number`.
+    FileNumberExceedsNext { file_number: u64, next_file_number: u64 },
+    /// Sobreposição ilegal de chaves entre arquivos no mesmo nível (nível > 0).
+    OverlappingFilesInLevel { level: usize, file1: u64, file2: u64 },
+    /// Nível registrado mas sem arquivos.
+    EmptyLevel(usize),
+}
+
+impl fmt::Display for ManifestCollapseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ZeroFileNumber => write!(f, "File number 0 is invalid (must be > 0)"),
+            Self::LevelOutOfBounds { level, max } => {
+                write!(f, "Level {level} exceeds maximum allowed levels ({max})")
+            }
+            Self::InvertedKeyRange { min_key, max_key } => {
+                write!(f, "Inverted key range: min_key {min_key:?} > max_key {max_key:?}")
+            }
+            Self::FileNumberExceedsNext { file_number, next_file_number } => {
+                write!(f, "File number {file_number} >= next_file_number {next_file_number}")
+            }
+            Self::OverlappingFilesInLevel { level, file1, file2 } => {
+                write!(f, "Overlapping key ranges in level {level} between files #{file1} and #{file2}")
+            }
+            Self::EmptyLevel(lvl) => write!(f, "Catalog level {lvl} is present but contains 0 files"),
+        }
+    }
+}
+
+impl std::error::Error for ManifestCollapseError {}
 
 /// Registro canônico de arquivo no catálogo de níveis.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -15,6 +56,32 @@ pub struct ManifestFileEntry {
     pub file_number: u64,
     pub min_key: Vec<u8>,
     pub max_key: Vec<u8>,
+}
+
+impl ManifestFileEntry {
+    /// Cria e valida uma entrada canônica de arquivo no catálogo de níveis.
+    pub fn try_new(
+        level: usize,
+        file_number: u64,
+        min_key: Vec<u8>,
+        max_key: Vec<u8>,
+    ) -> Result<Self, ManifestCollapseError> {
+        if file_number == 0 {
+            return Err(ManifestCollapseError::ZeroFileNumber);
+        }
+        if level >= 7 {
+            return Err(ManifestCollapseError::LevelOutOfBounds { level, max: 7 });
+        }
+        if min_key > max_key {
+            return Err(ManifestCollapseError::InvertedKeyRange { min_key, max_key });
+        }
+        Ok(Self {
+            level,
+            file_number,
+            min_key,
+            max_key,
+        })
+    }
 }
 
 /// Delta de edição de versão (VersionEdit).
@@ -180,21 +247,39 @@ impl ManifestAlgebraOracle {
 
     /// Comprova que o catálogo de níveis satisfaz invariantes fundamentais de integridade:
     /// 1. Para todo arquivo, min_key <= max_key
-    /// 2. Para todo arquivo, file_number < next_file_number
+    /// 2. Para todo arquivo, file_number > 0 e file_number < next_file_number
     /// 3. Para níveis L > 0, os arquivos não possuem sobreposição de chaves
-    pub fn verify_catalog_consistency(catalog: &ManifestCatalogState) -> bool {
+    /// 4. Todo nível é estritamente < 7
+    pub fn verify_catalog_consistency_checked(
+        catalog: &ManifestCatalogState,
+    ) -> Result<(), ManifestCollapseError> {
         for (&level, files) in &catalog.levels {
+            if level >= 7 {
+                return Err(ManifestCollapseError::LevelOutOfBounds { level, max: 7 });
+            }
             if files.is_empty() {
-                return false;
+                return Err(ManifestCollapseError::EmptyLevel(level));
             }
             let mut entries: Vec<&ManifestFileEntry> = files.values().collect();
-            // Verifica limites e next_file_number
+            // Verifica limites, zero ID e next_file_number
             for entry in &entries {
+                if entry.file_number == 0 {
+                    return Err(ManifestCollapseError::ZeroFileNumber);
+                }
+                if entry.level >= 7 {
+                    return Err(ManifestCollapseError::LevelOutOfBounds { level: entry.level, max: 7 });
+                }
                 if entry.min_key > entry.max_key {
-                    return false;
+                    return Err(ManifestCollapseError::InvertedKeyRange {
+                        min_key: entry.min_key.clone(),
+                        max_key: entry.max_key.clone(),
+                    });
                 }
                 if entry.file_number >= catalog.next_file_number {
-                    return false;
+                    return Err(ManifestCollapseError::FileNumberExceedsNext {
+                        file_number: entry.file_number,
+                        next_file_number: catalog.next_file_number,
+                    });
                 }
             }
 
@@ -203,11 +288,92 @@ impl ManifestAlgebraOracle {
                 entries.sort_by(|a, b| a.min_key.cmp(&b.min_key));
                 for i in 0..entries.len() - 1 {
                     if entries[i].max_key >= entries[i + 1].min_key {
-                        return false;
+                        return Err(ManifestCollapseError::OverlappingFilesInLevel {
+                            level,
+                            file1: entries[i].file_number,
+                            file2: entries[i + 1].file_number,
+                        });
                     }
                 }
             }
         }
-        true
+        Ok(())
+    }
+
+    /// Versão booleana para compatibilidade com oráculos existentes.
+    pub fn verify_catalog_consistency(catalog: &ManifestCatalogState) -> bool {
+        Self::verify_catalog_consistency_checked(catalog).is_ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_manifest_delta_collapse_structural_invariants_red_to_green() {
+        // 1. Zero file number hazard
+        assert_eq!(
+            ManifestFileEntry::try_new(0, 0, b"a".to_vec(), b"b".to_vec()),
+            Err(ManifestCollapseError::ZeroFileNumber)
+        );
+
+        // 2. Level out of bounds hazard (>= 7)
+        assert_eq!(
+            ManifestFileEntry::try_new(7, 1, b"a".to_vec(), b"b".to_vec()),
+            Err(ManifestCollapseError::LevelOutOfBounds { level: 7, max: 7 })
+        );
+
+        // 3. Inverted key range hazard
+        assert_eq!(
+            ManifestFileEntry::try_new(1, 1, b"z".to_vec(), b"a".to_vec()),
+            Err(ManifestCollapseError::InvertedKeyRange {
+                min_key: b"z".to_vec(),
+                max_key: b"a".to_vec(),
+            })
+        );
+
+        // 4. Catalog with zero file_number detected
+        let mut bad_catalog = ManifestCatalogState::empty();
+        bad_catalog.next_file_number = 100;
+        let mut bad_delta = VersionEditDelta::empty();
+        bad_delta.add_file(ManifestFileEntry {
+            level: 1,
+            file_number: 0,
+            min_key: b"10".to_vec(),
+            max_key: b"20".to_vec(),
+        });
+        bad_catalog.apply_delta(&bad_delta);
+        assert_eq!(
+            ManifestAlgebraOracle::verify_catalog_consistency_checked(&bad_catalog),
+            Err(ManifestCollapseError::ZeroFileNumber)
+        );
+        assert!(!ManifestAlgebraOracle::verify_catalog_consistency(&bad_catalog));
+
+        // 5. Overlapping files in L1 detected
+        let mut overlap_catalog = ManifestCatalogState::empty();
+        overlap_catalog.next_file_number = 100;
+        let mut overlap_delta = VersionEditDelta::empty();
+        overlap_delta.add_file(ManifestFileEntry::try_new(1, 1, b"10".to_vec(), b"30".to_vec()).unwrap());
+        overlap_delta.add_file(ManifestFileEntry::try_new(1, 2, b"25".to_vec(), b"40".to_vec()).unwrap());
+        overlap_catalog.apply_delta(&overlap_delta);
+        assert_eq!(
+            ManifestAlgebraOracle::verify_catalog_consistency_checked(&overlap_catalog),
+            Err(ManifestCollapseError::OverlappingFilesInLevel {
+                level: 1,
+                file1: 1,
+                file2: 2,
+            })
+        );
+
+        // 6. Valid catalog passes
+        let mut valid_catalog = ManifestCatalogState::empty();
+        valid_catalog.next_file_number = 100;
+        let mut valid_delta = VersionEditDelta::empty();
+        valid_delta.add_file(ManifestFileEntry::try_new(1, 1, b"10".to_vec(), b"20".to_vec()).unwrap());
+        valid_delta.add_file(ManifestFileEntry::try_new(1, 2, b"30".to_vec(), b"40".to_vec()).unwrap());
+        valid_catalog.apply_delta(&valid_delta);
+        assert!(ManifestAlgebraOracle::verify_catalog_consistency_checked(&valid_catalog).is_ok());
+        assert!(ManifestAlgebraOracle::verify_catalog_consistency(&valid_catalog));
     }
 }

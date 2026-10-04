@@ -48,6 +48,12 @@ pub enum HandoverViolation {
     NoActiveReadersToUnpin,
     /// Commit epoch inválido (não pode ser 0 nem u64::MAX).
     InvalidCommitEpoch { epoch: u64 },
+    /// Read epoch 0 é inválido / não inicializado.
+    ZeroReadEpochHazard,
+    /// Limite máximo de leitores ativos simultâneos atingido.
+    MaxReadersExceeded { limit: usize },
+    /// Tentativa redundante de pinar a MemTable para um epoch já comitado em disco no L0.
+    RedundantPinForDiskCommittedEpoch { read_epoch: u64, commit_epoch: u64 },
 }
 
 impl fmt::Display for HandoverViolation {
@@ -71,6 +77,18 @@ impl fmt::Display for HandoverViolation {
             }
             Self::InvalidCommitEpoch { epoch } => {
                 write!(f, "Invalid commit epoch {epoch} (must be > 0 and < u64::MAX)")
+            }
+            Self::ZeroReadEpochHazard => {
+                write!(f, "Read epoch 0 is invalid (uninitialized read hazard)")
+            }
+            Self::MaxReadersExceeded { limit } => {
+                write!(f, "Active memtable readers exceeded hard limit of {limit}")
+            }
+            Self::RedundantPinForDiskCommittedEpoch { read_epoch, commit_epoch } => {
+                write!(
+                    f,
+                    "Redundant memtable pin for read epoch {read_epoch} >= commit epoch {commit_epoch} (L0 is authoritative)"
+                )
             }
         }
     }
@@ -103,6 +121,9 @@ impl Default for MemTableRetirementCoordinator {
 }
 
 impl MemTableRetirementCoordinator {
+    /// Limite máximo de leitores simultâneos na MemTable para proteção contra exaustão de recursos.
+    pub const MAX_ACTIVE_READERS: usize = 1_000_000;
+
     /// Creates a new retirement coordinator initialized in `FlushingToDisk`.
     pub fn new() -> Self {
         Self {
@@ -126,8 +147,44 @@ impl MemTableRetirementCoordinator {
                 commit_epoch,
             });
         }
-        self.active_memtable_readers.fetch_add(1, Ordering::SeqCst);
-        Ok(())
+        let mut current = self.active_memtable_readers.load(Ordering::SeqCst);
+        loop {
+            if current >= Self::MAX_ACTIVE_READERS {
+                return Err(HandoverViolation::MaxReadersExceeded {
+                    limit: Self::MAX_ACTIVE_READERS,
+                });
+            }
+            match self.active_memtable_readers.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => return Ok(()),
+                Err(actual) => current = actual,
+            }
+        }
+    }
+
+    /// Registra um leitor ativo na MemTable imutável associado a um read epoch específico.
+    pub fn pin_memtable_reader_for_epoch(&self, read_epoch: u64) -> Result<(), HandoverViolation> {
+        if read_epoch == 0 {
+            return Err(HandoverViolation::ZeroReadEpochHazard);
+        }
+        let commit_epoch = self.version_commit_epoch.load(Ordering::Acquire);
+        if self.current_phase == FlushRetirementPhase::MemTableReclaimed {
+            return Err(HandoverViolation::ReclaimedSourceUnavailable {
+                read_epoch,
+                commit_epoch,
+            });
+        }
+        if self.current_phase == FlushRetirementPhase::VersionInstalledOnDisk && read_epoch >= commit_epoch {
+            return Err(HandoverViolation::RedundantPinForDiskCommittedEpoch {
+                read_epoch,
+                commit_epoch,
+            });
+        }
+        self.pin_memtable_reader()
     }
 
     /// Adquire um RAII guard para um leitor ativo na MemTable imutável.
@@ -202,6 +259,9 @@ impl MemTableRetirementCoordinator {
 
     /// Resolve a fonte autoritativa de dados de forma estrita e segura.
     pub fn resolve_source(&self, read_epoch: u64) -> Result<AuthoritativeSource, HandoverViolation> {
+        if read_epoch == 0 {
+            return Err(HandoverViolation::ZeroReadEpochHazard);
+        }
         let commit_epoch = self.version_commit_epoch.load(Ordering::Acquire);
         if read_epoch < commit_epoch {
             if self.current_phase == FlushRetirementPhase::MemTableReclaimed {
@@ -223,5 +283,71 @@ impl MemTableRetirementCoordinator {
             Ok(AuthoritativeSource::VersionSetL0) => "VersionSetL0",
             Err(_) => "ReclaimedSourceUnavailable",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_memtable_retirement_handshake_structural_invariants_red_to_green() {
+        let mut coordinator = MemTableRetirementCoordinator::new();
+
+        // 1. Zero read epoch hazard in resolve_source
+        assert_eq!(
+            coordinator.resolve_source(0),
+            Err(HandoverViolation::ZeroReadEpochHazard)
+        );
+
+        // 2. Zero read epoch hazard in pin_memtable_reader_for_epoch
+        assert_eq!(
+            coordinator.pin_memtable_reader_for_epoch(0),
+            Err(HandoverViolation::ZeroReadEpochHazard)
+        );
+
+        // 3. Valid epoch pinning while flushing
+        assert!(coordinator.pin_memtable_reader_for_epoch(50).is_ok());
+        assert_eq!(coordinator.active_readers(), 1);
+        coordinator.unpin_memtable_reader();
+        assert_eq!(coordinator.active_readers(), 0);
+
+        // 4. Install version on disk at commit epoch 100
+        assert!(coordinator.mark_version_installed(100).is_ok());
+
+        // 5. Stale read epoch (< 100) can still pin the retiring memtable
+        assert!(coordinator.pin_memtable_reader_for_epoch(80).is_ok());
+        assert_eq!(coordinator.active_readers(), 1);
+        coordinator.unpin_memtable_reader();
+
+        // 6. Contemporary or newer read epoch (>= 100) must NOT pin the retiring memtable (L0 is authoritative)
+        let red_err = coordinator.pin_memtable_reader_for_epoch(100);
+        assert_eq!(
+            red_err,
+            Err(HandoverViolation::RedundantPinForDiskCommittedEpoch {
+                read_epoch: 100,
+                commit_epoch: 100,
+            })
+        );
+        let red_err_newer = coordinator.pin_memtable_reader_for_epoch(150);
+        assert_eq!(
+            red_err_newer,
+            Err(HandoverViolation::RedundantPinForDiskCommittedEpoch {
+                read_epoch: 150,
+                commit_epoch: 100,
+            })
+        );
+
+        // 7. Max readers limit
+        coordinator.active_memtable_readers.store(
+            MemTableRetirementCoordinator::MAX_ACTIVE_READERS,
+            Ordering::SeqCst,
+        );
+        assert_eq!(
+            coordinator.pin_memtable_reader(),
+            Err(HandoverViolation::MaxReadersExceeded {
+                limit: MemTableRetirementCoordinator::MAX_ACTIVE_READERS,
+            })
+        );
     }
 }

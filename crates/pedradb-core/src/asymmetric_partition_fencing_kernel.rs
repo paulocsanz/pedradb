@@ -13,6 +13,44 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
+use std::fmt;
+
+/// Invariant violations and errors for asymmetric partition fencing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartitionFencingError {
+    /// Total nodes must be strictly positive.
+    ZeroTotalNodes,
+    /// Local node ID must be non-zero.
+    ZeroLocalNodeId,
+    /// Peer ID cannot be zero.
+    InvalidPeerId,
+    /// Cannot record local node as peer.
+    CannotRecordSelfAsPeer,
+    /// Peer sequence number must be non-zero.
+    ZeroPeerSequence,
+    /// Number of active peers exceeds cluster ceiling (total_nodes - 1).
+    PeerCountExceedsClusterLimit { active: u32, max_allowed: u32 },
+}
+
+impl fmt::Display for PartitionFencingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ZeroTotalNodes => write!(f, "total_nodes must be positive"),
+            Self::ZeroLocalNodeId => write!(f, "local_node_id must be non-zero"),
+            Self::InvalidPeerId => write!(f, "peer_id cannot be zero"),
+            Self::CannotRecordSelfAsPeer => write!(f, "cannot record self as peer"),
+            Self::ZeroPeerSequence => write!(f, "peer_seq must be non-zero"),
+            Self::PeerCountExceedsClusterLimit { active, max_allowed } => {
+                write!(
+                    f,
+                    "peer count exceeds cluster limit: {active} > {max_allowed}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for PartitionFencingError {}
 
 /// Health classification of a cluster peer connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,12 +106,12 @@ impl AsymmetricPartitionFencingKernel {
         total_nodes: u32,
         max_ack_lag: u64,
         heartbeat_timeout_ticks: u64,
-    ) -> Result<Self, &'static str> {
+    ) -> Result<Self, PartitionFencingError> {
         if total_nodes == 0 {
-            return Err("total_nodes must be positive");
+            return Err(PartitionFencingError::ZeroTotalNodes);
         }
         if local_node_id == 0 {
-            return Err("local_node_id must be non-zero");
+            return Err(PartitionFencingError::ZeroLocalNodeId);
         }
         let quorum_size = (total_nodes / 2) + 1;
         Ok(Self {
@@ -102,16 +140,30 @@ impl AsymmetricPartitionFencingKernel {
     /// Record a heartbeat received from a peer node.
     ///
     /// # Errors
-    /// Returns an error if `peer_id == local_node_id`.
+    /// Returns an error if `peer_id == local_node_id`, `peer_id == 0`, `peer_seq == 0`,
+    /// or if recording this peer would exceed cluster capacity (`total_nodes - 1`).
     pub fn record_peer_heartbeat(
         &mut self,
         peer_id: u64,
         peer_seq: u64,
         ack_of_our_seq: u64,
         tick: u64,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), PartitionFencingError> {
+        if peer_id == 0 {
+            return Err(PartitionFencingError::InvalidPeerId);
+        }
         if peer_id == self.local_node_id {
-            return Err("cannot record self as peer");
+            return Err(PartitionFencingError::CannotRecordSelfAsPeer);
+        }
+        if peer_seq == 0 {
+            return Err(PartitionFencingError::ZeroPeerSequence);
+        }
+        let max_peers = self.total_nodes.saturating_sub(1);
+        if !self.peers.contains_key(&peer_id) && self.peers.len() >= max_peers as usize {
+            return Err(PartitionFencingError::PeerCountExceedsClusterLimit {
+                active: (self.peers.len() + 1) as u32,
+                max_allowed: max_peers,
+            });
         }
         if tick > self.current_tick {
             self.current_tick = tick;
@@ -193,3 +245,57 @@ impl AsymmetricPartitionFencingKernel {
         self.quorum_size
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_asymmetric_partition_fencing_structural_invariants_red_to_green() {
+        // Invariant 1: Total nodes == 0 must fail-closed with ZeroTotalNodes
+        assert_eq!(
+            AsymmetricPartitionFencingKernel::new(1, 0, 5, 20),
+            Err(PartitionFencingError::ZeroTotalNodes)
+        );
+
+        // Invariant 2: Local node ID == 0 must fail-closed with ZeroLocalNodeId
+        assert_eq!(
+            AsymmetricPartitionFencingKernel::new(0, 3, 5, 20),
+            Err(PartitionFencingError::ZeroLocalNodeId)
+        );
+
+        let mut kernel = AsymmetricPartitionFencingKernel::new(1, 3, 5, 20).unwrap();
+
+        // Invariant 3: Peer ID == 0 must fail-closed with InvalidPeerId
+        assert_eq!(
+            kernel.record_peer_heartbeat(0, 10, 1, 1),
+            Err(PartitionFencingError::InvalidPeerId)
+        );
+
+        // Invariant 4: Recording self as peer must fail-closed with CannotRecordSelfAsPeer
+        assert_eq!(
+            kernel.record_peer_heartbeat(1, 10, 1, 1),
+            Err(PartitionFencingError::CannotRecordSelfAsPeer)
+        );
+
+        // Invariant 5: Peer sequence == 0 must fail-closed with ZeroPeerSequence
+        assert_eq!(
+            kernel.record_peer_heartbeat(2, 0, 1, 1),
+            Err(PartitionFencingError::ZeroPeerSequence)
+        );
+
+        // Normal heartbeats for valid peers (peers 2 and 3 in a 3-node cluster)
+        assert!(kernel.record_peer_heartbeat(2, 10, 1, 1).is_ok());
+        assert!(kernel.record_peer_heartbeat(3, 10, 1, 1).is_ok());
+
+        // Invariant 6: Sybil inflation: attempting to record peer 4 in a 3-node cluster (max remote peers = 2)
+        assert_eq!(
+            kernel.record_peer_heartbeat(4, 10, 1, 1),
+            Err(PartitionFencingError::PeerCountExceedsClusterLimit {
+                active: 3,
+                max_allowed: 2
+            })
+        );
+    }
+}
+

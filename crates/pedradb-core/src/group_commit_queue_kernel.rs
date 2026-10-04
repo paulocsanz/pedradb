@@ -30,6 +30,28 @@ pub enum Admission<T, R> {
     },
 }
 
+/// Typed error outcomes for group commit queue operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupCommitQueueError {
+    /// Attempted to publish a non-monotonic sequence number.
+    RegressiveSequencePublication { current: u64, attempted: u64 },
+}
+
+impl std::fmt::Display for GroupCommitQueueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RegressiveSequencePublication { current, attempted } => {
+                write!(
+                    f,
+                    "GroupCommitQueueError: cannot publish regressive sequence {attempted} <= current {current}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for GroupCommitQueueError {}
+
 /// Production synchronization kernel for group commit leader-follower batching.
 pub struct GroupCommitQueue<T, R> {
     state: Mutex<GroupCommitQueueState<T, R>>,
@@ -100,7 +122,29 @@ impl<T, R> GroupCommitQueue<T, R> {
 
     /// Publishes the committed sequence number with Release ordering.
     pub fn publish_seq(&self, seq: u64) {
-        self.published_seq.store(seq, Ordering::Release);
+        let _ = self.try_publish_seq(seq);
+    }
+
+    /// Atomically and monotonically publishes the next sequence number with Release ordering.
+    pub fn try_publish_seq(&self, seq: u64) -> Result<(), GroupCommitQueueError> {
+        let mut curr = self.published_seq.load(Ordering::Acquire);
+        loop {
+            if seq <= curr {
+                return Err(GroupCommitQueueError::RegressiveSequencePublication {
+                    current: curr,
+                    attempted: seq,
+                });
+            }
+            match self.published_seq.compare_exchange_weak(
+                curr,
+                seq,
+                Ordering::Release,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Ok(()),
+                Err(actual) => curr = actual,
+            }
+        }
     }
 
     /// Reads the current published sequence number with Acquire ordering.
@@ -115,9 +159,11 @@ impl<T, R> GroupCommitQueue<T, R> {
         self.active.load(Ordering::Acquire)
     }
 
-    /// Completes a participant ticket, decrementing in-flight count.
+    /// Completes a participant ticket, decrementing in-flight count with underflow protection.
     pub fn complete_ticket(&self) {
-        self.active.fetch_sub(1, Ordering::SeqCst);
+        let _ = self.active.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+            Some(val.saturating_sub(1))
+        });
     }
 
     /// Submits a work item and executes the leader-follower batching protocol.
@@ -231,4 +277,36 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_group_commit_queue_structural_invariants_red_to_green() {
+        let queue = GroupCommitQueue::<u64, u64>::new();
+
+        // 1. Calling complete_ticket at 0 must not underflow to usize::MAX
+        assert_eq!(queue.active_count(), 0);
+        queue.complete_ticket();
+        assert_eq!(queue.active_count(), 0);
+
+        // 2. Monotonic sequence publication
+        assert_eq!(queue.try_publish_seq(10), Ok(()));
+        assert_eq!(queue.published_seq(), 10);
+
+        // 3. Regressive sequence publication rejected
+        assert_eq!(
+            queue.try_publish_seq(5),
+            Err(GroupCommitQueueError::RegressiveSequencePublication {
+                current: 10,
+                attempted: 5,
+            })
+        );
+        assert_eq!(
+            queue.try_publish_seq(10),
+            Err(GroupCommitQueueError::RegressiveSequencePublication {
+                current: 10,
+                attempted: 10,
+            })
+        );
+        assert_eq!(queue.published_seq(), 10);
+    }
 }
+

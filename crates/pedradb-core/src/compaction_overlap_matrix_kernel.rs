@@ -19,9 +19,11 @@
 /// Typed error outcomes for compaction overlap matrix operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompactionOverlapError {
+    /// SST file ID cannot be zero (sentinel hazard).
+    ZeroFileId,
     /// Smallest key is strictly greater than largest key.
     InvertedKeyRange { smallest: Vec<u8>, largest: Vec<u8> },
-    /// Expansion ratio ceiling must be finite and >= 1.0.
+    /// Expansion ratio ceiling must be finite, >= 1.0, and <= 10,000.0.
     InvalidExpansionRatio,
     /// Key cannot be empty.
     EmptyKey,
@@ -30,6 +32,36 @@ pub enum CompactionOverlapError {
     /// Level files violate total ordering or overlap invariant.
     NonDisjointLevel,
 }
+
+impl std::fmt::Display for CompactionOverlapError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ZeroFileId => write!(f, "CompactionOverlapError: file_id 0 is reserved sentinel"),
+            Self::InvertedKeyRange { smallest, largest } => {
+                write!(
+                    f,
+                    "CompactionOverlapError: smallest key {:?} > largest key {:?}",
+                    smallest, largest
+                )
+            }
+            Self::InvalidExpansionRatio => {
+                write!(
+                    f,
+                    "CompactionOverlapError: expansion ratio must be finite, >= 1.0 and <= 10,000.0"
+                )
+            }
+            Self::EmptyKey => write!(f, "CompactionOverlapError: key cannot be empty"),
+            Self::ZeroFileSizeBytes => {
+                write!(f, "CompactionOverlapError: physical file size must be positive")
+            }
+            Self::NonDisjointLevel => {
+                write!(f, "CompactionOverlapError: level files violate disjoint ordering")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CompactionOverlapError {}
 
 /// Representation of an SSTable file's key range interval and physical size.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +84,9 @@ impl SstInterval {
         largest_key: impl Into<Vec<u8>>,
         file_size_bytes: u64,
     ) -> Result<Self, CompactionOverlapError> {
+        if file_id == 0 {
+            return Err(CompactionOverlapError::ZeroFileId);
+        }
         let smallest = smallest_key.into();
         let largest = largest_key.into();
         if smallest.is_empty() || largest.is_empty() {
@@ -118,13 +153,17 @@ pub struct CompactionOverlapMatrix {
 }
 
 impl CompactionOverlapMatrix {
-    /// Attempts to create a new overlap matrix analyzer, validating that `max_expansion_ratio` >= 1.0.
+    /// Attempts to create a new overlap matrix analyzer, validating that `max_expansion_ratio` >= 1.0 and <= 10,000.0.
     pub fn try_new(
         level_source: usize,
         level_target: usize,
         max_expansion_ratio: f64,
     ) -> Result<Self, CompactionOverlapError> {
-        if max_expansion_ratio.is_nan() || !max_expansion_ratio.is_finite() || max_expansion_ratio < 1.0 {
+        if max_expansion_ratio.is_nan()
+            || !max_expansion_ratio.is_finite()
+            || max_expansion_ratio < 1.0
+            || max_expansion_ratio > 10_000.0
+        {
             return Err(CompactionOverlapError::InvalidExpansionRatio);
         }
         Ok(Self {
@@ -307,3 +346,55 @@ impl CompactionOverlapMatrix {
         Some(all_sorted.remove(0))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compaction_overlap_matrix_structural_invariants_red_to_green() {
+        // 1. Zero file ID rejected
+        assert_eq!(
+            SstInterval::try_new(0, b"a".to_vec(), b"b".to_vec(), 100),
+            Err(CompactionOverlapError::ZeroFileId)
+        );
+
+        // 2. Empty key rejected
+        assert_eq!(
+            SstInterval::try_new(1, vec![], b"b".to_vec(), 100),
+            Err(CompactionOverlapError::EmptyKey)
+        );
+
+        // 3. Inverted key range rejected
+        assert_eq!(
+            SstInterval::try_new(1, b"z".to_vec(), b"a".to_vec(), 100),
+            Err(CompactionOverlapError::InvertedKeyRange {
+                smallest: b"z".to_vec(),
+                largest: b"a".to_vec(),
+            })
+        );
+
+        // 4. Invalid expansion ratios rejected in try_new
+        assert_eq!(
+            CompactionOverlapMatrix::try_new(1, 2, f64::NAN),
+            Err(CompactionOverlapError::InvalidExpansionRatio)
+        );
+        assert_eq!(
+            CompactionOverlapMatrix::try_new(1, 2, 0.5),
+            Err(CompactionOverlapError::InvalidExpansionRatio)
+        );
+        assert_eq!(
+            CompactionOverlapMatrix::try_new(1, 2, 20_000.0),
+            Err(CompactionOverlapError::InvalidExpansionRatio)
+        );
+
+        // 5. Valid matrix creation and candidate selection
+        let matrix = CompactionOverlapMatrix::try_new(1, 2, 5.0).unwrap();
+        let src = vec![SstInterval::try_new(1, b"10".to_vec(), b"20".to_vec(), 100).unwrap()];
+        let tgt = vec![SstInterval::try_new(2, b"15".to_vec(), b"25".to_vec(), 100).unwrap()];
+        let candidates = matrix.analyze_candidates(&src, &tgt);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].source_file_id, 1);
+    }
+}
+

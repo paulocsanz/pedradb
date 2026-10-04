@@ -26,6 +26,12 @@ pub enum CausalClosureViolation {
     ZeroTransactionIdHazard,
     /// Duplicate transaction identifier in causal DAG.
     DuplicateTransactionId(u64),
+    /// Sequence number cannot be zero in causal DAG.
+    ZeroSequenceNumberHazard,
+    /// Transaction cannot causally depend on itself.
+    SelfDependencyViolation(u64),
+    /// Predecessor transaction ID cannot be zero.
+    ZeroPredecessorIdHazard,
 }
 
 impl fmt::Display for CausalClosureViolation {
@@ -45,6 +51,9 @@ impl fmt::Display for CausalClosureViolation {
             }
             Self::ZeroTransactionIdHazard => write!(f, "Transaction ID cannot be zero in causal graph"),
             Self::DuplicateTransactionId(id) => write!(f, "Duplicate transaction ID {id} in causal DAG"),
+            Self::ZeroSequenceNumberHazard => write!(f, "Sequence number cannot be zero in causal graph"),
+            Self::SelfDependencyViolation(id) => write!(f, "Transaction {id} cannot causally depend on itself"),
+            Self::ZeroPredecessorIdHazard => write!(f, "Predecessor transaction ID cannot be zero"),
         }
     }
 }
@@ -84,12 +93,21 @@ impl CausalHistoryBisimulationJudge {
         if tx_id == 0 {
             return Err(CausalClosureViolation::ZeroTransactionIdHazard);
         }
+        if seq == 0 {
+            return Err(CausalClosureViolation::ZeroSequenceNumberHazard);
+        }
         if self.nodes.contains_key(&tx_id) {
             return Err(CausalClosureViolation::DuplicateTransactionId(tx_id));
         }
 
-        // Verify sequence ordering against all recorded predecessors
+        // Verify sequence ordering against all recorded predecessors, rejecting dep_id 0 and self-dependency
         for &dep_id in &dependencies {
+            if dep_id == 0 {
+                return Err(CausalClosureViolation::ZeroPredecessorIdHazard);
+            }
+            if dep_id == tx_id {
+                return Err(CausalClosureViolation::SelfDependencyViolation(tx_id));
+            }
             if let Some(pred) = self.nodes.get(&dep_id) {
                 if pred.seq >= seq {
                     return Err(CausalClosureViolation::CausalSequenceInversion {
@@ -148,3 +166,51 @@ impl CausalHistoryBisimulationJudge {
         self.nodes.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_causal_history_bisimulation_structural_invariants_red_to_green() {
+        let mut judge = CausalHistoryBisimulationJudge::new();
+
+        // Invariant 1: tx_id == 0 rejected with ZeroTransactionIdHazard
+        assert_eq!(
+            judge.try_register_tx(0, 10, vec![]),
+            Err(CausalClosureViolation::ZeroTransactionIdHazard)
+        );
+
+        // Invariant 2: seq == 0 rejected with ZeroSequenceNumberHazard
+        assert_eq!(
+            judge.try_register_tx(1, 0, vec![]),
+            Err(CausalClosureViolation::ZeroSequenceNumberHazard)
+        );
+
+        // Invariant 3: Self-dependency rejected with SelfDependencyViolation
+        assert_eq!(
+            judge.try_register_tx(1, 10, vec![1]),
+            Err(CausalClosureViolation::SelfDependencyViolation(1))
+        );
+
+        // Invariant 4: Predecessor ID 0 rejected with ZeroPredecessorIdHazard
+        assert_eq!(
+            judge.try_register_tx(1, 10, vec![0]),
+            Err(CausalClosureViolation::ZeroPredecessorIdHazard)
+        );
+
+        // Invariant 5: Normal registration and causal sequence monotonicity
+        assert!(judge.try_register_tx(1, 10, vec![]).is_ok());
+        assert!(judge.try_register_tx(2, 20, vec![1]).is_ok());
+
+        // Invariant 6: Inversion rejected (predecessor seq >= dependent seq)
+        assert_eq!(
+            judge.try_register_tx(3, 15, vec![2]),
+            Err(CausalClosureViolation::CausalSequenceInversion {
+                predecessor_seq: 20,
+                dependent_seq: 15,
+            })
+        );
+    }
+}
+

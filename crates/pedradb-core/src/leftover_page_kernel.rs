@@ -12,6 +12,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::fmt;
+
 /// Verdict of the leftover page policy for one compaction install.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeftoverPageAdvice {
@@ -26,6 +28,45 @@ pub enum LeftoverPageAdvice {
     /// Budget ≠ 0 (default) — today's behavior: never advise.
     KeepDefault,
 }
+
+impl fmt::Display for LeftoverPageAdvice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Drop => write!(f, "Drop"),
+            Self::KeepHot => write!(f, "KeepHot"),
+            Self::KeepCovered => write!(f, "KeepCovered"),
+            Self::KeepDefault => write!(f, "KeepDefault"),
+        }
+    }
+}
+
+/// Erros de validação estrutural de intervalos de chaves ou prefixos na política de leftover.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeftoverPageError {
+    /// Intervalo de chaves invertido (`smallest > largest`).
+    InvertedRange {
+        smallest: Vec<u8>,
+        largest: Vec<u8>,
+    },
+    /// Prefixo de família vazio.
+    EmptyPrefix,
+}
+
+impl fmt::Display for LeftoverPageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvertedRange { smallest, largest } => {
+                write!(
+                    f,
+                    "Inverted key range: smallest {smallest:?} is strictly greater than largest {largest:?}"
+                )
+            }
+            Self::EmptyPrefix => write!(f, "Family prefix cannot be empty"),
+        }
+    }
+}
+
+impl std::error::Error for LeftoverPageError {}
 
 /// RFC-0194 P0.1: the Fire-119 condition as a total function.
 ///
@@ -98,11 +139,40 @@ pub fn sst_range_covers_family(
     let (Some(lo), Some(hi)) = (smallest, largest) else {
         return false;
     };
+    if lo > hi {
+        return false;
+    }
     let fam_lo = pfx;
     match family_upper_bound(pfx) {
         Some(fam_hi_excl) => hi >= fam_lo && lo < fam_hi_excl.as_slice(),
         None => hi >= fam_lo,
     }
+}
+
+/// Versão com checagem estrita de integridade que rejeita prefixos vazios e intervalos invertidos.
+pub fn sst_range_covers_family_checked(
+    smallest: Option<&[u8]>,
+    largest: Option<&[u8]>,
+    pfx: &[u8],
+) -> Result<bool, LeftoverPageError> {
+    if pfx.is_empty() {
+        return Err(LeftoverPageError::EmptyPrefix);
+    }
+    let (Some(lo), Some(hi)) = (smallest, largest) else {
+        return Ok(false);
+    };
+    if lo > hi {
+        return Err(LeftoverPageError::InvertedRange {
+            smallest: lo.to_vec(),
+            largest: hi.to_vec(),
+        });
+    }
+    let fam_lo = pfx;
+    let covers = match family_upper_bound(pfx) {
+        Some(fam_hi_excl) => hi >= fam_lo && lo < fam_hi_excl.as_slice(),
+        None => hi >= fam_lo,
+    };
+    Ok(covers)
 }
 
 #[cfg(test)]
@@ -210,5 +280,45 @@ mod tests {
         ));
         // Unknown bounds: conservative false.
         assert!(!sst_range_covers_family(None, None, b"c/"));
+    }
+
+    #[test]
+    fn test_leftover_page_structural_invariants_red_to_green() {
+        // 1. Display trait implementation
+        assert_eq!(LeftoverPageAdvice::Drop.to_string(), "Drop");
+        assert_eq!(LeftoverPageAdvice::KeepHot.to_string(), "KeepHot");
+        assert_eq!(LeftoverPageAdvice::KeepCovered.to_string(), "KeepCovered");
+        assert_eq!(LeftoverPageAdvice::KeepDefault.to_string(), "KeepDefault");
+
+        // 2. Inverted range hazard: lo > hi (e.g. smallest = "c/999", largest = "c/111")
+        // Under flawed logic, "c/111" >= "c/" and "c/999" < "c0" returned true!
+        let inverted_lo = b"c/999".as_slice();
+        let inverted_hi = b"c/111".as_slice();
+        assert!(!sst_range_covers_family(Some(inverted_lo), Some(inverted_hi), b"c/"));
+
+        let checked_err = sst_range_covers_family_checked(Some(inverted_lo), Some(inverted_hi), b"c/");
+        assert_eq!(
+            checked_err,
+            Err(LeftoverPageError::InvertedRange {
+                smallest: inverted_lo.to_vec(),
+                largest: inverted_hi.to_vec(),
+            })
+        );
+
+        // 3. Empty prefix hazard
+        let empty_pfx_err = sst_range_covers_family_checked(
+            Some(b"c/001".as_slice()),
+            Some(b"c/002".as_slice()),
+            b""
+        );
+        assert_eq!(empty_pfx_err, Err(LeftoverPageError::EmptyPrefix));
+
+        // 4. Valid range works as expected
+        let valid_cov = sst_range_covers_family_checked(
+            Some(b"c/001".as_slice()),
+            Some(b"c/002".as_slice()),
+            b"c/"
+        );
+        assert_eq!(valid_cov, Ok(true));
     }
 }

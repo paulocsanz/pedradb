@@ -281,6 +281,12 @@ impl AlignedDirectBuffer {
         len: usize,
         alignment: usize,
     ) -> Result<&[u8], DirectIoAlignmentViolation> {
+        if !alignment.is_power_of_two()
+            || alignment < DIRECT_IO_SECTOR_ALIGNMENT
+            || alignment > MAX_DIRECT_IO_ALIGNMENT
+        {
+            return Err(DirectIoAlignmentViolation::InvalidAlignmentRequirement { alignment });
+        }
         if offset % alignment != 0 {
             return Err(DirectIoAlignmentViolation::MisalignedBufferPointer {
                 ptr_addr: self.aligned_address() + offset,
@@ -331,3 +337,43 @@ impl AlignedDirectBuffer {
         verify_direct_io_request(self.aligned_address(), file_offset, self.usable_len, alignment)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_direct_io_contract_structural_invariants_red_to_green() {
+        let buf = AlignedDirectBuffer::allocate(8192, 4096);
+        assert_eq!(buf.len(), 8192);
+
+        // 1. Invalid alignment in aligned_sub_slice must not panic with div-by-zero
+        assert_eq!(
+            buf.aligned_sub_slice(0, 4096, 0),
+            Err(DirectIoAlignmentViolation::InvalidAlignmentRequirement { alignment: 0 })
+        );
+        assert_eq!(
+            buf.aligned_sub_slice(0, 4096, 3),
+            Err(DirectIoAlignmentViolation::InvalidAlignmentRequirement { alignment: 3 })
+        );
+        assert_eq!(
+            buf.aligned_sub_slice(0, 4096, 256), // < 512
+            Err(DirectIoAlignmentViolation::InvalidAlignmentRequirement { alignment: 256 })
+        );
+
+        // 2. Valid sub_slice
+        let slice = buf.aligned_sub_slice(0, 4096, 4096).unwrap();
+        assert_eq!(slice.len(), 4096);
+
+        // 3. Overflow or out of bounds
+        assert_eq!(
+            buf.aligned_sub_slice(4096, 8192, 4096),
+            Err(DirectIoAlignmentViolation::SliceOutOfBounds {
+                offset: 4096,
+                len: 8192,
+                usable_len: 8192,
+            })
+        );
+    }
+}
+

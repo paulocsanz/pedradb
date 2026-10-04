@@ -145,50 +145,53 @@ impl DirectIoAligner {
         offset & mask
     }
 
-    /// Rounds an offset up to the nearest sector boundary.
-    #[must_use]
-    pub fn ceil_sector(&self, offset: u64) -> u64 {
+    /// Rounds an offset up to the nearest sector boundary, checking for arithmetic overflow.
+    pub fn try_ceil_sector(&self, offset: u64) -> Result<u64, AlignmentError> {
         let sec = self.sector_size as u64;
         let rem = offset % sec;
         if rem == 0 {
-            offset
+            Ok(offset)
         } else {
-            offset.saturating_add(sec - rem)
+            offset
+                .checked_add(sec - rem)
+                .ok_or(AlignmentError::ArithmeticOverflow)
         }
     }
 
-    /// Decomposes an arbitrary request `(offset, len)` into exact Direct-I/O execution slices.
-    ///
-    /// # Mathematical Invariants
-    /// 1. `prefix_len + aligned_len + suffix_len == total_len`
-    /// 2. `aligned_offset % sector_size == 0`
-    /// 3. `aligned_len % sector_size == 0`
+    /// Rounds an offset up to the nearest sector boundary.
     #[must_use]
-    pub fn plan_io_slices(&self, offset: u64, len: usize) -> IoSlicePlan {
+    pub fn ceil_sector(&self, offset: u64) -> u64 {
+        self.try_ceil_sector(offset).unwrap_or(u64::MAX)
+    }
+
+    /// Decomposes an arbitrary request `(offset, len)` into exact Direct-I/O execution slices,
+    /// failing closed with `AlignmentError::ArithmeticOverflow` on arithmetic overflow.
+    pub fn try_plan_io_slices(&self, offset: u64, len: usize) -> Result<IoSlicePlan, AlignmentError> {
+        let end_offset = offset
+            .checked_add(len as u64)
+            .ok_or(AlignmentError::ArithmeticOverflow)?;
+
         if len == 0 {
-            return IoSlicePlan {
+            let ceil_start = self.try_ceil_sector(offset)?;
+            return Ok(IoSlicePlan {
                 logical_offset: offset,
                 total_len: 0,
                 prefix_len: 0,
                 prefix_sector_offset: self.floor_sector(offset),
                 prefix_bounce_len: 0,
-                aligned_offset: self.ceil_sector(offset),
+                aligned_offset: ceil_start,
                 aligned_len: 0,
                 suffix_offset: offset,
                 suffix_len: 0,
                 suffix_bounce_len: 0,
-            };
+            });
         }
 
-        let end_offset = offset.saturating_add(len as u64);
-
-        // Case A: Transfer is completely contained within a single sector
         let floor_start = self.floor_sector(offset);
-        let ceil_start = self.ceil_sector(offset);
+        let ceil_start = self.try_ceil_sector(offset)?;
 
         if end_offset <= ceil_start {
-            // Whole payload fits in prefix bounce
-            return IoSlicePlan {
+            return Ok(IoSlicePlan {
                 logical_offset: offset,
                 total_len: len,
                 prefix_len: len,
@@ -199,10 +202,9 @@ impl DirectIoAligner {
                 suffix_offset: end_offset,
                 suffix_len: 0,
                 suffix_bounce_len: 0,
-            };
+            });
         }
 
-        // Case B: Span crosses one or more sector boundaries
         let prefix_len = if offset == floor_start {
             0
         } else {
@@ -224,7 +226,7 @@ impl DirectIoAligner {
         let prefix_bounce_len = if prefix_len > 0 { self.sector_size } else { 0 };
         let suffix_bounce_len = if suffix_len > 0 { self.sector_size } else { 0 };
 
-        IoSlicePlan {
+        Ok(IoSlicePlan {
             logical_offset: offset,
             total_len: len,
             prefix_len,
@@ -235,6 +237,52 @@ impl DirectIoAligner {
             suffix_offset: floor_end,
             suffix_len,
             suffix_bounce_len,
-        }
+        })
+    }
+
+    /// Decomposes an arbitrary request `(offset, len)` into exact Direct-I/O execution slices.
+    ///
+    /// # Mathematical Invariants
+    /// 1. `prefix_len + aligned_len + suffix_len == total_len`
+    /// 2. `aligned_offset % sector_size == 0`
+    /// 3. `aligned_len % sector_size == 0`
+    #[must_use]
+    pub fn plan_io_slices(&self, offset: u64, len: usize) -> IoSlicePlan {
+        self.try_plan_io_slices(offset, len)
+            .expect("plan_io_slices arithmetic overflow")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_direct_io_sector_alignment_structural_invariants_red_to_green() {
+        let aligner = DirectIoAligner::new(4096).unwrap();
+
+        // 1. Arithmetic overflow in try_plan_io_slices must be cleanly rejected
+        assert_eq!(
+            aligner.try_plan_io_slices(u64::MAX - 100, 200),
+            Err(AlignmentError::ArithmeticOverflow)
+        );
+
+        // 2. Arithmetic overflow in try_ceil_sector must be cleanly rejected
+        assert_eq!(
+            aligner.try_ceil_sector(u64::MAX - 10),
+            Err(AlignmentError::ArithmeticOverflow)
+        );
+
+        // 3. Normal planning succeeds
+        let plan = aligner.try_plan_io_slices(4096, 8192).unwrap();
+        assert_eq!(plan.total_len, 8192);
+        assert_eq!(plan.aligned_len, 8192);
+        assert_eq!(plan.prefix_len, 0);
+        assert_eq!(plan.suffix_len, 0);
+
+        // 4. Boundary alignment invariants
+        let plan2 = aligner.try_plan_io_slices(5000, 10000).unwrap();
+        assert_eq!(plan2.prefix_len + plan2.aligned_len + plan2.suffix_len, 10000);
+        assert_eq!(plan2.aligned_offset % 4096, 0);
     }
 }

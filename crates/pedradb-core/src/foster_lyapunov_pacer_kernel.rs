@@ -90,19 +90,81 @@ pub struct LyapunovPacingDecision {
     pub admission_ratio: f64,
 }
 
+/// Configuration error in Foster-Lyapunov pacer initialization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LyapunovConfigError {
+    InvalidMemLimits { target: u64, hard: u64 },
+    InvalidL0Limits { target: u64, hard: u64 },
+    InvalidCompactionLimits { target: u64, hard: u64 },
+    InvalidGamma,
+    InvalidWeights,
+}
+
+impl std::fmt::Display for LyapunovConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidMemLimits { target, hard } => {
+                write!(f, "LyapunovConfigError: mem target ({target}) must be < hard limit ({hard})")
+            }
+            Self::InvalidL0Limits { target, hard } => {
+                write!(f, "LyapunovConfigError: L0 target ({target}) must be < hard limit ({hard})")
+            }
+            Self::InvalidCompactionLimits { target, hard } => {
+                write!(f, "LyapunovConfigError: compaction target ({target}) must be < hard limit ({hard})")
+            }
+            Self::InvalidGamma => write!(f, "LyapunovConfigError: gamma must be finite and > 0.0"),
+            Self::InvalidWeights => write!(f, "LyapunovConfigError: weights must be finite and >= 0.0"),
+        }
+    }
+}
+
+impl std::error::Error for LyapunovConfigError {}
+
 /// Engine evaluating Foster-Lyapunov pacing decisions.
 pub struct FosterLyapunovPacer {
     config: FosterLyapunovConfig,
 }
 
 impl FosterLyapunovPacer {
+    /// Attempts to create a new pacer with validated configuration parameters.
+    pub fn try_new(config: FosterLyapunovConfig) -> Result<Self, LyapunovConfigError> {
+        if config.mem_target_bytes >= config.mem_hard_bytes {
+            return Err(LyapunovConfigError::InvalidMemLimits {
+                target: config.mem_target_bytes,
+                hard: config.mem_hard_bytes,
+            });
+        }
+        if config.l0_target_files >= config.l0_hard_files {
+            return Err(LyapunovConfigError::InvalidL0Limits {
+                target: config.l0_target_files,
+                hard: config.l0_hard_files,
+            });
+        }
+        if config.compaction_target_bytes >= config.compaction_hard_bytes {
+            return Err(LyapunovConfigError::InvalidCompactionLimits {
+                target: config.compaction_target_bytes,
+                hard: config.compaction_hard_bytes,
+            });
+        }
+        if !config.gamma.is_finite() || config.gamma <= 0.0 {
+            return Err(LyapunovConfigError::InvalidGamma);
+        }
+        if !config.weight_mem.is_finite()
+            || config.weight_mem < 0.0
+            || !config.weight_l0.is_finite()
+            || config.weight_l0 < 0.0
+            || !config.weight_compaction.is_finite()
+            || config.weight_compaction < 0.0
+        {
+            return Err(LyapunovConfigError::InvalidWeights);
+        }
+        Ok(Self { config })
+    }
+
     /// Creates a new pacer with given configuration.
+    #[must_use]
     pub fn new(config: FosterLyapunovConfig) -> Self {
-        assert!(config.mem_target_bytes < config.mem_hard_bytes);
-        assert!(config.l0_target_files < config.l0_hard_files);
-        assert!(config.compaction_target_bytes < config.compaction_hard_bytes);
-        assert!(config.gamma > 0.0);
-        Self { config }
+        Self::try_new(config).expect("valid foster lyapunov config")
     }
 
     /// Evaluates current engine state and derives continuous pacing backpressure.
@@ -179,3 +241,43 @@ fn normalize_debt(actual: u64, target: u64, hard: u64) -> f64 {
     let den = (hard - target) as f64;
     (num / den).clamp(0.0, 1.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_foster_lyapunov_pacer_structural_invariants_red_to_green() {
+        // 1. Inverted mem limits rejected
+        let bad_mem = FosterLyapunovConfig {
+            mem_target_bytes: 1000,
+            mem_hard_bytes: 500,
+            ..Default::default()
+        };
+        assert_eq!(
+            FosterLyapunovPacer::try_new(bad_mem).err(),
+            Some(LyapunovConfigError::InvalidMemLimits {
+                target: 1000,
+                hard: 500,
+            })
+        );
+
+        // 2. Non-positive gamma rejected
+        let bad_gamma = FosterLyapunovConfig {
+            gamma: 0.0,
+            ..Default::default()
+        };
+        assert_eq!(
+            FosterLyapunovPacer::try_new(bad_gamma).err(),
+            Some(LyapunovConfigError::InvalidGamma)
+        );
+
+        // 3. Normal config works
+        let pacer = FosterLyapunovPacer::try_new(FosterLyapunovConfig::default()).unwrap();
+        let state = BacklogState::default();
+        let dec = pacer.evaluate(&state);
+        assert_eq!(dec.delay_micros, 0);
+        assert_eq!(dec.admission_ratio, 1.0);
+    }
+}
+

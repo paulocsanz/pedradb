@@ -857,6 +857,21 @@ impl Default for OpenOptions {
 
 /// `PEDRA_CHANGELOG_INTERVAL` (RFC-0031). Unset → `0` (never on the commit
 /// path; flush/close still persist). The cache is rebuilt from WAL (RFC-0019).
+/// Durability pay-point executions (SST fsync + MANIFEST rewrite) since the
+/// last reset — the oracle for "idle steady state must not pay durability".
+static DURABLE_PAYS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Durability pay-point count since the last reset.
+#[must_use]
+pub fn durable_pays_count() -> u64 {
+    DURABLE_PAYS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Reset the durability pay-point counter.
+pub fn reset_durable_pays_count() {
+    DURABLE_PAYS.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
 fn changelog_interval_from_env() -> u64 {
     std::env::var("PEDRA_CHANGELOG_INTERVAL")
         .ok()
@@ -7562,7 +7577,7 @@ impl<E: Env> Db<E> {
 
     /// Snapshot of every way acked keys can still depend on the WAL
     /// (input to `flush_kernel::wal_rotate_decision`).
-    fn wal_pin_state(&self) -> crate::flush_kernel::WalPinState {
+    pub(crate) fn wal_pin_state(&self) -> crate::flush_kernel::WalPinState {
         crate::flush_kernel::WalPinState {
             mem_empty: crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64),
             imm_present: self.imm.is_some(),
@@ -7888,7 +7903,7 @@ impl<E: Env> Db<E> {
     /// `PEDRA_LEVEL_DIAG=1`: per-level file count + on-disk bytes at a
     /// scheduling milestone (settle start/end, repair end) — the shape the
     /// read path faces, on the guest serial console.
-    fn dump_level_diag(&self, tag: &str) {
+    pub(crate) fn dump_level_diag(&self, tag: &str) {
         if std::env::var_os("PEDRA_LEVEL_DIAG").is_none() {
             return;
         }
@@ -7903,6 +7918,34 @@ impl<E: Env> Db<E> {
             }
             eprintln!("LEVELDIAG {tag} level={level} files={n} bytes={bytes}");
         }
+    }
+
+    /// Prepare the next stacked level repair job for off-lock execution (RFC-0337).
+    pub(crate) fn prepare_next_stacked_level_repair(
+        &mut self,
+    ) -> Result<Option<PreparedL0Compact<E>>> {
+        if !crate::leveling::leveled_enabled() {
+            return Ok(None);
+        }
+        for level in 1..=MAX_LSM_LEVEL {
+            let families: Vec<String> = self
+                .ssts
+                .iter()
+                .zip(self.sst_levels.iter())
+                .filter(|(_, &lvl)| lvl == level)
+                .map(|(t, _)| self.compact_family_key(t).to_string())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            for cf in families {
+                let view = self.level_view(level, &cf);
+                if view.len() >= 2 && !crate::leveling::is_disjoint(&view) {
+                    let inputs: Vec<SstTable> = view.iter().map(|f| self.ssts[f.idx].clone()).collect();
+                    return self.build_prepared(inputs, level, crate::merge::CompactGcOptions::default());
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// One whole-level rewrite per stacked (non-disjoint) family level until
@@ -8654,7 +8697,7 @@ impl<E: Env> Db<E> {
     /// commute exactly like today's one-at-a-time installs.
     /// `max_jobs <= 1` delegates to the single-job picker (unchanged
     /// behavior). Returns an empty vec when nothing can push down.
-    fn prepare_disjoint_pushdown_batch(
+    pub(crate) fn prepare_disjoint_pushdown_batch(
         &mut self,
         max_jobs: usize,
     ) -> Result<Vec<PreparedL0Compact<E>>> {
@@ -8806,6 +8849,15 @@ impl<E: Env> Db<E> {
     #[allow(dead_code)]
     pub(crate) fn set_parallel_jobs(&mut self, k: usize) {
         self.parallel_jobs = k.clamp(1, 8);
+    }
+
+    /// Number of parallel jobs to prepare for pushdown compaction.
+    #[inline]
+    pub(crate) fn parallel_jobs_k(&self) -> usize {
+        match &self.parallel_merge {
+            Some(_) => self.parallel_jobs.clamp(1, 8),
+            None => 1,
+        }
     }
 
     /// Scheduling view of one family's files at `level` (inventory indices
@@ -12031,6 +12083,7 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// SST / MANIFEST I/O.
     pub fn persist_manifest_durable(&mut self) -> Result<()> {
+        DURABLE_PAYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.persist_manifest()
     }
 

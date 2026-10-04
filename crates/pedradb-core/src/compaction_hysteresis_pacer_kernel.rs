@@ -35,6 +35,10 @@ pub enum HysteresisConfigError {
     },
     /// Lower threshold must be greater than zero.
     ZeroThreshold,
+    /// Both L0 file weight and Level size weight cannot be zero simultaneously.
+    ZeroWeightsHazard,
+    /// Threshold exceeds safe maximum permille limit (1,000,000 permille).
+    ExcessiveThresholds { max: u64 },
 }
 
 impl std::fmt::Display for HysteresisConfigError {
@@ -48,6 +52,12 @@ impl std::fmt::Display for HysteresisConfigError {
             }
             Self::ZeroThreshold => {
                 write!(f, "Hysteresis lower threshold must be strictly greater than zero")
+            }
+            Self::ZeroWeightsHazard => {
+                write!(f, "Hysteresis configuration hazard: both l0_file_weight and level_weight cannot be zero")
+            }
+            Self::ExcessiveThresholds { max } => {
+                write!(f, "Hysteresis threshold exceeds maximum permitted permille limit {max}")
             }
         }
     }
@@ -124,6 +134,12 @@ impl CompactionHysteresisController {
                 theta_low: config.theta_low,
                 theta_high: config.theta_high,
             });
+        }
+        if config.l0_file_weight == 0 && config.level_weight == 0 {
+            return Err(HysteresisConfigError::ZeroWeightsHazard);
+        }
+        if config.theta_high > 1_000_000 {
+            return Err(HysteresisConfigError::ExcessiveThresholds { max: 1_000_000 });
         }
 
         Ok(Self {
@@ -250,3 +266,42 @@ impl CompactionHysteresisController {
         (new_state, changed)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compaction_hysteresis_pacer_structural_invariants_red_to_green() {
+        // 1. Zero weights hazard rejected
+        let zero_weights = HysteresisConfig {
+            l0_file_weight: 0,
+            level_weight: 0,
+            ..Default::default()
+        };
+        assert_eq!(
+            CompactionHysteresisController::new(zero_weights).unwrap_err(),
+            HysteresisConfigError::ZeroWeightsHazard
+        );
+
+        // 2. Excessive threshold rejected
+        let excessive = HysteresisConfig {
+            theta_high: 2_000_000,
+            ..Default::default()
+        };
+        assert_eq!(
+            CompactionHysteresisController::new(excessive).unwrap_err(),
+            HysteresisConfigError::ExcessiveThresholds { max: 1_000_000 }
+        );
+
+        // 3. Normal valid lifecycle
+        let mut controller = CompactionHysteresisController::new(HysteresisConfig::default()).unwrap();
+        assert_eq!(controller.state(), CompactionState::Idle);
+
+        // Under high load, transition to active
+        let (state, changed) = controller.update(20, &[]);
+        assert_eq!(state, CompactionState::Active);
+        assert!(changed);
+    }
+}
+

@@ -282,8 +282,8 @@
       "crates/rocksdb-compat/src/txn_kernel.rs"
     ],
     "kernel_files": 264,
-    "kernel_loc": 155013,
-    "handler_loc": 91116,
+    "kernel_loc": 158024,
+    "handler_loc": 91590,
     "db_rs_extracted": true,
     "proof_depth": {
       "extract": 0,
@@ -433,6 +433,7 @@
         "to_bytes",
         "try_from_slice",
         "try_new",
+        "try_new_with_span",
         "verify_disjoint_incarnations"
       ],
       "crates/pedradb-core/src/block_cache_hysteretic_partition_kernel.rs": [
@@ -613,6 +614,7 @@
         "mark_staged",
         "mark_written_to_os",
         "new",
+        "try_new",
         "verify_causal_soundness"
       ],
       "crates/pedradb-core/src/change_feed_kernel.rs": [
@@ -662,9 +664,11 @@
         "verify_acked_durability",
         "verify_checksum_alert",
         "verify_deterministic_replay",
+        "verify_sequenced_lifecycle",
         "verify_zero_resurrection"
       ],
       "crates/pedradb-core/src/cloud_hypervisor_pause_kernel.rs": [
+        "clear_quarantine_after_healthy_ticks",
         "clear_quarantine_after_sync",
         "is_quarantined",
         "new",
@@ -689,6 +693,8 @@
         "new",
         "quarantined_count",
         "total_corruption_events",
+        "try_mark_quarantined",
+        "try_release_quarantined",
         "verify_internal_invariants"
       ],
       "crates/pedradb-core/src/cloud_storage_watchdog_kernel.rs": [
@@ -698,9 +704,11 @@
         "inflight_count",
         "is_write_admitted",
         "new",
+        "purge_hung_after_fence",
         "register_io",
         "register_io_with_deadline",
-        "total_completed"
+        "total_completed",
+        "total_hung"
       ],
       "crates/pedradb-core/src/codec_inversion_kernel.rs": [
         "compress",
@@ -864,6 +872,8 @@
         "compact_l0_off_lock",
         "compact_l1_drain_off_lock",
         "compact_level_drain_off_lock",
+        "compact_leveled",
+        "compact_leveled_off_lock",
         "compact_reclaim",
         "compact_stacked_level_off_lock",
         "compact_vlog",
@@ -1164,6 +1174,8 @@
         "delete",
         "delete_range",
         "dir",
+        "dump_level_diag",
+        "durable_pays_count",
         "earliest_readable_sequence",
         "enable_write_backpressure_defaults",
         "encode_async_one",
@@ -1270,6 +1282,7 @@
         "oldest_pinned_sequence",
         "open",
         "open_with",
+        "parallel_jobs_k",
         "park_active_mem",
         "parked_bulk_bytes",
         "parked_bulk_count_handle",
@@ -1289,10 +1302,12 @@
         "point_tls_epoch_handle",
         "pop_parked_bulk_job",
         "prepare_adjacent_coalesce",
+        "prepare_disjoint_pushdown_batch",
         "prepare_flush_imm",
         "prepare_l0_compact",
         "prepare_l1_drain",
         "prepare_level_drain",
+        "prepare_next_stacked_level_repair",
         "prepare_pushdown_compact",
         "prepare_stacked_l1_repair",
         "prepare_stacked_level_repair",
@@ -1319,6 +1334,7 @@
         "release_snapshot_pin",
         "remove_bulk_encoding",
         "replace_oldest_parked_pair",
+        "reset_durable_pays_count",
         "reset_read_probe",
         "restore_imm",
         "restore_unsynced_ssts",
@@ -1419,6 +1435,7 @@
         "wal_arc",
         "wal_archive_count",
         "wal_archive_live_count",
+        "wal_pin_state",
         "wal_sync_count",
         "wal_sync_group",
         "workload_class_now",
@@ -1535,12 +1552,15 @@
         "new",
         "plan_io_slices",
         "sector_size",
+        "try_ceil_sector",
+        "try_plan_io_slices",
         "validate_buffer_alignment"
       ],
       "crates/pedradb-core/src/disk_pressure_kernel.rs": [
         "compact_allowed_under_pressure",
         "compact_refuse",
         "disk_pressure_admit",
+        "disk_pressure_admit_write",
         "disk_pressure_reclaim_plan",
         "disk_pressure_reclaim_plan_wal_held",
         "disk_probe_or_unknown",
@@ -1679,6 +1699,7 @@
         "decode",
         "encode",
         "new",
+        "try_decode_slice",
         "try_new",
         "verify_handshake"
       ],
@@ -1699,7 +1720,8 @@
       "crates/pedradb-core/src/foster_lyapunov_pacer_kernel.rs": [
         "compute_drift",
         "evaluate",
-        "new"
+        "new",
+        "try_new"
       ],
       "crates/pedradb-core/src/foster_lyapunov_stochastic_stall_kernel.rs": [
         "compute_v",
@@ -1762,7 +1784,8 @@
         "publish_seq",
         "published_seq",
         "retire_leader",
-        "submit"
+        "submit",
+        "try_publish_seq"
       ],
       "crates/pedradb-core/src/group_window_kernel.rs": [
         "async_catchup_bound_us",
@@ -1777,6 +1800,8 @@
         "last_fsynced_epoch",
         "new",
         "register_fsynced_barrier",
+        "try_new",
+        "try_register_fsynced_barrier",
         "verify_checksum",
         "verify_post_crash_canary"
       ],
@@ -1835,7 +1860,10 @@
         "add_file",
         "parse_sst_id",
         "sst_file_name",
-        "verify_backup_topological_closure"
+        "try_new",
+        "verify_backup_topological_closure",
+        "verify_complete_backup_with_current",
+        "verify_current_pointer_alignment"
       ],
       "crates/pedradb-core/src/hot_path_zero_alloc_kernel.rs": [
         "acquire_lease",
@@ -1910,7 +1938,8 @@
       ],
       "crates/pedradb-core/src/leftover_page_kernel.rs": [
         "family_upper_bound",
-        "sst_range_covers_family"
+        "sst_range_covers_family",
+        "sst_range_covers_family_checked"
       ],
       "crates/pedradb-core/src/liveness_progress_kernel.rs": [
         "advance_epoch",
@@ -1960,6 +1989,7 @@
       "crates/pedradb-core/src/manifest_confluence_kernel.rs": [
         "apply_delta",
         "empty",
+        "try_new",
         "verify_confluence",
         "verify_inventory_integrity"
       ],
@@ -1970,8 +2000,10 @@
         "delete_file",
         "empty",
         "to_snapshot_delta",
+        "try_new",
         "verify_associativity",
         "verify_catalog_consistency",
+        "verify_catalog_consistency_checked",
         "verify_fold_equivalence"
       ],
       "crates/pedradb-core/src/manifest_mod_kernel.rs": [
@@ -1983,10 +2015,12 @@
         "install_next",
         "load",
         "manifest_path",
+        "manifest_stores_count",
         "normalize_cfs",
         "normalize_levels",
         "parse_current_pointer",
         "parse_sst_name",
+        "reset_manifest_stores_count",
         "sst_path",
         "store"
       ],
@@ -2058,6 +2092,7 @@
         "mark_version_installed",
         "new",
         "pin_memtable_reader",
+        "pin_memtable_reader_for_epoch",
         "resolve_authoritative_source",
         "resolve_source",
         "try_unpin_memtable_reader",
@@ -3430,6 +3465,7 @@
         "full_iterator",
         "get",
         "get_cf",
+        "get_cf_bytes",
         "get_cf_opt",
         "get_named",
         "get_opt",
@@ -3467,6 +3503,7 @@
         "merge_cf",
         "multi_get",
         "multi_get_cf",
+        "multi_get_cf_bytes",
         "name",
         "new",
         "next",
@@ -3718,6 +3755,9 @@
         "verify_non_overlapping_spans",
         "verify_pointer_alignment",
         "verify_valid_file_descriptor"
+      ],
+      "crates/pedradb-core/src/durability_spine_kernel.rs": [
+        "try_spine_replay"
       ]
     },
     "single_artifact": 172,

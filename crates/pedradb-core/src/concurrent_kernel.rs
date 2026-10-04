@@ -5053,6 +5053,16 @@ impl<E: Env> ConcurrentDb<E> {
         if !self.writes_idle_for(Duration::ZERO) {
             return Ok(());
         }
+        // Read-guard precheck: the idle drain calls this every tick. When
+        // the pin state says KeepWal the write-lock path would return
+        // immediately anyway — taking the write lock just to learn that
+        // queues a writer and fails every reader's `try_read` for the
+        // drain window (published-SV fallback churn).
+        if let crate::flush_kernel::WalRotateAction::KeepWal =
+            crate::flush_kernel::wal_rotate_decision(self.inner.read().wal_pin_state())
+        {
+            return Ok(());
+        }
         self.inner.write().try_rotate_wal_if_idle()
     }
 
@@ -5246,27 +5256,118 @@ impl<E: Env> ConcurrentDb<E> {
     }
 
     /// Compact: flush pipeline first, then bounded leveled drain
-    /// ([`Db::compact_leveled`]) — L0 drain plus per-level pushdowns, not a
-    /// whole-level rewrite.
-    ///
-    /// Flush I/O releases the lock (see [`Self::flush`]); the compact merge still
-    /// needs exclusive access to the SST inventory for install safety.
+    /// ([`Db::compact_leveled`]) — L0 drain plus per-level pushdowns, running
+    /// SST merge and write off the write lock (RFC-0337).
     ///
     /// # Errors
     /// SST / MANIFEST I/O.
     pub fn compact(&self) -> Result<()> {
+        self.compact_leveled_off_lock()
+    }
+
+    /// Leveled compaction running entirely off the exclusive write lock (RFC-0337).
+    ///
+    /// Merging and writing SST tables occurs without holding the inner lock, allowing
+    /// concurrent puts, gets, and group commits to proceed without starvation. The inner
+    /// write lock is held only briefly to prepare the inputs and to atomically commit the
+    /// resulting VersionEdit and update the SuperVersion.
+    ///
+    /// # Errors
+    /// SST / MANIFEST I/O.
+    pub fn compact_leveled_off_lock(&self) -> Result<()> {
         self.flush()?;
-        let mut g = self.inner.write();
-        let res = g.compact_leveled();
-        let delay = g.take_pending_pacing_delay();
-        self.publish_from(&g);
-        drop(g);
+        {
+            let g = self.inner.read();
+            let probe = crate::env::probe_available_bytes(g.env(), g.dir());
+            if let Some((available, need)) = crate::disk_pressure_kernel::compact_refuse(probe) {
+                return Err(CoreError::DiskPressure { available, need });
+            }
+            if !crate::leveling::leveled_enabled() {
+                drop(g);
+                let mut w = self.inner.write();
+                let res = w.compact_with(CompactOptions::default());
+                let delay = w.take_pending_pacing_delay();
+                self.publish_from(&w);
+                drop(w);
+                if let Some(delay) = delay {
+                    self.compaction_pacing_active.store(true, Ordering::Release);
+                    std::thread::sleep(delay);
+                    self.compaction_pacing_active.store(false, Ordering::Release);
+                }
+                return res;
+            }
+        }
+
+        // Unstack any non-disjoint levels off-lock
+        loop {
+            let maybe_repair = {
+                let mut g = self.inner.write();
+                g.prepare_next_stacked_level_repair()?
+            };
+            let Some(job) = maybe_repair else {
+                break;
+            };
+            let tables = job.write()?;
+            if !self.install_prepared_one(job, tables) {
+                break;
+            }
+        }
+
+        for _ in 0..100_000 {
+            // L0→L1 jobs stay one-at-a-time
+            let maybe_l0 = {
+                let mut g = self.inner.write();
+                g.prepare_l0_compact(CompactOptions::default())?
+            };
+            if let Some(job) = maybe_l0 {
+                let tables = job.write()?;
+                if !self.install_prepared_one(job, tables) {
+                    break;
+                }
+                continue;
+            }
+
+            let batch = {
+                let mut g = self.inner.write();
+                let jobs_k = g.parallel_jobs_k();
+                g.prepare_disjoint_pushdown_batch(jobs_k)?
+            };
+            if batch.is_empty() {
+                let g = self.inner.read();
+                g.dump_level_diag("compact_leveled_done");
+                break;
+            }
+
+            let mut results = Vec::with_capacity(batch.len());
+            for job in batch {
+                let tables = job.write()?;
+                results.push((job, tables));
+            }
+            let mut all_installed = true;
+            for (job, tables) in results {
+                if !self.install_prepared_one(job, tables) {
+                    all_installed = false;
+                    break;
+                }
+            }
+            if !all_installed {
+                break;
+            }
+        }
+
+        let delay = self.inner.write().take_pending_pacing_delay();
         if let Some(delay) = delay {
             self.compaction_pacing_active.store(true, Ordering::Release);
             std::thread::sleep(delay);
             self.compaction_pacing_active.store(false, Ordering::Release);
         }
-        res
+
+        Ok(())
+    }
+
+    /// Alias for [`Self::compact_leveled_off_lock`].
+    pub fn compact_leveled(&self) -> Result<()> {
+        self.compact_leveled_off_lock()
     }
 
     /// Native compaction filter (RFC-0217 P1.2): flush first (mem keys are

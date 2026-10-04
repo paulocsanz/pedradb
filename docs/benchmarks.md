@@ -200,6 +200,8 @@ cited in the README is the fdatasync-before-Ok column.
 Negative point lookup, QPS. Not the snapshot-harness `probe_miss` p50
 in the 5 September table.
 
+Reading discipline: RocksDB default `Options::default()` has **no Bloom filter configured** (every probe traverses index blocks). With a matching 10 bits/key Bloom filter configured in RocksDB (`ROCKS_PARITY_ROCKS_BLOOM=10`), this cell operates at parity (~1.0×). The 17.6× ratio reflects PedraDB's built-in 10-bit bloom and per-CF SST key envelopes against an unconfigured, bloomless default peer.
+
 | round | canary | Pedra qps | Rocks qps | ratio |
 |---|---:|---:|---:|---:|
 | r1 | 146k, discarded | 433 468 | 26 885 | 16.12 |

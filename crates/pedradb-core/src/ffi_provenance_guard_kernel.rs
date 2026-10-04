@@ -22,6 +22,8 @@ pub enum FfiProvenanceError {
     LengthExceedsTargetLimit { len: usize, limit: usize },
     /// Buffer length is smaller than the required fixed schema or struct header.
     BufferLengthUnderflow { expected: usize, actual: usize },
+    /// Alignment requirement is invalid (must be a power of two >= 1).
+    InvalidAlignmentRequirement { alignment: usize },
     /// Memory ranges overlap, violating Rust aliasing and Tree Borrows rules.
     OverlappingBufferAliasing {
         first_range: (usize, usize),
@@ -41,6 +43,9 @@ impl fmt::Display for FfiProvenanceError {
             }
             Self::BufferLengthUnderflow { expected, actual } => {
                 write!(f, "FFI error: buffer length {actual} is smaller than required {expected}")
+            }
+            Self::InvalidAlignmentRequirement { alignment } => {
+                write!(f, "FFI error: alignment requirement {alignment} must be a power of two >= 1")
             }
             Self::OverlappingBufferAliasing { first_range, second_range } => {
                 write!(
@@ -72,7 +77,12 @@ impl SafeFfiBufferDescriptor {
         if address == 0 {
             return Err(FfiProvenanceError::NullPointerHazard);
         }
-        if required_alignment > 0 && address % required_alignment != 0 {
+        if required_alignment == 0 || !required_alignment.is_power_of_two() {
+            return Err(FfiProvenanceError::InvalidAlignmentRequirement {
+                alignment: required_alignment,
+            });
+        }
+        if address % required_alignment != 0 {
             return Err(FfiProvenanceError::MisalignedPointer {
                 address,
                 required: required_alignment,
@@ -134,3 +144,33 @@ impl SafeFfiBufferDescriptor {
         self.len == 0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ffi_provenance_guard_structural_invariants_red_to_green() {
+        // 1. Alignment 0 rejected
+        assert_eq!(
+            SafeFfiBufferDescriptor::try_new(0x1000, 1024, 0),
+            Err(FfiProvenanceError::InvalidAlignmentRequirement { alignment: 0 })
+        );
+
+        // 2. Non-power-of-two alignment rejected
+        assert_eq!(
+            SafeFfiBufferDescriptor::try_new(0x1000, 1024, 3),
+            Err(FfiProvenanceError::InvalidAlignmentRequirement { alignment: 3 })
+        );
+        assert_eq!(
+            SafeFfiBufferDescriptor::try_new(0x1000, 1024, 7),
+            Err(FfiProvenanceError::InvalidAlignmentRequirement { alignment: 7 })
+        );
+
+        // 3. Valid power-of-two alignment succeeds
+        let desc = SafeFfiBufferDescriptor::try_new(0x1000, 1024, 16).unwrap();
+        assert_eq!(desc.address(), 0x1000);
+        assert_eq!(desc.len(), 1024);
+    }
+}
+

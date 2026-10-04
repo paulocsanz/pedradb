@@ -31,6 +31,16 @@ live in the development tree. Count the pairs yourself: every id in
 `scripts/formal/catalog.json` names a kernel file present in this tree —
 that self-consistency is what the lint's extract and GAP checks enforce.
 
+## Kernel proofs vs runtime engineering armor
+
+We maintain a strict boundary between what is proved in Lean 4 and what is protected by runtime verification:
+
+1. **Mathematically proved (Lean 4 via Aeneas)**: The 172 pure decision kernels (`*_kernel.rs`). These prove core algebraic invariants in isolation: monotonic sequence ordering, tombstone dominance, compaction disjointness, and write-admission gating.
+2. **Guarded by runtime engineering armor (DST, PCT, RAII, Sanitizers)**: The multi-threaded engine runtime (`ConcurrentDb`), concurrency primitives (`RwLock`, atomic sequences, SuperVersion publishing), and physical I/O crates (`pedradb-posix`, `pedradb-io-uring`). These are protected against real-world hardware and OS physics via:
+   - **Immediate Linearizability (RFC-0330)**: Point cache negative-hit invalidation and read-lock fallback preventing transient stale reads.
+   - **Anti-Hole Crash Consistency (Contract F182)**: RAII seals writing valid NOP frames on aborted write jobs.
+   - **Deterministic Simulation Testing (DST)**: Seeded fault injection simulating torn writes and lying fsyncs on real POSIX disks (`PEDRA_SWARM_DISK=1`).
+
 ## Where the 172 pairs sit
 
 Counted by the kernel file `rustc` links — regenerate this table with

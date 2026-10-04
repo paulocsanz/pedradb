@@ -8,11 +8,40 @@
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 /// Unique identifier for an open iterator session.
 pub type IteratorId = u64;
 /// File number on disk.
 pub type FileNumber = u64;
+
+/// Errors that can occur during iterator pinning and file retention management.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IteratorPinningError {
+    /// Iterator ID already active.
+    IteratorAlreadyActive(IteratorId),
+    /// Iterator ID 0 is invalid.
+    ZeroIteratorId,
+    /// File number 0 is invalid.
+    ZeroFileNumber,
+    /// Attempted to pin an already deleted SST file.
+    AttemptedToPinDeletedFile(FileNumber),
+}
+
+impl fmt::Display for IteratorPinningError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::IteratorAlreadyActive(id) => write!(f, "Iterator ID #{id} is already active"),
+            Self::ZeroIteratorId => write!(f, "Iterator ID 0 is invalid (must be > 0)"),
+            Self::ZeroFileNumber => write!(f, "File number 0 is invalid (must be > 0)"),
+            Self::AttemptedToPinDeletedFile(num) => {
+                write!(f, "Attempted to pin already deleted SST file #{num}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for IteratorPinningError {}
 
 /// Tracks active iterators, version pins, and physical SST file reference counts.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,22 +65,31 @@ impl IteratorPinningManager {
     }
 
     /// Opens an iterator and pins the set of SST files in its snapshot.
-    pub fn open_iterator(&mut self, iter_id: IteratorId, files: &[FileNumber]) -> Result<(), &'static str> {
+    pub fn open_iterator(&mut self, iter_id: IteratorId, files: &[FileNumber]) -> Result<(), IteratorPinningError> {
+        if iter_id == 0 {
+            return Err(IteratorPinningError::ZeroIteratorId);
+        }
         if self.active_iterators.contains_key(&iter_id) {
-            return Err("Iterator ID already active");
+            return Err(IteratorPinningError::IteratorAlreadyActive(iter_id));
         }
 
-        let mut file_set = BTreeSet::new();
+        // Deduplicate file numbers upfront to prevent reference count inflation / leakage
+        let mut unique_files = BTreeSet::new();
         for &f in files {
-            // Cannot pin a file that has already been physically deleted
-            if self.pending_deletion.contains(&f) && *self.file_refs.get(&f).unwrap_or(&0) == 0 {
-                return Err("Attempted to pin already deleted SST file");
+            if f == 0 {
+                return Err(IteratorPinningError::ZeroFileNumber);
             }
-            file_set.insert(f);
+            if self.pending_deletion.contains(&f) && *self.file_refs.get(&f).unwrap_or(&0) == 0 {
+                return Err(IteratorPinningError::AttemptedToPinDeletedFile(f));
+            }
+            unique_files.insert(f);
+        }
+
+        for &f in &unique_files {
             *self.file_refs.entry(f).or_insert(0) += 1;
         }
 
-        self.active_iterators.insert(iter_id, file_set);
+        self.active_iterators.insert(iter_id, unique_files);
         Ok(())
     }
 
@@ -125,4 +163,56 @@ pub fn verify_iterator_step_monotonicity(keys_emitted: &[u64]) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_iterator_pinning_structural_invariants_red_to_green() {
+        let mut mgr = IteratorPinningManager::new();
+
+        // 1. Zero iterator id is rejected
+        assert_eq!(
+            mgr.open_iterator(0, &[10, 20]),
+            Err(IteratorPinningError::ZeroIteratorId)
+        );
+
+        // 2. Zero file number is rejected
+        assert_eq!(
+            mgr.open_iterator(1, &[10, 0, 20]),
+            Err(IteratorPinningError::ZeroFileNumber)
+        );
+
+        // 3. Duplicate file numbers do NOT inflate reference count
+        // Passing &[10, 10, 10, 20] should only increment ref count of 10 by 1!
+        assert!(mgr.open_iterator(1, &[10, 10, 10, 20]).is_ok());
+        assert_eq!(mgr.file_refs.get(&10), Some(&1));
+        assert_eq!(mgr.file_refs.get(&20), Some(&1));
+
+        // 4. Duplicate iterator id is rejected
+        assert_eq!(
+            mgr.open_iterator(1, &[30]),
+            Err(IteratorPinningError::IteratorAlreadyActive(1))
+        );
+
+        // 5. Mark 10 as obsolete (should defer deletion because iterator 1 has it pinned)
+        assert!(!mgr.mark_file_obsolete(10));
+        assert!(mgr.is_file_pinned(10));
+
+        // 6. Close iterator 1 releases pins cleanly without residual leak
+        let unlinked = mgr.close_iterator(1);
+        assert!(unlinked.contains(&10));
+        assert!(!mgr.is_file_pinned(10));
+        assert_eq!(mgr.file_refs.get(&10), None);
+        assert_eq!(mgr.file_refs.get(&20), Some(&0));
+
+        // 7. Attempting to pin an already deleted file is rejected
+        mgr.pending_deletion.insert(99);
+        assert_eq!(
+            mgr.open_iterator(2, &[99]),
+            Err(IteratorPinningError::AttemptedToPinDeletedFile(99))
+        );
+    }
 }

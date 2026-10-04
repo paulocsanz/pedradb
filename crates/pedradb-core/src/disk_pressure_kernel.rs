@@ -68,6 +68,30 @@ pub fn disk_pressure_admit(available: Option<u64>) -> DiskPressureAdmit {
     }
 }
 
+/// Admit an incoming write batch of `write_bytes` given `available` free bytes.
+///
+/// Guarantees that admitting this write will not immediately breach the hard floor.
+#[must_use]
+pub fn disk_pressure_admit_write(available: Option<u64>, write_bytes: u64) -> DiskPressureAdmit {
+    match available {
+        None => DiskPressureAdmit::Ok,
+        Some(n) => {
+            let required_hard = DISK_HARD_FREE_BYTES.saturating_add(write_bytes);
+            let required_soft = DISK_SOFT_FREE_BYTES.saturating_add(write_bytes);
+            if n >= required_soft {
+                DiskPressureAdmit::Ok
+            } else if n >= required_hard {
+                DiskPressureAdmit::Reclaim
+            } else {
+                DiskPressureAdmit::Refuse {
+                    available: n,
+                    need: required_hard,
+                }
+            }
+        }
+    }
+}
+
 /// AS-IS: always admit — WAL append proceeds into ENOSPC.
 #[must_use]
 pub fn disk_pressure_admit_as_is(_available: Option<u64>) -> DiskPressureAdmit {
@@ -554,5 +578,30 @@ mod tests {
             DISK_RECLAIM_EVERY_MS - 1,
             DISK_RECLAIM_EVERY_MS
         ));
+    }
+
+    #[test]
+    fn test_disk_pressure_structural_invariants_red_to_green() {
+        // When available is 70 MB (> hard floor 64 MB), normal admit admits for reclaim:
+        assert_eq!(
+            disk_pressure_admit(Some(70 * 1024 * 1024)),
+            DiskPressureAdmit::Reclaim
+        );
+
+        // But if incoming write batch is 20 MB, available will drop to 50 MB (< hard floor 64 MB)!
+        // disk_pressure_admit_write must fail-closed and Refuse:
+        assert_eq!(
+            disk_pressure_admit_write(Some(70 * 1024 * 1024), 20 * 1024 * 1024),
+            DiskPressureAdmit::Refuse {
+                available: 70 * 1024 * 1024,
+                need: 84 * 1024 * 1024,
+            }
+        );
+
+        // If space is ample, admit Ok:
+        assert_eq!(
+            disk_pressure_admit_write(Some(500 * 1024 * 1024), 10 * 1024 * 1024),
+            DiskPressureAdmit::Ok
+        );
     }
 }

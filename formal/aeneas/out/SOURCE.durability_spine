@@ -1,4 +1,4 @@
 path=crates/pedradb-core/src/durability_spine_kernel.rs
-sha256=2cc24a8998ebb2970594c80e85d3bfef90b4346bb500892bf8b52c2d8ea8320b
+sha256=1e00750513d46a53415cca4da45e32fbc272ff82fd7683e569114d2a13a986f0
 aeneas=f5a4c58-dirty
 charon=0.1.232

@@ -1478,6 +1478,11 @@ pub struct ProbeCounters {
     /// (the O(candidates) SuperVersion path). Its per-get rate is the
     /// writer-lock churn tax on readers.
     pub published_sv: u64,
+    /// Durability pay-point executions (SST fsync + MANIFEST rewrite) —
+    /// must stay flat on an idle, fully-published steady state.
+    pub durable_pays: u64,
+    /// MANIFEST rewrites (file + CURRENT swap).
+    pub manifest_stores: u64,
 }
 
 /// Snapshot of the calling thread's point-path counters.
@@ -1487,6 +1492,8 @@ pub fn probe_counters() -> ProbeCounters {
         blocks_decoded: pedradb_core::sst::sst_blocks_decoded(),
         block_crc_skipped: pedradb_core::sst::sst_block_crc_skipped(),
         published_sv: pedradb_core::concurrent::get_used_published_sv_count(),
+        durable_pays: pedradb_core::db::durable_pays_count(),
+        manifest_stores: pedradb_core::manifest::manifest_stores_count(),
     }
 }
 
@@ -2563,8 +2570,7 @@ impl<E: PedraEnv> DB<E> {
             None
         } else {
             Some(opts.write_buffer_size)
-        };
-        // RFC-0042 v18 mapped the Rocks block-cache knob onto whole-file
+        };        // RFC-0042 v18 mapped the Rocks block-cache knob onto whole-file
         // SST residency. Rocks caches 4 KiB blocks; slipstream's default
         // 1 GiB knob then pinned 1 GiB of 64 MiB files on the 3.9 GiB
         // guest and v57 lookup_100 regressed. Cap whole-file residency at
@@ -2912,6 +2918,17 @@ impl<E: PedraEnv> DB<E> {
     ///
     /// # Errors
     /// Pedra read errors.
+    /// RFC-0308 Pilar D: named-CF get returning `Bytes` (refcount handoff,
+    /// no `.to_vec()` per get — the Vec API copies the payload on every
+    /// hit). Same path and semantics as [`Self::get_cf`]. Lost in the
+    /// release-line reconciliation and restored: the official 100M legs
+    /// measured with this pillar (6e30134) held get_hit/get_loop/multi_get
+    /// at 26.7 µs / 1.04× / 1.13×; without it (8628b5e) 33.3 µs / 0.43× /
+    /// 0.42×.
+    pub fn get_cf_bytes(&self, cf: &ColumnFamily, key: &[u8]) -> Result<Option<Bytes>> {
+        self.get_cached_bytes(&cf.name, key)
+    }
+
     pub fn get_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         self.get_cached(&cf.name, key)
     }
@@ -2925,6 +2942,46 @@ impl<E: PedraEnv> DB<E> {
             self.check_cf(cf)?;
         }
         self.get_cached(cf, key)
+    }
+
+    /// TLS-warmed point get on a CF name already known valid.
+    /// RFC-0308 Pilar D: `get_cached` without the terminal value copy —
+    /// hits hand the cached `Bytes` straight through.
+    fn get_cached_bytes(&self, cf: &str, key: &[u8]) -> Result<Option<Bytes>> {
+        let effective = cf_encode_effective(cf, self.codec.default_raw);
+        thread_local! {
+            static ENC: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+        }
+        ENC.with(|cell| -> Result<Option<Bytes>> {
+            let mut buf = cell.borrow_mut();
+            buf.clear();
+            if !pedradb_core::write_admission_kernel::batch_is_empty(effective.len() as u64) {
+                buf.extend_from_slice(effective.as_bytes());
+                buf.push(0);
+            }
+            buf.extend_from_slice(key);
+            let enc: &[u8] = &buf;
+            if self.fast_encoded_miss(enc) {
+                drop(buf);
+                self.inner.note_class_point(false);
+                return Ok(None);
+            }
+            let epoch = self.cache_epoch_base + self.inner.point_tls_epoch();
+            let gen = self.inner.key_tls_gen(enc);
+            if let Some(hit) = LAST_CF.with(|slot| slot.borrow().get(epoch, gen, cf, key)) {
+                drop(buf);
+                self.inner.note_class_point(hit.is_some());
+                return Ok(hit);
+            }
+            let got = self.inner.get(enc);
+            drop(buf);
+            if got.is_some() {
+                LAST_CF.with(|slot| {
+                    slot.borrow_mut().store(epoch, gen, cf, key, got.clone())
+                });
+            }
+            Ok(got)
+        })
     }
 
     /// TLS-warmed point get on a CF name already known valid.
@@ -4571,6 +4628,44 @@ impl<E: PedraEnv> DB<E> {
             .collect()
     }
 
+    /// RFC-0308 Pilar A: batched named-CF point reads with a sorted probe
+    /// plan. One visible-sequence read for the whole batch; keys execute
+    /// in ENCODED order so consecutive keys usually land in the same run
+    /// table (its bloom partition and index stay hot between probes — the
+    /// locality neither the per-key loop nor Rocks' MultiGet has), with
+    /// stable indices restoring the caller's order. Results are `Bytes`
+    /// (Pilar D: no per-hit payload copy).
+    pub fn multi_get_cf_bytes<'a, K, I>(&self, keys: I) -> Vec<Result<Option<Bytes>>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = (&'a ColumnFamily, K)>,
+    {
+        let pairs: Vec<(&ColumnFamily, K)> = keys.into_iter().collect();
+        let n = pairs.len();
+        let mut out: Vec<Result<Option<Bytes>>> = Vec::with_capacity(n);
+        if pedradb_core::write_admission_kernel::batch_is_empty(n as u64) {
+            return out;
+        }
+        // Encode every key once, remember its position.
+        let mut plan: Vec<(usize, Vec<u8>)> = Vec::with_capacity(n);
+        for (i, (cf, k)) in pairs.iter().enumerate() {
+            let mut enc = Vec::with_capacity(cf.name.len() + 1 + k.as_ref().len());
+            enc.extend_from_slice(cf.name.as_bytes());
+            enc.push(0);
+            enc.extend_from_slice(k.as_ref());
+            plan.push((i, enc));
+        }
+        plan.sort_by(|a, b| a.1.cmp(&b.1));
+        let mut results: Vec<Option<Option<Bytes>>> = vec![None; n];
+        for (i, enc) in &plan {
+            results[*i] = Some(self.inner.get(enc));
+        }
+        for r in results.into_iter() {
+            out.push(Ok(r.unwrap_or(None)));
+        }
+        out
+    }
+
     /// rust-rocksdb `multi_get_cf`.
     ///
     /// Evaluates batched gets under a single atomic snapshot point-in-time.
@@ -5176,7 +5271,15 @@ where
                                 let _ = inner.persist_unsynced_l0s_off_lock();
                                 let _ = inner.rotate_wal_if_writers_idle();
                             }
-                            if !disable_auto_compactions {
+                            // Read-side gate: `compat_compact_once` takes the
+                            // Db write lock just to ask "any work?" — at the
+                            // settled steady state (no L0, no tombstone debt)
+                            // that queued a writer every 5 ms and failed every
+                            // reader's `try_read` for the drain window
+                            // (published-SV fallback, measured up to 38% of
+                            // gets on read-only phases). Signals are from this
+                            // same tick's with_read pass.
+                            if !disable_auto_compactions && (drain_l0 || l0 > 0 || tombstone_due) {
                                 while compat_compact_once(&inner, &gate) {}
                             }
                             wait = poll;

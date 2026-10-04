@@ -23,6 +23,8 @@ pub enum CacheDisambiguationError {
     InvalidByteLength { actual: usize, expected: usize },
     /// Distinct file incarnations produced identical cache keys or tags.
     CrossIncarnationCollision,
+    /// Block span addition overflows u64.
+    BlockSpanOverflow { offset: u64, len: u64 },
 }
 
 impl fmt::Display for CacheDisambiguationError {
@@ -46,6 +48,12 @@ impl fmt::Display for CacheDisambiguationError {
                     "Cross-incarnation collision: distinct file incarnations produced identical cache keys"
                 )
             }
+            Self::BlockSpanOverflow { offset, len } => {
+                write!(
+                    f,
+                    "Block span addition overflow: offset {offset} + len {len} wraps u64"
+                )
+            }
         }
     }
 }
@@ -64,10 +72,11 @@ pub struct DisambiguatedCacheKey {
 }
 
 impl DisambiguatedCacheKey {
-    /// Attempts to construct a validated disambiguated cache key.
-    pub fn try_new(
+    /// Attempts to construct a validated disambiguated cache key with block span verification.
+    pub fn try_new_with_span(
         table_uuid: [u8; 16],
         block_offset: u64,
+        block_len: u64,
         generation_epoch: u64,
     ) -> Result<Self, CacheDisambiguationError> {
         if table_uuid == [0u8; 16] {
@@ -76,6 +85,12 @@ impl DisambiguatedCacheKey {
         if generation_epoch == 0 {
             return Err(CacheDisambiguationError::ZeroGenerationEpoch);
         }
+        if block_offset.checked_add(block_len).is_none() {
+            return Err(CacheDisambiguationError::BlockSpanOverflow {
+                offset: block_offset,
+                len: block_len,
+            });
+        }
         Ok(Self {
             table_uuid,
             block_offset,
@@ -83,13 +98,19 @@ impl DisambiguatedCacheKey {
         })
     }
 
-    /// Constructs a new disambiguated cache key (backward-compatible).
+    /// Attempts to construct a validated disambiguated cache key.
+    pub fn try_new(
+        table_uuid: [u8; 16],
+        block_offset: u64,
+        generation_epoch: u64,
+    ) -> Result<Self, CacheDisambiguationError> {
+        Self::try_new_with_span(table_uuid, block_offset, 0, generation_epoch)
+    }
+
+    /// Constructs a new disambiguated cache key, enforcing invariant contracts.
     pub fn new(table_uuid: [u8; 16], block_offset: u64, generation_epoch: u64) -> Self {
-        Self::try_new(table_uuid, block_offset, generation_epoch).unwrap_or_else(|_| Self {
-            table_uuid,
-            block_offset,
-            generation_epoch,
-        })
+        Self::try_new(table_uuid, block_offset, generation_epoch)
+            .expect("DisambiguatedCacheKey invariant violated")
     }
 
     /// Serializes key into a compact 32-byte representation.
@@ -159,3 +180,39 @@ impl CacheCollisionOracle {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_block_cache_disambiguation_structural_invariants_red_to_green() {
+        // Invariant 1: Nil table UUID is rejected fail-closed
+        assert_eq!(
+            DisambiguatedCacheKey::try_new([0u8; 16], 1024, 1),
+            Err(CacheDisambiguationError::NilTableUuid)
+        );
+
+        // Invariant 2: Generation epoch 0 is rejected fail-closed
+        assert_eq!(
+            DisambiguatedCacheKey::try_new([1u8; 16], 1024, 0),
+            Err(CacheDisambiguationError::ZeroGenerationEpoch)
+        );
+
+        // Invariant 3: Block span addition overflow is detected and rejected
+        assert_eq!(
+            DisambiguatedCacheKey::try_new_with_span([1u8; 16], u64::MAX - 10, 20, 1),
+            Err(CacheDisambiguationError::BlockSpanOverflow {
+                offset: u64::MAX - 10,
+                len: 20
+            })
+        );
+
+        // Invariant 4: Valid key construction and round-trip byte representation
+        let key = DisambiguatedCacheKey::try_new_with_span([2u8; 16], 4096, 512, 3).unwrap();
+        let bytes = key.to_bytes();
+        let decoded = DisambiguatedCacheKey::try_from_slice(&bytes).unwrap();
+        assert_eq!(key, decoded);
+    }
+}
+

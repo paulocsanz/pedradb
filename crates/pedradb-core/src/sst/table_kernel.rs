@@ -926,26 +926,17 @@ impl SstTable {
                     SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
                     let body = split_block_crc(&scratch.raw, &self.path)?;
                     let plain_arc: Arc<[u8]> = if self.compressed_blocks {
-                        let (size, input) = lz4_flex::block::uncompressed_size(body).map_err(|e| {
+                        let config = crate::sst_block_decompression_guard_kernel::BlockDecompressionGuardConfig::default();
+                        crate::sst_block_decompression_guard_kernel::SafeBlockDecoder::decompress_lz4_into(
+                            body,
+                            &config,
+                            &mut scratch.plain,
+                        ).map_err(|e| {
                             CoreError::Internal(format!(
                                 "SST lz4 decompress failed in {}: {e}",
                                 self.path.display()
                             ))
                         })?;
-                        scratch.plain.clear();
-                        scratch.plain.resize(size, 0);
-                        let written = lz4_flex::block::decompress_into(input, &mut scratch.plain).map_err(|e| {
-                            CoreError::Internal(format!(
-                                "SST lz4 decompress failed in {}: {e}",
-                                self.path.display()
-                            ))
-                        })?;
-                        if written != size {
-                            return Err(CoreError::Internal(format!(
-                                "SST lz4 size prefix mismatch in {}: wrote {written} of {size} bytes",
-                                self.path.display()
-                            )));
-                        }
                         Arc::from(scratch.plain.as_slice())
                     } else {
                         Arc::from(body)
@@ -2371,26 +2362,17 @@ fn seek_point_in_block_body(
 ) -> Result<Option<(SequenceNumber, Lookup)>> {
     let plain_scratch = &mut scratch.plain;
     let plain: &[u8] = if compressed {
-        let (size, input) = lz4_flex::block::uncompressed_size(body).map_err(|e| {
+        let config = crate::sst_block_decompression_guard_kernel::BlockDecompressionGuardConfig::default();
+        crate::sst_block_decompression_guard_kernel::SafeBlockDecoder::decompress_lz4_into(
+            body,
+            &config,
+            plain_scratch,
+        ).map_err(|e| {
             CoreError::Internal(format!(
                 "SST lz4 decompress failed in {}: {e}",
                 path.display()
             ))
         })?;
-        plain_scratch.clear();
-        plain_scratch.resize(size, 0);
-        let written = lz4_flex::block::decompress_into(input, plain_scratch).map_err(|e| {
-            CoreError::Internal(format!(
-                "SST lz4 decompress failed in {}: {e}",
-                path.display()
-            ))
-        })?;
-        if written != size {
-            return Err(CoreError::Internal(format!(
-                "SST lz4 size prefix mismatch in {}: wrote {written} of {size} bytes",
-                path.display()
-            )));
-        }
         plain_scratch.as_slice()
     } else {
         body
@@ -2726,12 +2708,19 @@ fn decode_block_bytes(
         raw
     };
     let plain: Vec<u8> = if compressed_blocks {
-        lz4_flex::decompress_size_prepended(raw).map_err(|e| {
+        let config = crate::sst_block_decompression_guard_kernel::BlockDecompressionGuardConfig::default();
+        let mut out = Vec::new();
+        crate::sst_block_decompression_guard_kernel::SafeBlockDecoder::decompress_lz4_into(
+            raw,
+            &config,
+            &mut out,
+        ).map_err(|e| {
             CoreError::Internal(format!(
                 "SST lz4 decompress failed in {}: {e}",
                 path.display()
             ))
-        })?
+        })?;
+        out
     } else {
         raw.to_vec()
     };
