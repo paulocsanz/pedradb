@@ -89,20 +89,45 @@ fn value_bytes() -> usize {
 
 fn backends() -> Vec<Backend> {
     let raw = std::env::var("SLIPSTREAM_BENCH_BACKENDS").unwrap_or_default();
-    if raw.trim().is_empty() {
-        return vec![Backend::Fjall, Backend::RocksDb, Backend::PedraDb];
+    let mut selected = if raw.trim().is_empty() {
+        vec![Backend::Fjall, Backend::RocksDb, Backend::PedraDb]
+    } else {
+        raw.split(',')
+            .filter_map(|s| match s.trim().to_ascii_lowercase().as_str() {
+                "fjall" => Some(Backend::Fjall),
+                "rocksdb" | "rocks" => Some(Backend::RocksDb),
+                "pedradb" | "pedra" => Some(Backend::PedraDb),
+                other => {
+                    eprintln!("snapshot_backends: ignoring unknown backend {other:?}");
+                    None
+                }
+            })
+            .collect()
+    };
+    let shuffle = std::env::var("SLIPSTREAM_BENCH_SHUFFLE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if shuffle && selected.len() > 1 {
+        let seed = std::env::var("SLIPSTREAM_BENCH_SHUFFLE_SEED")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or(0xC0FF_EE00)
+            });
+        let mut state = seed | 1;
+        for i in (1..selected.len()).rev() {
+            let j = (next_rand(&mut state) as usize) % (i + 1);
+            selected.swap(i, j);
+        }
+        eprintln!(
+            "snapshot_backends: shuffle seed={seed} order={:?}",
+            selected.iter().map(|b| b.name()).collect::<Vec<_>>()
+        );
     }
-    raw.split(',')
-        .filter_map(|s| match s.trim().to_ascii_lowercase().as_str() {
-            "fjall" => Some(Backend::Fjall),
-            "rocksdb" | "rocks" => Some(Backend::RocksDb),
-            "pedradb" | "pedra" => Some(Backend::PedraDb),
-            other => {
-                eprintln!("snapshot_backends: ignoring unknown backend {other:?}");
-                None
-            }
-        })
-        .collect()
+    selected
 }
 
 fn sequential_mode(n: usize) -> bool {
