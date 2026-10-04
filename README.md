@@ -91,6 +91,13 @@ PedraDB provides zero-lock-contention health diagnostics and internal metrics di
 
 ## Concurrency & Durability Guarantees
 
+**Transactions are optimistic, first-committer-wins**: the conflict set is
+touched keys AND range deletes (a committed `DeleteRange` conflicts with a
+later OCC put inside its window, and vice versa — verified by test). Range
+**reads** (scans) are snapshot reads and are not tracked in the conflict
+set: serializability across concurrent scans and range writes is not
+claimed.
+
 - **Strict Read-Your-Writes Linearizability**: Every acknowledged transaction (`tx.commit()` -> `Ok`) is immediately visible to subsequent `get` calls on the same thread and concurrent observers. `ConcurrentDb::get` falls back to verified read-lock acquisition if optimistic SuperVersion publication is mid-transition, eliminating transient stale reads (`crates/pedradb-core/tests/rfc0330_strict_linearizability_read_your_writes.rs`).
 - **Gapless Anti-Hole Crash Consistency**: Positional WAL allocations for asynchronous writers are bound to RAII anti-hole seals (Contract F182). Aborted or cancelled write jobs automatically seal allocated spans with valid NOP frames, preventing mid-log tearing on crash recovery (`crates/pedradb-core/tests/rfc0330_async_wal_anti_hole_contract.rs`).
 - **Fail-Closed Verification**: Checksums (CRC32C) and monotonic sequence numbers guard all WAL records, manifest updates, and SST blocks. Any uncorrectable physical corruption aborts recovery safely rather than serving damaged data.
@@ -105,9 +112,21 @@ PedraDB provides zero-lock-contention health diagnostics and internal metrics di
 Linux, single guest (4 vCPU on a Threadripper PRO 3975WX host, NVMe).
 Ratio = Pedra ÷ peer; above 1 means Pedra is faster. **Bold** is a win;
 plain is a tie or parity; `—` is unpublished — not measured, or the peer
-sat outside its own historical band and the cell was refused. Protocol,
-per-run values behind every median, and the full loss registry:
-[`docs/benchmarks.md`](docs/benchmarks.md).
+sat outside its own historical band and the cell was refused.
+
+Reading discipline (RFC-0337): peers are RocksDB `Options::default()` —
+which ships **no bloom filter** (absent-key cells are a feature delta, not
+engine superiority; `ROCKS_PARITY_ROCKS_BLOOM=10` is the harness A/B lane
+for a bloom-configured peer) — with snappy on L1+, while Pedra ships
+**without block compression** (cold-read and disk-footprint cells carry
+that 2–4× tax; a compression knob is roadmap). Cells come in two classes:
+**sorted-ingest** tables below (flush + `wait_for_compact` settled
+symmetrically — LSM costs live here), and **memtable-window** tables
+further down (256 MiB write buffers on both engines so no timed suite
+flushes — those cells measure memtable and cache throughput). Harness
+defaults equal product `OpenOptions` defaults; any profile delta is cited
+per-table. Protocol, per-run values behind every median, and the full loss
+registry: [`docs/benchmarks.md`](docs/benchmarks.md).
 
 ### Scale ladder — sorted ingest, vs RocksDB default
 

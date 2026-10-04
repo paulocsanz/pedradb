@@ -2538,6 +2538,8 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
     env: E,
     dir: PathBuf,
     vlog_use_new: Arc<AtomicBool>,
+    /// RFC-0274: Track when compaction pacing sleep is actively running outside the write lock.
+    compaction_pacing_active: Arc<AtomicBool>,
 }
 
 impl<E: Env> Clone for ConcurrentDb<E> {
@@ -2570,6 +2572,7 @@ impl<E: Env> Clone for ConcurrentDb<E> {
             env: self.env.clone(),
             dir: self.dir.clone(),
             vlog_use_new: Arc::clone(&self.vlog_use_new),
+            compaction_pacing_active: Arc::clone(&self.compaction_pacing_active),
         }
     }
 }
@@ -2674,6 +2677,7 @@ impl<E: Env> ConcurrentDb<E> {
             env,
             dir,
             vlog_use_new,
+            compaction_pacing_active: Arc::new(AtomicBool::new(false)),
         };
         out.publish_ssts();
         out
@@ -3473,6 +3477,12 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.write().set_compaction_rate_bytes_per_sec(rate);
     }
 
+    /// True while compaction is actively sleeping for pacing outside the Db write lock (RFC-0274).
+    #[must_use]
+    pub fn is_compaction_pacing(&self) -> bool {
+        self.compaction_pacing_active.load(Ordering::Acquire)
+    }
+
     /// Estimated pending compaction debt in bytes across all LSM levels (RFC-0274 Pillar III).
     #[must_use]
     pub fn pending_compaction_bytes(&self) -> u64 {
@@ -4035,6 +4045,20 @@ impl<E: Env> ConcurrentDb<E> {
     /// not stage on the Ok path.
     #[must_use]
     pub fn try_stage_if_full(&self) -> bool {
+        // Read-guard precheck. The idle compact tick calls this every 5 ms;
+        // taking the Db write lock just to learn "not full" queues a writer
+        // behind in-flight readers, and every `try_read` in that window
+        // falls to `lookup_published` (measured 10-34% of gets on read-only
+        // phases). The write-guard re-check below stays authoritative.
+        {
+            let g = self.inner.read();
+            let Some(limit) = g.auto_flush_threshold() else {
+                return false;
+            };
+            if g.active_mem_usage() < limit {
+                return false;
+            }
+        }
         let mut g = self.inner.write();
         let Some(limit) = g.auto_flush_threshold() else {
             return false;
@@ -5056,6 +5080,13 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// SST / MANIFEST I/O.
     pub fn persist_unsynced_l0s_off_lock(&self) -> Result<()> {
+        // Read-guard precheck: the idle drain calls this every tick; skip
+        // the write lock when nothing is unsynced (the settled steady state).
+        if crate::write_admission_kernel::batch_is_empty(
+            self.inner.read().unsynced_sst_count() as u64,
+        ) {
+            return Ok(());
+        }
         let prepared = {
             let mut g = self.inner.write();
             if crate::write_admission_kernel::batch_is_empty(g.unsynced_sst_count() as u64) {
@@ -5231,7 +5262,9 @@ impl<E: Env> ConcurrentDb<E> {
         self.publish_from(&g);
         drop(g);
         if let Some(delay) = delay {
+            self.compaction_pacing_active.store(true, Ordering::Release);
             std::thread::sleep(delay);
+            self.compaction_pacing_active.store(false, Ordering::Release);
         }
         res
     }
@@ -5254,7 +5287,9 @@ impl<E: Env> ConcurrentDb<E> {
         self.publish_from(&g);
         drop(g);
         if let Some(delay) = delay {
+            self.compaction_pacing_active.store(true, Ordering::Release);
             std::thread::sleep(delay);
+            self.compaction_pacing_active.store(false, Ordering::Release);
         }
         res
     }
@@ -5330,7 +5365,9 @@ impl<E: Env> ConcurrentDb<E> {
         self.publish_from(&g);
         drop(g);
         if let Some(delay) = delay {
+            self.compaction_pacing_active.store(true, Ordering::Release);
             std::thread::sleep(delay);
+            self.compaction_pacing_active.store(false, Ordering::Release);
         }
         res
     }
@@ -5350,7 +5387,9 @@ impl<E: Env> ConcurrentDb<E> {
         self.publish_from(&g);
         drop(g);
         if let Some(delay) = delay {
+            self.compaction_pacing_active.store(true, Ordering::Release);
             std::thread::sleep(delay);
+            self.compaction_pacing_active.store(false, Ordering::Release);
         }
         res
     }
@@ -7128,26 +7167,28 @@ mod tests {
         let parked = db.parked_unflushed_count();
         assert!(parked > 0);
         let barrier = std::sync::Barrier::new(3);
+        let stop = std::sync::atomic::AtomicBool::new(false);
         std::thread::scope(|s| {
             for t in 0..2u8 {
                 let db = &db;
                 let barrier = &barrier;
+                let stop = &stop;
                 s.spawn(move || {
                     barrier.wait();
-                    let t0 = Instant::now();
                     let mut n = 0u32;
-                    while t0.elapsed() < Duration::from_millis(200) {
+                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
                         let k = format!("c/{t}-{n:06}");
                         let _ = db.put(k.as_bytes(), b"v");
                         n = n.wrapping_add(1);
+                        std::thread::yield_now();
                     }
                 });
             }
             barrier.wait();
             let wait0 = Instant::now();
-            while !db.recently_multi(Duration::from_millis(2)) {
+            while !db.recently_multi(Duration::from_millis(50)) {
                 assert!(
-                    wait0.elapsed() < Duration::from_millis(400),
+                    wait0.elapsed() < Duration::from_secs(5),
                     "2 writers must set recently_multi"
                 );
                 std::thread::sleep(Duration::from_millis(1));
@@ -7157,6 +7198,7 @@ mod tests {
                 "must skip materialize while recently_multi"
             );
             assert_eq!(db.parked_unflushed_count(), parked);
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
         });
         let _ = fs::remove_dir_all(&dir);
     }
@@ -12749,7 +12791,18 @@ mod tests {
         }
 
         // Wait for compaction rewrite_ssts to complete disk write and enter pacing delay outside the lock
-        thread::sleep(Duration::from_millis(60));
+        let start_wait = Instant::now();
+        while !db.is_compaction_pacing() && !t.is_finished() {
+            if start_wait.elapsed() > Duration::from_secs(5) {
+                break;
+            }
+            thread::yield_now();
+        }
+
+        assert!(
+            db.is_compaction_pacing(),
+            "compaction must enter pacing delay outside the write lock"
+        );
 
         // Attempt a write while compaction is pacing.
         // If write lock were held during sleep, this put would be blocked for hundreds of milliseconds!

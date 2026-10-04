@@ -46,8 +46,11 @@ silently runs every enabled backend in one process.
 
 Linux, single guest (4 vCPU on a Threadripper PRO 3975WX host), NVMe via
 `TMPDIR`, `vm.dirty_ratio=5`, `vm.dirty_background_ratio=1`. Values are
-200 B, batches 1024 entries, block cache 256 MiB, Pedra bulk-stage clamp
-64 MiB (`PEDRA_STAGE_MAX_BYTES=67108864`). One backend per process —
+200 B, batches 1024 entries, block cache 256 MiB (harness default, same
+for every backend), Pedra bulk chunks self-tuned to a 64 MiB ceiling
+in-engine (RFC-0306 default — no knob; the historical
+`PEDRA_STAGE_MAX_BYTES=67108864` pin was a downward-only no-op at that
+value). One backend per process —
 `SLIPSTREAM_BENCH_BACKENDS=pedradb`, then `=rocksdb` — Pedra leg first.
 A 50k-entry smoke per backend must exit 0 before any official leg. A
 published cell is the median of 3 runs (criterion `mid` of
@@ -139,6 +142,18 @@ restart, all exits 0) landed inside these bands: probe_miss Pedra 230 ns
 vs Rocks 531–621 ns, prefix 346 vs 350–360 µs, get_hit 60.7 vs 77–98 µs.
 
 ## Linux gate, 21–23 September 2026
+
+> **Class label (RFC-0337)**: the mc4 shapes below run in a 256 MiB
+> memtable window on BOTH engines — no timed suite flushes, so these cells
+> measure **memtable + cache throughput, not LSM behavior** (flush,
+> compaction, tombstone, and cold-cache costs appear in the sorted-ingest
+> tables above, where the worst cells live). The absent-key shapes are a
+> **feature delta**: the RocksDB default peer ships no bloom filter;
+> `ROCKS_PARITY_ROCKS_BLOOM=10` is the A/B lane for the bloom-configured
+> peer, and we expect those ratios to collapse against it. Historical
+> tables measured with `ROCKS_PARITY_MIN_BLOB=4096` (vlog profile) cite it
+> in their provenance; the harness default is now inline — equal to the
+> product's `OpenOptions` default.
 
 Async same-class column (`PEDRA_PARITY_ASYNC=1`) against RocksDB default
 `WriteOptions.sync=false`. Guest: 4 vCPU / 4 GiB, `linux-gate-p238`.
@@ -295,11 +310,11 @@ scripts/scale-ladder-campaign.sh
 Or leg-by-leg:
 
 ```sh
-# Official harness, one backend per process
+# Official harness, one backend per process (defaults ARE the protocol:
+# 200 B values, 256 MiB cache, 64 MiB engine-side bulk ceiling)
 cd crates/snapshot-bench
 for b in pedradb rocksdb; do
   SLIPSTREAM_BENCH_BACKENDS=$b SLIPSTREAM_BENCH_ENTRIES=25000000 \
-  SLIPSTREAM_BENCH_CACHE_BYTES=268435456 PEDRA_STAGE_MAX_BYTES=67108864 \
   TMPDIR=/data/stores \
     cargo bench --bench snapshot_backends --features fjall,rocksdb,pedradb \
     -- 'get_hit|prefix_scan|lookup_100'

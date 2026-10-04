@@ -282,8 +282,8 @@
       "crates/rocksdb-compat/src/txn_kernel.rs"
     ],
     "kernel_files": 264,
-    "kernel_loc": 154890,
-    "handler_loc": 91058,
+    "kernel_loc": 155013,
+    "handler_loc": 91116,
     "db_rs_extracted": true,
     "proof_depth": {
       "extract": 0,
@@ -907,6 +907,7 @@
         "ingest_sst_file",
         "install_prepared_l0_off_lock",
         "io_advise_line",
+        "is_compaction_pacing",
         "is_durability_fenced",
         "is_empty",
         "is_settled_sst_only",

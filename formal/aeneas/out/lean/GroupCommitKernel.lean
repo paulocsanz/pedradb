@@ -695,11 +695,15 @@ def lock_alphabet_linearizes_n3
       let holding_write ←
         if a0 = LOCK_ACT_ACQUIRE_WRITE
         then ok true
-        else ok (a1 = LOCK_ACT_ACQUIRE_WRITE)
+        else if a1 = LOCK_ACT_ACQUIRE_WRITE
+        then ok true
+        else ok false
       let submitted ←
         if a0 = LOCK_ACT_SUBMIT
         then ok true
-        else ok (a1 = LOCK_ACT_SUBMIT)
+        else if a1 = LOCK_ACT_SUBMIT
+        then ok true
+        else ok false
       lock_alphabet_step holding_write submitted a2
     else ok false
   else ok false

@@ -679,11 +679,27 @@ impl BlockCache {
 ///
 /// Hit is O(1). Capacity 0 = disabled. (Count answers moved to
 /// [`CountCache`] — range-aware invalidation.)
-#[derive(Debug, Default)]
+///
+/// RFC-0337 A2.1: sharded by key hash — the single-mutex version serialized
+/// EVERY point get (hit, miss, negative) behind one lock, capping read
+/// throughput at high core counts. Freeze-when-full and gen-invalidation
+/// semantics are per shard and identical to the single-lock version.
+#[derive(Debug)]
 pub struct AnswerCache<V> {
-    inner: Mutex<AnswerCacheInner<V>>,
+    shards: Box<[Mutex<AnswerCacheInner<V>>]>,
     is_frozen: std::sync::atomic::AtomicBool,
 }
+
+impl<V: Clone> Default for AnswerCache<V> {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+/// Shard count: 16 locks keeps the critical section tiny while letting
+/// independent cores' point gets proceed in parallel (measure before
+/// changing; the frozen-hit fast path still needs no lock at all).
+const ANSWER_CACHE_SHARDS: usize = 16;
 
 /// Latest-snapshot point get (`None` = cached absence).
 pub type PointCache = AnswerCache<Option<Bytes>>;
@@ -823,25 +839,45 @@ struct AnswerCacheInner<V> {
 }
 
 impl<V: Clone> AnswerCache<V> {
-    /// Create with max cached keys (`0` = disabled).
+    /// Create with max cached keys (`0` = disabled). The capacity is the
+    /// TOTAL across shards; each shard holds capacity/SHARDS and freezes
+    /// independently at its share (same aggregate fill behavior).
     #[must_use]
     pub fn new(capacity: usize) -> Self {
+        // An ENABLED cache (capacity >= 1) must cache something: never
+        // round a small capacity down to zero shards-with-room.
+        let per_shard = if capacity == 0 {
+            0
+        } else {
+            (capacity / ANSWER_CACHE_SHARDS).max(1)
+        };
         Self {
-            inner: Mutex::new(AnswerCacheInner {
-                map: std::collections::HashMap::default(),
-                order: std::collections::VecDeque::new(),
-                capacity,
-                gen: 0,
-                epoch: 0,
-            }),
+            shards: (0..ANSWER_CACHE_SHARDS)
+                .map(|_| {
+                    Mutex::new(AnswerCacheInner {
+                        map: std::collections::HashMap::default(),
+                        order: std::collections::VecDeque::new(),
+                        capacity: per_shard,
+                        gen: 0,
+                        epoch: 0,
+                    })
+                })
+                .collect(),
             is_frozen: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    fn shard_of(&self, key: &[u8]) -> &Mutex<AnswerCacheInner<V>> {
+        let mut fx = FxHasher::default();
+        fx.write(key);
+        let idx = fx.finish() as usize % ANSWER_CACHE_SHARDS;
+        &self.shards[idx]
     }
 
     /// `None` = miss.
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<V> {
-        let g = self.inner.lock();
+        let g = self.shard_of(key).lock();
         if crate::write_admission_kernel::batch_is_empty(g.capacity as u64) {
             return None;
         }
@@ -856,7 +892,7 @@ impl<V: Clone> AnswerCache<V> {
         if self.is_frozen.load(Ordering::Relaxed) {
             return;
         }
-        let mut g = self.inner.lock();
+        let mut g = self.shard_of(key).lock();
         if crate::write_admission_kernel::batch_is_empty(g.capacity as u64) {
             return;
         }
@@ -881,38 +917,43 @@ impl<V: Clone> AnswerCache<V> {
         g.map.insert(owned, (now, epoch, value));
     }
 
-    /// Invalidate every entry without walking the map (write path).
+    /// Invalidate every entry without walking the maps (write path): every
+    /// shard's gen bumps — a stale hit would need `entry.gen == shard.gen`,
+    /// which just changed.
     pub fn clear(&self) {
         self.is_frozen.store(false, Ordering::Relaxed);
-        let mut g = self.inner.lock();
-        g.gen = g.gen.wrapping_add(1);
-        if g.gen == 0 {
-            g.map.clear();
-            g.order.clear();
-            g.gen = 1;
+        for shard in &self.shards {
+            let mut g = shard.lock();
+            g.gen = g.gen.wrapping_add(1);
+            if g.gen == 0 {
+                g.map.clear();
+                g.order.clear();
+                g.gen = 1;
+            }
         }
     }
 
     /// Drop one key so other latest-snapshot hits stay (YCSB B/D 95/5).
     pub fn invalidate(&self, key: &[u8]) {
         self.is_frozen.store(false, Ordering::Relaxed);
-        self.inner.lock().map.remove(key);
+        self.shard_of(key).lock().map.remove(key);
     }
 
-    /// Drop several keys under **one** lock (publish path: one acquire per
-    /// written batch instead of one per key).
+    /// Drop several keys (publish path): one lock acquire per DISTINCT
+    /// shard — keys sharing a shard batch under its lock.
     pub fn invalidate_many(&self, keys: &[Bytes]) {
         self.is_frozen.store(false, Ordering::Relaxed);
-        let mut g = self.inner.lock();
         for k in keys {
-            g.map.remove(k);
+            self.shard_of(k).lock().map.remove(k);
         }
     }
 
     /// No cached answers (RFC-0062 P0.4: skip per-key dirty clones).
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        crate::write_admission_kernel::batch_is_empty(self.inner.lock().map.len() as u64)
+        self.shards.iter().all(|s| {
+            crate::write_admission_kernel::batch_is_empty(s.lock().map.len() as u64)
+        })
     }
 }
 
@@ -1367,15 +1408,39 @@ mod tests {
 
     #[test]
     fn point_cache_freezes_at_capacity() {
-        let c = PointCache::new(2);
-        c.insert(b"a", Some(Bytes::from_static(b"1")));
-        c.insert(b"b", Some(Bytes::from_static(b"2")));
-        c.insert(b"c", Some(Bytes::from_static(b"3")));
-        assert_eq!(c.get(b"a").unwrap().as_deref(), Some(&b"1"[..]));
-        assert_eq!(c.get(b"b").unwrap().as_deref(), Some(&b"2"[..]));
+        // RFC-0337 sharding: freeze is per shard. Find three keys that land
+        // in the SAME shard (FxHasher is deterministic — brute force is
+        // stable) and prove that shard freezes at its share without
+        // FIFO-evicting.
+        fn shard_of_key(key: &[u8]) -> usize {
+            let mut fx = FxHasher::default();
+            fx.write(key);
+            fx.finish() as usize % 16
+        }
+        let mut same: Vec<Vec<u8>> = Vec::new();
+        let mut i = 0u32;
+        while same.len() < 3 {
+            let k = format!("freeze-{i}").into_bytes();
+            if same.is_empty() || shard_of_key(&k) == shard_of_key(&same[0]) {
+                same.push(k);
+            }
+            i += 1;
+        }
+        // capacity 32 => per-shard 2: the third same-shard key must be
+        // refused (frozen shard, no eviction), the first two must survive.
+        let c = PointCache::new(32);
+        for (n, k) in same.iter().enumerate() {
+            c.insert(k, Some(Bytes::from(format!("{n}"))));
+        }
+        assert_eq!(
+            c.get(&same[0]).unwrap().as_deref(),
+            Some(&b"0"[..]),
+            "first entry must survive shard freeze"
+        );
+        assert_eq!(c.get(&same[1]).unwrap().as_deref(), Some(&b"1"[..]));
         assert!(
-            c.get(b"c").is_none(),
-            "full cache must not FIFO-evict on miss"
+            c.get(&same[2]).is_none(),
+            "full shard must not FIFO-evict on miss"
         );
     }
 

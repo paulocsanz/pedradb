@@ -149,6 +149,21 @@ fn value_for(pool: &[u8], i: usize, len: usize) -> &[u8] {
 /// a watch-driven consumer would during hydration.
 fn hydrate<S: SnapshotStore>(store: &mut S, n: usize, pool: &[u8], vlen: usize) {
     let mut batch = Vec::with_capacity(APPLY_BATCH);
+    // SLIPSTREAM_BENCH_SHUFFLE=1: deterministic shuffled insert order over
+    // the SAME key/value/version set (only the order differs). The sorted
+    // leg rides the ascending bulk latch; this leg forces the leveled
+    // pipeline (memtable → L0 → compaction), so settle measures real
+    // level-organization work. Settled stores are identical across legs,
+    // so every read cell stays comparable.
+    let shuffled: Option<Vec<u64>> = std::env::var_os("SLIPSTREAM_BENCH_SHUFFLE").map(|_| {
+        let mut idx: Vec<u64> = (0..n as u64).collect();
+        let mut state = 0x5EED_CAFE_F00D_0001u64;
+        for cut in (1..idx.len()).rev() {
+            idx.swap(cut, (next_rand(&mut state) as usize) % (cut + 1));
+        }
+        eprintln!("  hydrate order: shuffled (fixed seed 0x5EED_CAFE_F00D_0001)");
+        idx
+    });
     let mut i = 0usize;
     let progress_every = if n >= 10_000_000 {
         10_000_000
@@ -160,10 +175,11 @@ fn hydrate<S: SnapshotStore>(store: &mut S, n: usize, pool: &[u8], vlen: usize) 
         batch.clear();
         let end = (i + APPLY_BATCH).min(n);
         for j in i..end {
+            let src = shuffled.as_ref().map_or(j as u64, |o| o[j]) as usize;
             batch.push(KvUpdate::Put(KvEntry {
-                key: key(j),
-                value: value_for(pool, j, vlen).to_vec(),
-                version: VersionToken::from_u64(j as u64 + 1),
+                key: key(src),
+                value: value_for(pool, src, vlen).to_vec(),
+                version: VersionToken::from_u64(src as u64 + 1),
             }));
         }
         store
@@ -251,15 +267,26 @@ fn median_get_loop(label: &str, n: usize, mut get: impl FnMut(&str)) {
     );
 }
 
+/// Official-protocol block-cache budget: 256 MiB, applied identically to
+/// every backend. This IS the default — the official leg runs zero-config;
+/// `SLIPSTREAM_BENCH_CACHE_BYTES` remains an explicit override only.
 fn cache_bytes() -> Option<u64> {
-    std::env::var("SLIPSTREAM_BENCH_CACHE_BYTES")
-        .ok()
-        .and_then(|v| v.parse().ok())
+    Some(
+        std::env::var("SLIPSTREAM_BENCH_CACHE_BYTES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(256 << 20),
+    )
 }
 
 /// RFC-0176 clock input. Unset cache → 64 GiB (same default as `pedra scale`).
+/// Reads the env directly: the 256 MiB cache default above must not change
+/// the clock-RAM semantics.
 fn ram_for_clock() -> u64 {
-    cache_bytes().unwrap_or(64 << 30)
+    std::env::var("SLIPSTREAM_BENCH_CACHE_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(64 << 30)
 }
 
 fn dir_size_bytes(path: &Path) -> u64 {

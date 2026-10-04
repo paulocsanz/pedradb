@@ -28,9 +28,14 @@ static ALLOCS: AtomicU64 = AtomicU64::new(0);
 static ALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
 static LIVE_BYTES: AtomicU64 = AtomicU64::new(0);
 static FREES: AtomicU64 = AtomicU64::new(0);
+/// Alloc-site attribution for the hit phase (small allocs, 1/64 sampled).
+static HIT_ATTR: AtomicU64 = AtomicU64::new(0);
 thread_local! {
     static BIG_SITES: std::cell::RefCell<std::collections::HashMap<String, (u64, u64)>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+    static SMALL_SITES: std::cell::RefCell<std::collections::HashMap<String, (u64, u64)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    static IN_SITE_CAPTURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 struct CountingAlloc;
@@ -40,6 +45,31 @@ unsafe impl GlobalAlloc for CountingAlloc {
         ALLOCS.fetch_add(1, Ordering::Relaxed);
         ALLOC_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
         LIVE_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
+        let attr = HIT_ATTR.load(Ordering::Relaxed);
+        if attr != 0 && layout.size() < (1 << 20) {
+            SMALL_SITES.with(|sites| {
+                if IN_SITE_CAPTURE.get() {
+                    return;
+                }
+                let seq = ALLOCS.load(Ordering::Relaxed);
+                if seq % 64 != 0 {
+                    return;
+                }
+                IN_SITE_CAPTURE.set(true);
+                let bt = std::backtrace::Backtrace::force_capture();
+                let key = format!("{:?}", bt)
+                    .lines()
+                    .filter(|l| l.contains("pedradb") || l.contains("rocksdb_compat"))
+                    .take(6)
+                    .collect::<Vec<_>>()
+                    .join("|");
+                IN_SITE_CAPTURE.set(false);
+                let mut g = sites.borrow_mut();
+                let e = g.entry(key).or_insert((0u64, 0u64));
+                e.0 += 64;
+                e.1 += (layout.size() as u64) * 64;
+            });
+        }
         if layout.size() >= 1 << 20 {
             BIG_SITES.with(|sites| {
                 let bt = std::backtrace::Backtrace::force_capture();
@@ -236,23 +266,49 @@ fn main() {
         .map(|p| key((p * 7_919) % n))
         .collect();
     let mut hit_us = Vec::new();
+    // Burst profile of the published-SV fallback: per-100-get counter
+    // deltas. A 5 ms-periodic cluster indicts the compact tick, ~1 ms the
+    // flush tick, uniform noise a lock-handoff artifact.
+    let mut burst_profile: Vec<u32> = Vec::new();
     let a3 = ALLOCS.load(Ordering::Relaxed);
     let blocks0 = rocksdb_compat::probe_counters().blocks_decoded;
     let crc0 = rocksdb_compat::probe_counters().block_crc_skipped;
+    let pubsv0 = rocksdb_compat::probe_counters().published_sv;
     let tables0 = db.lookup_tables_probed();
+    let attr_mode = std::env::var_os("PROBE_ATTR").is_some();
+    let burst_mode = std::env::var_os("PROBE_BURST").is_some();
+    let mut last_pubsv = rocksdb_compat::probe_counters().published_sv;
     for rep in 0..(3 * mul.max(1)) {
+        if rep == 1 && attr_mode {
+            HIT_ATTR.store(1, Ordering::Relaxed);
+        }
         let t = Instant::now();
-        for k in &hit_keys {
-            let _ = std::hint::black_box(db.get_named("data", k).unwrap());
+        if rep == 0 && burst_mode {
+            for chunk in hit_keys.chunks(100) {
+                for k in chunk {
+                    let _ = std::hint::black_box(db.get_named("data", k).unwrap());
+                }
+                let now = rocksdb_compat::probe_counters().published_sv;
+                burst_profile.push((now - last_pubsv) as u32);
+                last_pubsv = now;
+            }
+        } else {
+            for k in &hit_keys {
+                let _ = std::hint::black_box(db.get_named("data", k).unwrap());
+            }
         }
         if rep == 0 {
             hit_us.push(t.elapsed().as_secs_f64() / hit_keys.len() as f64 * 1e6);
+        }
+        if rep == 1 && attr_mode {
+            HIT_ATTR.store(0, Ordering::Relaxed);
         }
     }
     let hit_allocs = ALLOCS.load(Ordering::Relaxed) - a3;
     let tables_probed = db.lookup_tables_probed() - tables0;
     let blocks_decoded = rocksdb_compat::probe_counters().blocks_decoded - blocks0;
     let crc_skipped = rocksdb_compat::probe_counters().block_crc_skipped - crc0;
+    let pubsv = rocksdb_compat::probe_counters().published_sv - pubsv0;
     let gets = 20_000u64 * (3 * mul.max(1)) as u64;
 
     let per_op = |c: u64, ops: u64| c as f64 / ops as f64;
@@ -263,15 +319,44 @@ fn main() {
         miss_ns.iter().cloned().fold(f64::INFINITY, f64::min), per_op(miss_allocs, 20_000 * 4));
     println!("  miss-in    : {:>9.1} ns/op | allocs/op {:>6.2}",
         median(&mut inside_ns), per_op(inside_allocs, 20_000 * 3));
-    println!("  hit-warm   : {:>9.2} µs/op | allocs/op {:>6.2} | blocks/get {:.3} | tables/get {:.3} | crc-skip/get {:.3}",
+    println!("  hit-warm   : {:>9.2} µs/op | allocs/op {:>6.2} | blocks/get {:.3} | tables/get {:.3} | crc-skip/get {:.3} | pubsv/get {:.3}",
         median(&mut hit_us), per_op(hit_allocs, 20_000 * 3),
         blocks_decoded as f64 / gets as f64, tables_probed as f64 / gets as f64,
-        crc_skipped as f64 / gets as f64);
+        crc_skipped as f64 / gets as f64, pubsv as f64 / gets as f64);
     if std::env::var_os("PEDRA_HYDRATE_DIAG").is_some() {
         println!("  {}", pedradb_core::write_diag_kernel::latched_bulk_diag_line());
     }
+    if burst_mode {
+        let nz: Vec<(usize, u32)> = burst_profile
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| **v > 0)
+            .map(|(i, v)| (i, *v))
+            .collect();
+        let total: u32 = burst_profile.iter().sum();
+        println!(
+            "== FALLBACK BURSTS (per-100-get deltas; {} buckets, {} nonzero, {} fallbacks) ==",
+            burst_profile.len(),
+            nz.len(),
+            total
+        );
+        println!("  nonzero buckets: {:?}", &nz[..nz.len().min(40)]);
+    }
+    if attr_mode {
+        SMALL_SITES.with(|sites| {
+            let g = sites.borrow();
+            let mut rows: Vec<_> = g.iter().collect();
+            rows.sort_by_key(|(_, (n, _))| *n);
+            rows.reverse();
+            println!("== HIT ALLOC SITES (est. count x avg bytes, 1/64 sampled during rep 1) ==");
+            for (k, (n, b)) in rows.iter().take(14) {
+                let avg = if *n > 0 { b / n } else { 0 };
+                println!("  {n:>9} x {avg:>6}B: {k}");
+            }
+        });
+    }
     println!(
-        "PERFPROBE_JSON {{\"n\":{n},\"apply_us\":{:.1},\"apply_allocs_per_op\":{:.2},\"miss_out_ns\":{:.0},\"miss_in_ns\":{:.0},\"hit_us\":{:.2},\"hit_allocs_per_op\":{:.2},\"blocks_per_get\":{:.3},\"miss_wall_s\":{:.3}}}",
+        "PERFPROBE_JSON {{\"n\":{n},\"apply_us\":{:.1},\"apply_allocs_per_op\":{:.2},\"miss_out_ns\":{:.0},\"miss_in_ns\":{:.0},\"hit_us\":{:.2},\"hit_allocs_per_op\":{:.2},\"blocks_per_get\":{:.3},\"pubsv_per_get\":{:.4},\"miss_wall_s\":{:.3}}}",
         median(&mut batch_us.clone()),
         per_op(apply_allocs, n),
         miss_ns.iter().cloned().fold(f64::INFINITY, f64::min),
@@ -279,6 +364,7 @@ fn main() {
         median(&mut hit_us),
         per_op(hit_allocs, 20_000 * 3),
         blocks_decoded as f64 / gets as f64,
+        pubsv as f64 / gets as f64,
         miss_wall
     );
 

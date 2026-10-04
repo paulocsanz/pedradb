@@ -94,19 +94,17 @@ fn compat_bench_opts() -> rocksdb_compat::Options {
     }
     // WiscKey / BlobDB: values ≥ threshold go to VALUES.vlog so the WAL
     // holds a pointer (16 KiB blob is not copied into every WAL record).
-    // Default 4096 — 1 KiB SET/GET stay inline. `ROCKS_PARITY_MIN_BLOB=0`
-    // restores always-inline (A/B). Rocks default is blob files off;
-    // this is the Pedra large-value profile on the parity harness only.
-    match std::env::var("ROCKS_PARITY_MIN_BLOB") {
-        Ok(s) if s == "0" || s.eq_ignore_ascii_case("off") => {}
-        Ok(s) => {
+    // RFC-0337 (round-5 A1.3, the Tuned-Bench Trap): harness defaults MUST
+    // equal product defaults. The product's OpenOptions default is
+    // `large_value_threshold: None` (all values inline) — so the harness
+    // default is now INLINE too. `ROCKS_PARITY_MIN_BLOB=<bytes>` opts IN
+    // the vlog profile as an explicit A/B lane; historical tables measured
+    // with 4096 must cite that env in their provenance.
+    if let Ok(s) = std::env::var("ROCKS_PARITY_MIN_BLOB") {
+        if s != "0" && !s.eq_ignore_ascii_case("off") {
             let n = s.parse::<u64>().unwrap_or(4096);
             opts.set_enable_blob_files(true);
             opts.set_min_blob_size(n);
-        }
-        Err(_) => {
-            opts.set_enable_blob_files(true);
-            opts.set_min_blob_size(4096);
         }
     }
     // `ROCKS_PARITY_RETENTION` (RFC-0047 P0.3): pin the retention the
@@ -523,6 +521,19 @@ impl RocksEngine {
                     .unwrap_or(256 * 1024 * 1024)
             });
         opts.set_write_buffer_size(memtable);
+        // RFC-0337 (round-5 A1.2): the absent-key headline races Pedra's
+        // always-on bloom against RocksDB's DEFAULT configuration, which
+        // ships no bloom. The default peer stays default (the
+        // product-vs-default rule); this A/B lane makes the feature delta
+        // measurable: `ROCKS_PARITY_ROCKS_BLOOM=10` gives the peer a
+        // 10-bit-per-key bloom (the recommended configuration).
+        if let Ok(bits) = std::env::var("ROCKS_PARITY_ROCKS_BLOOM") {
+            if let Ok(bits) = bits.parse::<f64>() {
+                let mut table_opts = rocksdb::BlockBasedOptions::default();
+                table_opts.set_bloom_filter(bits, false);
+                opts.set_block_based_table_factory(&table_opts);
+            }
+        }
         let db = rocksdb::DB::open_cf(&opts, path, DEPS_CFS).expect("rocksdb open_cf");
         let wopts_async = rocksdb::WriteOptions::default();
         let mut wopts_sync = rocksdb::WriteOptions::default();

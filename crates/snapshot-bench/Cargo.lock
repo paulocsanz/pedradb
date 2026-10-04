@@ -691,6 +691,7 @@ dependencies = [
  "parking_lot",
  "pedradb-core",
  "pedradb-posix",
+ "pedradb-spec",
 ]
 
 [[package]]
@@ -708,6 +709,7 @@ name = "pedradb-posix"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "pedradb-spec",
 ]
 
 [[package]]
@@ -715,6 +717,7 @@ name = "pedradb-sim"
 version = "0.1.0"
 dependencies = [
  "pedradb-core",
+ "pedradb-spec",
 ]
 
 [[package]]

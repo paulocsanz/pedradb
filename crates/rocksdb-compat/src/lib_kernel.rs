@@ -1474,6 +1474,10 @@ fn arena_val(src: &[u8]) -> bytes::Bytes {
 pub struct ProbeCounters {
     pub blocks_decoded: usize,
     pub block_crc_skipped: usize,
+    /// Point gets that missed `try_read` and fell to `lookup_published`
+    /// (the O(candidates) SuperVersion path). Its per-get rate is the
+    /// writer-lock churn tax on readers.
+    pub published_sv: u64,
 }
 
 /// Snapshot of the calling thread's point-path counters.
@@ -1482,6 +1486,7 @@ pub fn probe_counters() -> ProbeCounters {
     ProbeCounters {
         blocks_decoded: pedradb_core::sst::sst_blocks_decoded(),
         block_crc_skipped: pedradb_core::sst::sst_block_crc_skipped(),
+        published_sv: pedradb_core::concurrent::get_used_published_sv_count(),
     }
 }
 

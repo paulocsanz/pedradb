@@ -30,7 +30,7 @@ fn probes_le_levels_plus_l0_max_under_cap() {
     for (levels, l0_covering, l0_max) in rows {
         assert!(l0_covering <= l0_max, "row violates the cap invariant");
         assert!(
-            levels + l0_max <= u64::MAX,
+            levels.checked_add(l0_max).is_some(),
             "row violates the fits-u64 hypothesis"
         );
         let probes = point_get_probes(levels, l0_covering);
@@ -51,7 +51,7 @@ fn probes_le_levels_plus_l0_max_under_cap() {
 /// the walk-all file count.
 #[test]
 fn probes_worst_shape_is_levels_plus_l0_worst() {
-    assert!(SCALE_L0_BEST <= SCALE_L0_WORST);
+    const { assert!(SCALE_L0_BEST <= SCALE_L0_WORST) };
     for levels in [0u64, 1, 5, 33, 1 << 20] {
         let best = point_get_probes(levels, SCALE_L0_BEST);
         let worst = point_get_probes(levels, SCALE_L0_WORST);

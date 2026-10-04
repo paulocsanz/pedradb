@@ -38,7 +38,7 @@ Env knobs (same names as upstream):
 |---|---|---|
 | `SLIPSTREAM_BENCH_ENTRIES` | `1000000` | fold size `n` |
 | `SLIPSTREAM_BENCH_VALUE_BYTES` | `200` | value length |
-| `SLIPSTREAM_BENCH_CACHE_BYTES` | backend default (1 GiB) | block-cache budget, same for every backend |
+| `SLIPSTREAM_BENCH_CACHE_BYTES` | 256 MiB (official default) | block-cache budget override, same for every backend |
 | `SLIPSTREAM_BENCH_BACKENDS` | all | comma list: `fjall,rocksdb,pedradb` |
 | `SLIPSTREAM_BENCH_SEQUENTIAL` | auto at ≥ 50M | one backend on disk at a time |
 
@@ -50,12 +50,13 @@ process with `SLIPSTREAM_BENCH_BACKENDS`.
 
 One backend per process, Pedra leg then Rocks leg, three runs per cell,
 criterion medians (`mid` of `[lo, mid, hi]`); 200 B values, 256 MiB cache,
-`TMPDIR` on real NVMe, Pedra bulk-stage clamp on:
+`TMPDIR` on real NVMe. **Zero-config**: the harness defaults ARE the
+protocol — 200 B values, 256 MiB cache for every backend, and Pedra's
+bulk chunks self-tune to a 64 MiB ceiling in-engine (RFC-0306, no knob;
+the historical `PEDRA_STAGE_MAX_BYTES` pin was a downward-only no-op at
+that value). The only envs left are shape selectors and `TMPDIR`:
 
 ```bash
-export SLIPSTREAM_BENCH_VALUE_BYTES=200
-export SLIPSTREAM_BENCH_CACHE_BYTES=268435456
-export PEDRA_STAGE_MAX_BYTES=67108864
 export TMPDIR=/path/on/nvme
 for r in 1 2 3; do
   for b in pedradb rocksdb; do
