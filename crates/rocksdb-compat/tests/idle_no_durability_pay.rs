@@ -117,4 +117,10 @@ fn idle_settled_db_never_pays_durability_points() {
          window ({stores} manifest rewrites): the WAL-rotate 'settled' gate is \
          unreachable and every rotate re-fsyncs under the Db write lock"
     );
+    assert_eq!(
+        pubsv, 0,
+        "{pubsv} of {gets} idle gets fell to the published-SV path: a host worker \
+         kept queuing the Db write lock during a read-only window on a settled \
+         store (WAL-rotate churn)"
+    );
 }

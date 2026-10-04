@@ -262,6 +262,15 @@ this list only by a 3-run of the current engine.
   1.65 GiB vs SIGKILL at 3.4 GiB before).
 - **Owned sparse-index boundary keys** fixed the 100M OOM during
   hydrate on the 3.9 GiB guest (index pinned the ingest key pool).
+- **16-way multi-shard answer cache (RFC-0337)**: partitions the point-lookup
+  answer cache into 16 striped shards with per-shard lock acquisition and
+  independent freezing, eliminating reader lock serialization on high core counts.
+- **Off-lock leveled compaction (RFC-0337)**: moves multi-level SST merges
+  and physical disk writes outside `inner.write()`, preserving write ingestion
+  throughput during heavy background compactions.
+- **Fail-closed decompression bounds (RFC-0311)**: enforces a 64 MiB block
+  size ceiling and a 256× max expansion ratio before allocating memory on
+  compressed SST blocks.
 
 ## Fjall column
 

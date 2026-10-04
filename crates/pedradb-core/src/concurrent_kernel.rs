@@ -5053,15 +5053,23 @@ impl<E: Env> ConcurrentDb<E> {
         if !self.writes_idle_for(Duration::ZERO) {
             return Ok(());
         }
-        // Read-guard precheck: the idle drain calls this every tick. When
-        // the pin state says KeepWal the write-lock path would return
-        // immediately anyway — taking the write lock just to learn that
-        // queues a writer and fails every reader's `try_read` for the
-        // drain window (published-SV fallback churn).
-        if let crate::flush_kernel::WalRotateAction::KeepWal =
-            crate::flush_kernel::wal_rotate_decision(self.inner.read().wal_pin_state())
+        // Read-guard precheck: the idle drain calls this every tick. Both
+        // early-outs of the write-lock path are evaluated under a read
+        // guard (pin-state decision AND segment emptiness) — taking the
+        // write lock just to learn "nothing to rotate" queues a writer and
+        // fails every reader's `try_read` for the drain window
+        // (published-SV fallback churn). The write-lock path re-evaluates
+        // everything as before.
         {
-            return Ok(());
+            let g = self.inner.read();
+            match crate::flush_kernel::wal_rotate_decision(g.wal_pin_state()) {
+                crate::flush_kernel::WalRotateAction::KeepWal => return Ok(()),
+                crate::flush_kernel::WalRotateAction::RotateWal => {
+                    if g.wal_segment_empty() {
+                        return Ok(());
+                    }
+                }
+            }
         }
         self.inner.write().try_rotate_wal_if_idle()
     }

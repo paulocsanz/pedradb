@@ -282,8 +282,8 @@
       "crates/rocksdb-compat/src/txn_kernel.rs"
     ],
     "kernel_files": 264,
-    "kernel_loc": 158024,
-    "handler_loc": 91590,
+    "kernel_loc": 158054,
+    "handler_loc": 91620,
     "db_rs_extracted": true,
     "proof_depth": {
       "extract": 0,
@@ -1436,6 +1436,7 @@
         "wal_archive_count",
         "wal_archive_live_count",
         "wal_pin_state",
+        "wal_segment_empty",
         "wal_sync_count",
         "wal_sync_group",
         "workload_class_now",

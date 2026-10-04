@@ -7577,6 +7577,15 @@ impl<E: Env> Db<E> {
 
     /// Snapshot of every way acked keys can still depend on the WAL
     /// (input to `flush_kernel::wal_rotate_decision`).
+    /// WAL segment emptiness under the WAL mutex (read-side rotate precheck).
+    /// Lock order note: callers hold at most a Db READ guard here; WAL
+    /// holders never acquire Db locks (the write pipeline appends under
+    /// `wal.lock()` without `db.write()`), so no cycle exists.
+    pub(crate) fn wal_segment_empty(&self) -> bool {
+        let w = self.wal.lock();
+        crate::flush_kernel::wal_segment_is_empty(w.position())
+    }
+
     pub(crate) fn wal_pin_state(&self) -> crate::flush_kernel::WalPinState {
         crate::flush_kernel::WalPinState {
             mem_empty: crate::write_admission_kernel::batch_is_empty(self.mem.len() as u64),
@@ -7628,8 +7637,18 @@ impl<E: Env> Db<E> {
         //   no WAL-less debt, lazy feed current): the feed then rebuilds
         //   from the published SSTs (F53) and no publish is needed.
         let walless_covered = self.manifest_published_seq >= self.walless_seq_high;
-        let feed_needs_segment =
-            self.changelog_interval == 0 && self.changelog_disk_watermark < self.last_sequence();
+        // F53: with the CHANGELOG store path off (interval 0) the published
+        // SST inventory is the feed's rebuild source. The changelog file
+        // watermark cannot advance (only `store_on` moves it, and the
+        // interval-0 policy never stores), so keying this predicate on it
+        // made `settled` unreachable and every WAL-rotate re-fired its
+        // archive/check work under the Db write lock forever — the
+        // measured read-only-phase writer churn.
+        let feed_needs_segment = if self.changelog_interval == 0 {
+            self.manifest_published_seq < self.last_sequence()
+        } else {
+            self.changelog_disk_watermark < self.last_sequence()
+        };
         let settled = !self.manifest_dirty && walless_covered && !feed_needs_segment;
         let archive_now = walless_covered
             && !self.unpublished_below_floor
@@ -7701,8 +7720,11 @@ impl<E: Env> Db<E> {
         // as data (unconditional, like the live WAL). Re-evaluated after
         // the gate publish/store above so a settled segment truncates.
         let walless_covered = self.manifest_published_seq >= self.walless_seq_high;
-        let feed_needs_segment =
-            self.changelog_interval == 0 && self.changelog_disk_watermark < self.last_sequence();
+        let feed_needs_segment = if self.changelog_interval == 0 {
+            self.manifest_published_seq < self.last_sequence()
+        } else {
+            self.changelog_disk_watermark < self.last_sequence()
+        };
         let settled = !self.manifest_dirty && walless_covered && !feed_needs_segment;
         if walless_covered
             && !self.unpublished_below_floor
