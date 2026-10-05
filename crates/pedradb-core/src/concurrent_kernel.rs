@@ -4686,16 +4686,21 @@ impl<E: Env> ConcurrentDb<E> {
     /// Lock-free variant for idle polling (RFC-0305): host workers tick at
     /// ~1 kHz and must not fight the hydrate writer for the Db RwLock.
     #[must_use]
-    /// Rocks-shaped write stall: block (bounded) instead of failing when
-    /// the write-admission watermarks (RFC-0274) would reject the batch.
+    /// Rocks-shaped write stall: block instead of failing while the
+    /// write-admission watermarks (RFC-0274) would reject the batch.
     /// Evaluated OFF the Db write lock — the in-lock admission check stays
-    /// the fail-closed authority; this pre-check keeps sustained shuffled
-    /// ingest alive while background compaction drains the debt it just
-    /// created. Assists the drain between waits. Returns false on deadline.
-    pub fn await_write_admission(&self, max_wait: std::time::Duration) -> bool {
-        let deadline = std::time::Instant::now() + max_wait;
+    /// the fail-closed authority. The stalled writer DRAINS the very debt
+    /// that stalled it: each wait round runs one L0→L1 compaction job
+    /// (same shape as the compat host worker's `compat_compact_once`) plus
+    /// parked-materialization. Bounded by PROGRESS, not wall time: the
+    /// wait ends when admission clears, or when the debt stops shrinking
+    /// for `no_progress` (a wedged drain), in which case false returns and
+    /// the in-lock check errors with the evidence.
+    pub fn await_write_admission(&self, no_progress: std::time::Duration) -> bool {
+        let mut last_debt: Option<u64> = None;
+        let mut stalled_since = std::time::Instant::now();
         loop {
-            let would_stall = {
+            let (would_stall, debt) = {
                 let g = self.inner.read();
                 let debt = g.pending_compaction_bytes();
                 let cfg = g.backpressure_config();
@@ -4707,30 +4712,63 @@ impl<E: Env> ConcurrentDb<E> {
                     ),
                     crate::backpressure_kernel::CompactionDebtVerdict::StallCompaction { .. }
                 );
-                let stall_limit = g.write_stall_l0();
-                let stall_l0 = matches!(
-                    crate::write_admission_kernel::write_admit(
-                        0,
-                        false,
-                        0,
-                        g.level_file_count(0) as u64,
-                        stall_limit.is_some(),
-                        stall_limit.unwrap_or(0) as u64,
-                    ),
-                    crate::write_admission_kernel::WriteAdmit::StallL0
-                );
-                stall_debt || stall_l0
+                let stall_l0 = {
+                    let l0 = g.level_file_count(0);
+                    match g.write_stall_l0() {
+                        Some(limit) if l0 >= limit => true,
+                        _ => false,
+                    }
+                };
+                (stall_debt || stall_l0, debt)
             };
             if !would_stall {
                 return true;
             }
-            if std::time::Instant::now() >= deadline {
+            if let Some(prev) = last_debt {
+                if debt < prev {
+                    stalled_since = std::time::Instant::now();
+                }
+            }
+            last_debt = Some(debt);
+            if stalled_since.elapsed() >= no_progress {
                 return false;
             }
+            let _ = self.compact_l0_assist_once();
             let _ = self.materialize_bulk_once();
             let _ = self.materialize_parked_once();
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
+    }
+
+    /// One L0→L1 compaction job, I/O off the Db write lock — the engine-side
+    /// body of the compat worker's `compat_compact_once`. Safe to run
+    /// concurrently with the worker: staging and install are write-lock
+    /// transactions; a job whose inputs were already consumed installs as a
+    /// no-op.
+    pub fn compact_l0_assist_once(&self) -> bool {
+        let job = {
+            let mut g = self.inner.write();
+            let opts = crate::db::CompactOptions {
+                max_input_files: Some(2),
+                ..crate::db::CompactOptions::default()
+            };
+            if crate::write_admission_kernel::batch_is_empty(g.level_file_count(0) as u64) {
+                match g.prepare_stacked_l1_repair(opts) {
+                    Ok(Some(j)) => j,
+                    _ => return false,
+                }
+            } else {
+                match g.prepare_l0_compact(opts) {
+                    Ok(Some(j)) => j,
+                    _ => return false,
+                }
+            }
+        };
+        let tables = match job.write() {
+            Ok(t) => t,
+            Err(_) => return false,
+        };
+        self.install_prepared_l0_off_lock(job, tables)
     }
 
     pub fn has_parked_bulk_fast(&self) -> bool {
