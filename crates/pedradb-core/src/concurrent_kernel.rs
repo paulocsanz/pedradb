@@ -52,6 +52,58 @@ thread_local! {
 static GET_LSM_LOCKS: AtomicU64 = AtomicU64::new(0);
 static GET_USED_PUBLISHED_SV: AtomicU64 = AtomicU64::new(0);
 
+/// Hang diagnostics (PEDRA_HANG_DIAG=1): the compact/assist paths stamp
+/// their current phase + entry instant so a watchdog names the exact
+/// region a thread is stuck in (run11/run12: one call never returns).
+pub struct CompactPhase {
+    phase: std::sync::atomic::AtomicU8,
+    since: std::sync::atomic::AtomicU64,
+}
+
+pub static PHASE_WORKER: CompactPhase = CompactPhase {
+    phase: std::sync::atomic::AtomicU8::new(0),
+    since: std::sync::atomic::AtomicU64::new(0),
+};
+pub static PHASE_ASSIST: CompactPhase = CompactPhase {
+    phase: std::sync::atomic::AtomicU8::new(0),
+    since: std::sync::atomic::AtomicU64::new(0),
+};
+
+const PHASE_NAMES: [&str; 5] = [
+    "idle",
+    "prepare(write-lock)",
+    "job.write(merge/io)",
+    "install(write-lock+fsync)",
+    "done",
+];
+
+#[must_use]
+pub fn compact_phase_report() -> String {
+    use std::sync::atomic::Ordering;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    let fmt = |p: &CompactPhase, who: &str| {
+        let ph = p.phase.load(Ordering::Relaxed);
+        let since = p.since.load(Ordering::Relaxed);
+        format!(
+            "{who}: {} for {}ms",
+            PHASE_NAMES[ph as usize],
+            now.saturating_sub(since)
+        )
+    };
+    format!("{} | {}", fmt(&PHASE_WORKER, "worker"), fmt(&PHASE_ASSIST, "assist"))
+}
+
+fn stamp_phase(p: &CompactPhase, phase: u8) {
+    use std::sync::atomic::Ordering;
+    p.phase.store(phase, Ordering::Relaxed);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    p.since.store(now, Ordering::Relaxed);
+}
+
 /// RFC-0236 / RFC-0315 SuperVersion: mem + imm + SST snapshot readers clone.
 ///
 /// `ssts` is L0 newest → older → L1+ (the locked lookup order), not
@@ -4746,6 +4798,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// transactions; a job whose inputs were already consumed installs as a
     /// no-op.
     pub fn compact_l0_assist_once(&self) -> bool {
+        stamp_phase(&PHASE_ASSIST, 1);
         let job = {
             let mut g = self.inner.write();
             let opts = crate::db::CompactOptions {
@@ -4764,11 +4817,15 @@ impl<E: Env> ConcurrentDb<E> {
                 }
             }
         };
+        stamp_phase(&PHASE_ASSIST, 2);
         let tables = match job.write() {
             Ok(t) => t,
             Err(_) => return false,
         };
-        self.install_prepared_l0_off_lock(job, tables)
+        stamp_phase(&PHASE_ASSIST, 3);
+        let r = self.install_prepared_l0_off_lock(job, tables);
+        stamp_phase(&PHASE_ASSIST, 0);
+        r
     }
 
     pub fn has_parked_bulk_fast(&self) -> bool {
@@ -12911,3 +12968,8 @@ mod tests {
 
 
 
+
+/// Stamp the host worker's current compact phase (hang diagnostics).
+pub fn stamp_worker_phase(phase: u8) {
+    stamp_phase(&PHASE_WORKER, phase);
+}

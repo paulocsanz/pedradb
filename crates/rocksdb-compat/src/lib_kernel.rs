@@ -5134,6 +5134,25 @@ fn compat_resume<E: PedraEnv>(
     }
 }
 
+/// PEDRA_HANG_DIAG=1: print the compact phase marks every 10s so a stuck
+/// run names the exact region (prepare / job.write / install) instead of
+/// freezing silently (run11/run12 forensics).
+fn spawn_hang_watchdog() {
+    if std::env::var_os("PEDRA_HANG_DIAG").is_none() {
+        return;
+    }
+    std::thread::Builder::new()
+        .name("pedra-hang-watchdog".into())
+        .spawn(|| loop {
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            eprintln!(
+                "HANGDIAG {}",
+                pedradb_core::concurrent::compact_phase_report()
+            );
+        })
+        .ok();
+}
+
 fn spawn_compact_worker<E>(
     inner: ConcurrentDb<E>,
     gate: Arc<Mutex<()>>,
@@ -5146,6 +5165,7 @@ where
     E: PedraEnv + Send + Sync + 'static,
     E::File: Send + Sync + 'static,
 {
+    spawn_hang_watchdog();
     let (tx, rx) = mpsc::sync_channel(1);
     let handle = thread::Builder::new()
         .name("pedra-compat-compact".into())
@@ -5537,6 +5557,7 @@ const COMPACT_MAX_L0_INPUTS: usize = 2;
 
 /// One L0→L1 job. I/O runs without the write lock (G5: failed write is not installed).
 fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> bool {
+    pedradb_core::concurrent::stamp_worker_phase(1);
     let _gate = gate.lock();
     let job = inner.with_write(|db| {
         let opts = if db.auto_reclaim() {
@@ -5563,10 +5584,12 @@ fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -
     let Some(job) = job else {
         return false;
     };
+    pedradb_core::concurrent::stamp_worker_phase(2);
     let tables = match job.write() {
         Ok(t) => t,
         Err(_) => return false,
     };
+    pedradb_core::concurrent::stamp_worker_phase(3);
     if !inner.install_prepared_l0_off_lock(job, tables) {
         return false;
     }
