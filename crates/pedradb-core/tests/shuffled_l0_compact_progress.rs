@@ -29,8 +29,12 @@ fn shuffled_memtable_ingest_l0_compact_makes_progress() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
 
+    let buf: usize = std::env::var("SHUF_L0_BUF_MI")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(4);
     let mut oo = OpenOptions::default();
-    oo.auto_flush_bytes = Some(4 << 20);
+    oo.auto_flush_bytes = Some(buf << 20);
     let db = ConcurrentDb::open_with(dir.clone(), oo).expect("open");
 
     // Shuffled order over the same key set: no 8-batch ascending streak
@@ -65,7 +69,8 @@ fn shuffled_memtable_ingest_l0_compact_makes_progress() {
     );
 
     // The progress oracle: drain L0 through the worker's job shape.
-    let budget = Duration::from_secs(180);
+    let reclaim = std::env::var_os("SHUF_L0_RECLAIM").is_some();
+    let budget = Duration::from_secs(if reclaim { 420 } else { 180 });
     let started = Instant::now();
     let mut jobs = 0u64;
     let mut last_print = Instant::now();
@@ -78,7 +83,28 @@ fn shuffled_memtable_ingest_l0_compact_makes_progress() {
             started.elapsed(),
         );
         let w = Instant::now();
-        let installed = db.compact_l0_assist_once();
+        let installed = if reclaim {
+            // The compat worker's exact job shape with auto_reclaim=true:
+            // GC wraps the k-way merge (GcMergeSource).
+            let job = db.with_write(|d| {
+                d.prepare_l0_compact(pedradb_core::CompactOptions {
+                    gc: pedradb_core::merge::CompactGcOptions::for_oldest_snapshot(
+                        d.last_sequence(),
+                    ),
+                    max_input_files: Some(2),
+                })
+                .expect("prepare")
+            });
+            match job {
+                Some(job) => {
+                    let tables = job.write().expect("job.write must terminate");
+                    db.install_prepared_l0_off_lock(job, tables)
+                }
+                None => false,
+            }
+        } else {
+            db.compact_l0_assist_once()
+        };
         jobs += 1;
         if last_print.elapsed() > Duration::from_secs(10) || !installed {
             eprintln!(
