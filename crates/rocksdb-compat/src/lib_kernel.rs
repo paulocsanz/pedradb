@@ -5231,7 +5231,11 @@ where
                         let drain_l0 = l0_due || (tombstone_due && l0 > 0);
 
                         if drain_l0 && !disable_auto_compactions {
-                            while compat_compact_once(&inner, &gate) {}
+                            for _ in 0..16 {
+                                if !compat_compact_once(&inner, &gate) {
+                                    break;
+                                }
+                            }
                             wait = poll;
                             if inflight {
                                 continue;
@@ -5279,7 +5283,11 @@ where
                             // lock just to ask "any work?" — at the settled
                             // steady state that queued a writer every 5 ms.
                             if !disable_auto_compactions && (drain_l0 || l0 > 0 || tombstone_due) {
-                                while compat_compact_once(&inner, &gate) {}
+                                for _ in 0..16 {
+                                    if !compat_compact_once(&inner, &gate) {
+                                        break;
+                                    }
+                                }
                             }
                             wait = poll;
                         } else {

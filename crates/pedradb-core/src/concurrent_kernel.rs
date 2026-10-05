@@ -5287,7 +5287,11 @@ impl<E: Env> ConcurrentDb<E> {
         let staged = {
             let mut g = self.inner.write();
             let Some(undo) = g.apply_prepared_l0_compact(job, tables) else {
-                return true;
+                // Nothing installed is not a success: returning true here
+                // let the workers' while-loops re-prepare the same
+                // never-applying job forever (run11 livelock: 99% CPU,
+                // zero I/O, dead heartbeat).
+                return false;
             };
             let old_paths = undo.old_paths().to_vec();
             // RFC-0151 P1.3: publish gate, measured — fsync must succeed and
