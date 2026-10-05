@@ -4785,7 +4785,11 @@ impl<E: Env> ConcurrentDb<E> {
             if stalled_since.elapsed() >= no_progress {
                 return false;
             }
-            let _ = self.compact_l0_assist_once();
+            // PEDRA_ASSIST_OFF=1: diagnosis A/B — never run a second
+            // concurrent merge (isolate the worker's job.write alone).
+            if std::env::var_os("PEDRA_ASSIST_OFF").is_none() {
+                let _ = self.compact_l0_assist_once();
+            }
             let _ = self.materialize_bulk_once();
             let _ = self.materialize_parked_once();
             std::thread::sleep(std::time::Duration::from_millis(25));

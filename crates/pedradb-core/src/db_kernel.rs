@@ -13443,6 +13443,12 @@ fn write_merged_tables_span<'a>(
     let mut peeked: Option<Result<(InternalKey, Bytes)>> = None;
     let mut stream_ended = false;
     let mut last_user: Option<Bytes> = None;
+    // PEDRA_MERGE_TRACE=1: progress oracle for a stuck merge — entries
+    // consumed frozen while CPU spins = spin inside one next_entry call;
+    // climbing forever = an effectively infinite stream.
+    let merge_trace = std::env::var_os("PEDRA_MERGE_TRACE").is_some();
+    let mut trace_entries: u64 = 0;
+    let mut trace_at = Instant::now();
     // PEDRA_REWRITE_DIAG: one line per finished chunk (guest 25M settle
     // OOM hunts — RSS trajectory of the whole-levels rewrite).
     let rewrite_diag = std::env::var_os("PEDRA_REWRITE_DIAG").is_some();
@@ -13490,6 +13496,25 @@ fn write_merged_tables_span<'a>(
             }
             acc = acc.saturating_add(merged_entry_bytes(&ok_entry.0, &ok_entry.1));
             last_user = Some(ok_entry.0.user_key.clone());
+            if merge_trace {
+                trace_entries = trace_entries.saturating_add(1);
+                if trace_entries.is_multiple_of(1 << 18) {
+                    let now = Instant::now();
+                    if now.duration_since(trace_at) > std::time::Duration::from_secs(5) {
+                        // Frozen entries + climbing elapsed = spin inside
+                        // one next_entry call; climbing entries = an
+                        // effectively infinite stream. Either way the line
+                        // keeps printing, unlike a healthy merge.
+                        eprintln!(
+                            "MERGETRACE entries={trace_entries} last_user_len={:?} out_chunks={} t={:.1}s",
+                            last_user.as_ref().map(|u| u.len()),
+                            out.len(),
+                            now.duration_since(rewrite_started).as_secs_f32()
+                        );
+                        trace_at = now;
+                    }
+                }
+            }
             Some(Ok(ok_entry))
         });
         let file_num = file_alloc();
