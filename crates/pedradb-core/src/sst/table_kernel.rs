@@ -2221,7 +2221,21 @@ impl SstInternalStream<'_> {
         if self.failed {
             return Ok(None);
         }
+        let block_trace = self.table.block_count() > 0
+            && std::env::var_os("PEDRA_MERGE_TRACE").is_some();
+        let mut traced = 0usize;
         loop {
+            if block_trace && self.entry_i == 0 {
+                traced = traced.saturating_add(1);
+                if traced.is_multiple_of(4096) {
+                    eprintln!(
+                        "STREAMTRACE block {}+/{} of {}",
+                        self.block_i,
+                        self.table.block_count(),
+                        self.table.path.display()
+                    );
+                }
+            }
             if let Some(block) = &self.block {
                 if self.entry_i < block.len() {
                     let (k, v) = &block[self.entry_i];

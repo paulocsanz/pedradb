@@ -1150,8 +1150,20 @@ impl<S: CompactSource> KwayInternalMerge<S> {
     /// A source failed to decode its first block.
     pub fn from_streams(mut streams: Vec<S>) -> Result<Self> {
         let mut heap = BinaryHeap::new();
+        let seed_trace = std::env::var_os("PEDRA_MERGE_TRACE").is_some();
         for src in 0..streams.len() {
+            if seed_trace {
+                eprintln!("MERGESEED stream {}/{} seeding...", src + 1, streams.len());
+            }
             if let Some((key, value)) = streams[src].next_entry()? {
+                if seed_trace {
+                    eprintln!(
+                        "MERGESEED stream {}/{} first key len={}",
+                        src + 1,
+                        streams.len(),
+                        key.user_key.len()
+                    );
+                }
                 heap.push(MergeHead { key, value, src });
             }
         }
