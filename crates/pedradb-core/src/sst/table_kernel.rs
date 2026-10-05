@@ -1345,6 +1345,17 @@ impl SstTable {
 
     /// Make the CRC-stripped file body resident again (whole-file read, file
     /// CRC verified — fail-closed) and re-register it with the pool.
+    /// Pin this table's payload image for a caller-managed lifetime (the
+    /// merge): the returned `Arc` keeps the bytes alive even when the pool
+    /// evicts the table's slot mid-merge. One whole-file read + CRC per
+    /// input per merge instead of per block.
+    pub(crate) fn pin_payload(&self, kit: Option<&PayloadKit>) -> Result<Arc<[u8]>> {
+        match kit {
+            Some(k) => self.ensure_payload(k),
+            None => self.ensure_payload_from_path(),
+        }
+    }
+
     fn ensure_payload(&self, kit: &PayloadKit) -> Result<Arc<[u8]>> {
         {
             let g = self.payload.read();
@@ -2204,6 +2215,96 @@ pub struct SstInternalStream<'a> {
     /// Half-open span end (`[lo, hi)` user keys): the first entry at or past
     /// this user key ends the stream permanently.
     hi_excl: Option<Bytes>,
+}
+
+/// Merge-side stream over a PINNED payload image. The pool budget cannot
+/// hold 2 x 256 MiB inputs plus every registered output chunk, so
+/// slot-based reads evicted the input mid-merge and decode reloaded +
+/// re-CRC'd the whole file per block (the run13/14 merge "hang"). This
+/// stream holds its own Arc to the image: eviction clears the table's
+/// slot, the bytes here stay alive for the merge's lifetime.
+pub struct SstPinnedInternalStream<'a> {
+    table: &'a SstTable,
+    image: Arc<[u8]>,
+    block_i: usize,
+    block: Option<Vec<(InternalKey, Bytes)>>,
+    entry_i: usize,
+    failed: bool,
+    hi_excl: Option<Bytes>,
+}
+
+impl<'a> SstPinnedInternalStream<'a> {
+    /// Internal stream over a caller-pinned payload image of `table`.
+    pub fn pinned_between(
+        table: &'a SstTable,
+        image: Arc<[u8]>,
+        hi_excl: Option<Bytes>,
+    ) -> SstPinnedInternalStream<'a> {
+        SstPinnedInternalStream {
+            table,
+            image,
+            block_i: 0,
+            block: None,
+            entry_i: 0,
+            failed: false,
+            hi_excl,
+        }
+    }
+}
+
+impl crate::merge::CompactSource for SstPinnedInternalStream<'_> {
+    fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
+        if self.failed {
+            return Ok(None);
+        }
+        loop {
+            if let Some(block) = &self.block {
+                if self.entry_i < block.len() {
+                    let (k, v) = &block[self.entry_i];
+                    if let Some(hi) = self.hi_excl.as_deref() {
+                        if k.user_key.as_ref() >= hi {
+                            self.failed = true;
+                            return Ok(None);
+                        }
+                    }
+                    let e = (k.clone(), v.clone());
+                    self.entry_i += 1;
+                    return Ok(Some(e));
+                }
+            }
+            if self.block_i >= self.table.block_count() {
+                return Ok(None);
+            }
+            let h = match self.table.index.get(self.block_i) {
+                Some(h) => h,
+                None => {
+                    self.failed = true;
+                    return Err(CoreError::Internal(format!(
+                        "SST block index {} missing in {}",
+                        self.block_i,
+                        self.table.path.display()
+                    )));
+                }
+            };
+            match decode_block_from_payload(
+                &self.image,
+                h,
+                self.table.compressed_blocks,
+                self.table.block_crc,
+                &self.table.path,
+            ) {
+                Ok(decoded) => {
+                    self.block_i += 1;
+                    self.entry_i = 0;
+                    self.block = Some(decoded);
+                }
+                Err(e) => {
+                    self.failed = true;
+                    return Err(e);
+                }
+            }
+        }
+    }
 }
 
 impl crate::merge::CompactSource for SstInternalStream<'_> {

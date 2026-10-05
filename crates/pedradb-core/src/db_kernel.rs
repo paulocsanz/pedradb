@@ -13420,9 +13420,24 @@ fn write_merged_tables_span<'a>(
     if crate::write_admission_kernel::batch_is_empty(tables.len() as u64) {
         return Ok(out);
     }
+    // Pin every input's payload image for the merge's lifetime: the pool
+    // budget (256 MiB) cannot hold 2 x 256 MiB inputs plus each registered
+    // output chunk, and slot-based reads reloaded + re-CRC'd the whole
+    // file per block once eviction hit (the 10M shuffled merge "hang").
+    let pinned: Vec<std::sync::Arc<[u8]>> = tables
+        .iter()
+        .map(|t| t.pin_payload(kit))
+        .collect::<Result<_>>()?;
     let streams: Vec<_> = tables
         .iter()
-        .map(|t| t.iter_internal_between(lo, hi))
+        .zip(pinned.into_iter())
+        .map(|(t, image)| {
+            crate::sst::SstPinnedInternalStream::pinned_between(
+                t,
+                image,
+                hi.map(|h| Bytes::copy_from_slice(h)),
+            )
+        })
         .collect();
     let merge = crate::merge::KwayInternalMerge::from_streams(streams)?;
     // GC rewrites stream too: `GcMergeSource` applies the same retention
