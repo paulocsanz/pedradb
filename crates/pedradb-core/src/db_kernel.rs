@@ -7113,6 +7113,17 @@ impl<E: Env> Db<E> {
             Ok(Some((ik, val))) => {
                 let seq = top - rank;
                 rank += 1;
+                // External files hold raw values; every stored value must be
+                // pre-escaped or the read path strips a leading `0x01`
+                // (silent one-byte corruption on exactly the cross-database
+                // move workload this API exists for — put/tx pre-escape
+                // already; the native ingest path was the last verbatim
+                // writer).
+                let val = if ik.kind == ValueType::Value {
+                    escape_inline_value(val)
+                } else {
+                    val
+                };
                 Some(Ok((InternalKey::new(ik.user_key, seq, ik.kind), val)))
             }
             Ok(None) => None,
