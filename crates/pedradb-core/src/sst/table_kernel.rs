@@ -718,40 +718,47 @@ impl SstTable {
             // ≤v4 carries no per-block CRC: reuse the whole-body path so the
             // file-level CRC gate re-runs before any block decodes. Still
             // hash-seek a resident image (RFC-0236 data-block hash).
-            let g = self.payload.read();
-            let p: &Arc<[u8]> = &g.img;
-            if !crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
-                let mut best: Option<(SequenceNumber, Lookup)> = None;
-                for bi in self.blocks_for_point(user_key) {
-                    let Some(h) = self.index.get(bi) else {
-                        continue;
-                    };
-                    let start = usize::try_from(h.offset)
-                        .map_err(|_| CoreError::Internal("SST block offset overflow".into()))?;
-                    let len = h.length as usize;
-                    let Some(end) = start.checked_add(len) else {
-                        return Err(CoreError::Internal("SST block length overflow".into()));
-                    };
-                    if end > p.len() {
-                        continue;
-                    }
-                    if let Some(found) = seek_point_in_plain_block(
-                        &p[start..end],
-                        user_key,
-                        snapshot,
-                        &self.path,
-                        scratch,
-                    )? {
-                        if crate::lookup_kernel::prefer_newer_seq(
-                            best.is_some(),
-                            found.0,
-                            best.as_ref().map(|(s, _)| *s).unwrap_or(0),
-                        ) {
-                            best = Some(found);
+            //
+            // Drop the read guard before `point_in_blocks` → `decode_block` →
+            // `ensure_payload`: that reload takes `payload.write()`, and holding
+            // `payload.read()` across it self-deadlocks (10M gate after pin-fix
+            // hydrate: v3 L1 bodies evicted, first get hung in wait_for_readers).
+            {
+                let g = self.payload.read();
+                let p: &Arc<[u8]> = &g.img;
+                if !crate::write_admission_kernel::batch_is_empty(p.len() as u64) {
+                    let mut best: Option<(SequenceNumber, Lookup)> = None;
+                    for bi in self.blocks_for_point(user_key) {
+                        let Some(h) = self.index.get(bi) else {
+                            continue;
+                        };
+                        let start = usize::try_from(h.offset)
+                            .map_err(|_| CoreError::Internal("SST block offset overflow".into()))?;
+                        let len = h.length as usize;
+                        let Some(end) = start.checked_add(len) else {
+                            return Err(CoreError::Internal("SST block length overflow".into()));
+                        };
+                        if end > p.len() {
+                            continue;
+                        }
+                        if let Some(found) = seek_point_in_plain_block(
+                            &p[start..end],
+                            user_key,
+                            snapshot,
+                            &self.path,
+                            scratch,
+                        )? {
+                            if crate::lookup_kernel::prefer_newer_seq(
+                                best.is_some(),
+                                found.0,
+                                best.as_ref().map(|(s, _)| *s).unwrap_or(0),
+                            ) {
+                                best = Some(found);
+                            }
                         }
                     }
+                    return Ok(best);
                 }
-                return Ok(best);
             }
             return Ok(self.point_in_blocks(user_key, snapshot, &mut |bi| {
                 self.decode_block(bi).ok().map(Arc::new)
@@ -5526,6 +5533,55 @@ mod tests {
             err.to_string().contains("CRC mismatch"),
             "corrupt reload must fail closed, got {err:?}"
         );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Regression: evicted ≤v4 payload + `point_at_seeking` must reload via
+    /// `ensure_payload` without holding `payload.read()` across the write
+    /// (self-deadlock hung the 10M gate's first get after settle).
+    #[test]
+    fn evicted_v3_point_seek_reloads_without_self_deadlock() {
+        let path = temp_path();
+        let mut mem = MemTable::new();
+        for i in 0..40u32 {
+            let key = format!("v3-{i:03}").into_bytes();
+            mem.put(key, u64::from(i), &b"payload-value"[..]);
+        }
+        let table = write_sst_try_sorted_opts(
+            &StdEnv,
+            &path,
+            mem.iter_internal().map(|(k, v)| Ok((k.clone(), v.clone()))),
+            mem.len(),
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(!table.block_crc, "v3 has no per-block CRC");
+        *table.entries.lock() = None;
+        let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
+        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1 << 20)));
+        pool.arm();
+        table.attach_payload_kit(&source, &pool);
+        *table.payload.write() = crate::cache::ResidentBody::empty();
+        assert!(!table.payload_resident());
+
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&done);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            if !flag.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("evicted_v3_point_seek_reloads_without_self_deadlock: hung");
+                std::process::abort();
+            }
+        });
+
+        let mut scratch = PointSeekScratch::default();
+        let hit = table
+            .point_at_seeking(b"v3-000", u64::MAX, &mut scratch)
+            .expect("evicted v3 seek must reload, not deadlock");
+        done.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(hit.is_some(), "key must be found after whole-body reload");
+        assert!(table.payload_resident(), "≤v4 reload re-installs residency");
         let _ = std::fs::remove_file(&path);
     }
 
