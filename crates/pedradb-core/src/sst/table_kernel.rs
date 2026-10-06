@@ -3642,6 +3642,11 @@ fn write_sst_try_sorted_body(
     let mut n_entries = 0usize;
     // Compression policy: undecided until the first block probes the ratio.
     // `PEDRA_LZ4_PROBE=0` restores the unconditional-lz4 policy (A/B arm).
+    // Caller `compress=true` + probe decline → SST **v6** (raw + per-block
+    // CRC): evicted point gets stay one `read_range`, not a whole-file reload
+    // (v3 thrash hung/slowed the 10M shuffled gate after settle). Explicit
+    // `compress=false` still writes legacy v3 for tests.
+    let want_compress = compress;
     let mut policy_compress = compress;
     let mut policy_decided =
         !compress || std::env::var("PEDRA_LZ4_PROBE").map_or(false, |v| v == "0");
@@ -3673,13 +3678,15 @@ fn write_sst_try_sorted_body(
         policy_compress: &mut bool,
         policy_decided: &mut bool,
         lz4_scratch: &mut Vec<u8>,
+        raw_block_crc: bool,
     ) -> Result<()> {
         if crate::write_admission_kernel::batch_is_empty(block_buf.len() as u64) {
             return Ok(());
         }
         let t0 = std::time::Instant::now();
         // First block probes the ratio for the whole file: keep lz4 only if
-        // it saves ≥10 %; random payloads (bulk chunks) write v3 raw instead.
+        // it saves ≥10 %; otherwise fall through to v6 raw+block-CRC (when
+        // the caller asked for compression) or legacy v3 (explicit raw).
         if !*policy_decided {
             *policy_decided = true;
             if *policy_compress {
@@ -3716,7 +3723,11 @@ fn write_sst_try_sorted_body(
             return Ok(());
         }
         stages.add(|s| &mut s.lz4_ns, t0);
-        let raw = std::mem::take(block_buf);
+        let mut raw = std::mem::take(block_buf);
+        if raw_block_crc {
+            let crc = crc32c::crc32c(&raw);
+            raw.extend_from_slice(&crc.to_le_bytes());
+        }
         let length = u32::try_from(raw.len())
             .map_err(|_| CoreError::Internal("SST block too large".into()))?;
         data.extend_from_slice(&raw);
@@ -3803,6 +3814,7 @@ fn write_sst_try_sorted_body(
                 &mut policy_compress,
                 &mut policy_decided,
                 &mut lz4_scratch,
+                want_compress,
             )?;
             block_user_keys.clear();
             block_first_user = Some(ikey.user_key.clone());
@@ -3839,6 +3851,7 @@ fn write_sst_try_sorted_body(
         &mut policy_compress,
         &mut policy_decided,
         &mut lz4_scratch,
+        want_compress,
     )?;
     let key_cp = SstTable::derive_index_accel(&mut index);
     stages.add(|s| &mut s.enc_ns, t_enc);
@@ -3850,11 +3863,15 @@ fn write_sst_try_sorted_body(
     // Header: magic version num_entries max_seq num_blocks data_len (fixed 40 B)
     let mut header = Vec::with_capacity(40);
     header.extend_from_slice(SST_MAGIC);
+    // v5 = lz4+block CRC; v6 = raw+block CRC (probe declined); v3 = explicit raw.
     let version = if policy_compress {
         SST_VERSION
+    } else if want_compress {
+        SST_VERSION_V6
     } else {
         SST_VERSION_V3
     };
+    let is_v6 = version == SST_VERSION_V6;
     header.extend_from_slice(&version.to_le_bytes());
     let n =
         u64::try_from(n_entries).map_err(|_| CoreError::Internal("too many SST entries".into()))?;
@@ -3885,8 +3902,12 @@ fn write_sst_try_sorted_body(
     bloom.freeze_partitions();
 
     let t_crc = std::time::Instant::now();
+    // v6: file CRC is header ‖ index/bloom only (data fails closed per block).
+    // v2–v5: full-body trailer (legacy).
     let mut file_crc = crc32c::crc32c(&header);
-    file_crc = crc32c::crc32c_append(file_crc, &data);
+    if !is_v6 {
+        file_crc = crc32c::crc32c_append(file_crc, &data);
+    }
     file_crc = crc32c::crc32c_append(file_crc, &index_bytes);
     file_crc = crc32c::crc32c_append(file_crc, &bloom_bytes);
     stages.add(|s| &mut s.crc_ns, t_crc);
@@ -3956,7 +3977,8 @@ fn write_sst_try_sorted_body(
         )),
         payload_len,
         compressed_blocks: policy_compress,
-        block_crc: policy_compress,
+        // v5 and v6 both carry per-block CRC32C; only explicit-raw v3 does not.
+        block_crc: policy_compress || want_compress,
         entries: Arc::new(Mutex::new(None)),
         kit: Arc::new(RwLock::new(None)),
         range_tombstones,
@@ -4577,7 +4599,7 @@ mod tests {
         );
         let mut mem = MemTable::new();
         // Repetitive payload: the writer's first-block probe must keep lz4
-        // (v5) — a small/incompressible fixture now legitimately writes v3.
+        // (v5) — incompressible fixtures write v6 (raw + block CRC).
         mem.put(b"k".as_slice(), 1, Bytes::from(vec![0x5Au8; 8192]));
         let path = temp_path();
         write_sst(&path, &mem).unwrap();
@@ -5136,11 +5158,11 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// RFC-0159 P1.1: incompressible payloads (bulk-chunk shapes) make the
-    /// first block decide v3 raw for the whole file — no lz4 CPU, no block
-    /// CRCs, byte-identical round trip.
+    /// RFC-0159: incompressible payloads make the first block decline lz4;
+    /// the file is SST **v6** (raw + per-block CRC) so evicted point gets
+    /// stay one `read_range` — not whole-file v3 reload thrash.
     #[test]
-    fn incompressible_flush_writes_v3_raw() {
+    fn incompressible_flush_writes_v6_raw_with_block_crc() {
         let mut rng = 0x5EED_5EED_5EED_5EEDu64;
         let mut mem = MemTable::new();
         for i in 0..2048u32 {
@@ -5160,9 +5182,14 @@ mod tests {
         let path = temp_path();
         let table = write_l0_sst(&StdEnv, &path, &mem, false).unwrap();
         assert!(
-            !table.compressed_blocks && !table.block_crc,
-            "incompressible flush must skip lz4 (v3 raw)"
+            !table.compressed_blocks && table.block_crc,
+            "incompressible flush must skip lz4 but keep block CRC (v6)"
         );
+        let ver = {
+            let bytes = std::fs::read(&path).unwrap();
+            u32::from_le_bytes(bytes[8..12].try_into().unwrap())
+        };
+        assert_eq!(ver, SST_VERSION_V6, "probe-declined writer must emit v6");
         assert_eq!(table.len(), mem.len());
         for i in (0..2048u32).step_by(97) {
             let key = format!("key-{i:06}");
@@ -5178,6 +5205,20 @@ mod tests {
         }
         let re = SstTable::open(&path).unwrap();
         assert_eq!(re.len(), mem.len());
+        assert!(re.block_crc, "re-open must see v6 block CRC");
+        // Evicted: point seek must not need a whole-file reload.
+        let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
+        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1)));
+        pool.arm();
+        re.attach_payload_kit(&source, &pool);
+        *re.payload.write() = crate::cache::ResidentBody::empty();
+        let mut scratch = PointSeekScratch::default();
+        assert!(
+            re.point_at_seeking(b"key-000000", u64::MAX, &mut scratch)
+                .unwrap()
+                .is_some(),
+            "evicted v6 point seek serves via per-block read_range"
+        );
         let _ = std::fs::remove_file(&path);
     }
 
